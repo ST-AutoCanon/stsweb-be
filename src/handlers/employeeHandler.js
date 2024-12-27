@@ -69,3 +69,28 @@ exports.deleteEmployee = async (req, res) => {
     return res.status(400).json(ErrorHandler.generateErrorResponse(400, 'Failed to delete employee'));
   }
 };
+
+/**
+ * Handler to fetch an employee.
+ */
+exports.getEmployee = async (req, res) => {
+  const employeeId = req.query.employeeId || req.params.employeeId;
+  if (!employeeId) {
+    // Return 400 Bad Request for missing ID
+    return res.status(400).json(ErrorHandler.generateErrorResponse(400, "Employee ID is required."));
+  }
+try {
+  const profile = await employeeService.getEmployee(employeeId);
+  // Successful response with profile details
+  return res.status(200).json({
+    status: 'success',
+    code:200,
+    message: "Profile fetched successfully.",
+    data: profile,
+  });
+} catch (error) {
+  console.error("Error in getEmployee:", error.message);
+  // Return 500 Internal Server Error for failed fetch
+  return res.status(500).json(ErrorHandler.generateErrorResponse(500, "Failed to fetch employee profile."));
+}
+};

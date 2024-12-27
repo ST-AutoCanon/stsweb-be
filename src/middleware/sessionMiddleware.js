@@ -10,7 +10,7 @@ const ErrorHandler = require('../utils/errorHandler');
  * @param {Function} next - Next middleware function.
  */
 const validateSessionToken = (req, res, next) => {
-  const unprotectedRoutes = ["/login", "/password-reset"]; // Add any other unprotected routes if needed
+  const unprotectedRoutes = ["/login", "/password-reset", "/forgot-password"]; // Add any other unprotected routes if needed
 
   // Skip validation for unprotected routes
   if (unprotectedRoutes.includes(req.path)) {

@@ -197,9 +197,12 @@ WHERE
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   SAVE_RESET_TOKEN: `
-    INSERT INTO password_resets (email, token, expiry_time)
-    VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))
-  `,
+  INSERT INTO password_resets (email, token, expiry_time) 
+  VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))
+  ON DUPLICATE KEY UPDATE 
+    token = VALUES(token), 
+    expiry_time = VALUES(expiry_time)
+`,
   GET_ALL_EMPLOYEES: `
     SELECT employee_id, CONCAT(first_name,' ', last_name) AS name, photo_url AS photo, department, position, email, aadhaar_number, pan_number, salary
     FROM employees
@@ -225,5 +228,26 @@ WHERE
     UPDATE employees 
     SET password = ? 
     WHERE email = ?;
-  `
+  `,
+  GET_EMPLOYEE:`
+  SELECT
+      employee_id,
+      CONCAT(first_name, ' ', last_name) AS name,
+      department,
+      position,
+      email,
+      phone_number,
+      dob,
+      address,
+      aadhaar_number,
+      pan_number,
+      photo_url,
+      salary,
+      role
+    FROM employees
+    WHERE employee_id = ?;
+  `,
+  GET_EMPLOYEE_BY_EMAIL: `SELECT * FROM employees WHERE email = ?
+  `,
+  
 };

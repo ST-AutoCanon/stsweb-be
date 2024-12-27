@@ -226,3 +226,21 @@ exports.deleteEmployee = async (employeeId) => {
   console.log(`Employee with ID ${employeeId} has been deleted.`);
   return result;
 };
+
+/**
+ * Fetch employee details.
+ */
+exports.getEmployee = async (employeeId) => {
+  try {
+    const [rows] = await db.execute(queries.GET_EMPLOYEE, [employeeId]);
+
+    if (rows.length === 0) {
+      throw new Error('Employee not found');
+    }
+
+    return rows[0];
+  } catch (error) {
+    console.error('Error in getEmployee:', error.message);
+    throw error;
+  }
+};
