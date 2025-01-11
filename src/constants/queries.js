@@ -22,7 +22,7 @@ module.exports = {
   // Query to fetch admin dashboard statistics
   GET_ADMIN_DASHBOARD: `
   SELECT 
-    COUNT(DISTINCT a.employee_id) AS total_employees,
+    COUNT(DISTINCT e.employee_id) AS total_employees,
     SUM(CASE WHEN DATE(a.date) = CURDATE() AND a.login_time IS NOT NULL THEN 1 ELSE 0 END) AS present,
     (
       SELECT COUNT(*) 
@@ -38,7 +38,8 @@ module.exports = {
         AND lq.status = 'Approved' 
         AND DATE(lq.created_at) = CURDATE()
     ) AS other_absence
-  FROM attendance a
+  FROM employees e
+  LEFT JOIN attendance a ON e.employee_id = a.employee_id
   WHERE DATE(a.date) = CURDATE();
 `,
 
@@ -127,7 +128,8 @@ module.exports = {
   //Query to fetch employee dashboard statistics
   GET_EMPLOYEE_DASHBOARD: `
   SELECT 
-    CONCAT(e.first_name, ' ', e.last_name) AS full_name,
+    CONCAT(e.first_name, ' ', e.last_name) AS name,
+    position,
     e.salary AS salary,
     (SELECT COUNT(*) 
      FROM attendance a 
@@ -144,7 +146,14 @@ module.exports = {
   FROM employees e
   WHERE e.employee_id = ?;
 `,
-GET_LEAVE_QUERIES: `
+    INSERT_LEAVE_REQUEST: `
+      INSERT INTO leavequeries (employee_id, start_date, end_date, reason, leave_type)
+      VALUES (?, ?, ?, ?, ?)
+    `,
+    SELECT_LEAVE_REQUESTS: `
+      SELECT * FROM leavequeries WHERE employee_id = ?
+    `,
+    GET_LEAVE_QUERIES: `
     SELECT 
       leavequeries.id AS leave_id, 
       leavequeries.employee_id, 
@@ -204,11 +213,11 @@ WHERE
     expiry_time = VALUES(expiry_time)
 `,
   GET_ALL_EMPLOYEES: `
-    SELECT employee_id, CONCAT(first_name,' ', last_name) AS name, photo_url AS photo, department, position, email, aadhaar_number, pan_number, salary
+    SELECT employee_id, CONCAT(first_name,' ', last_name) AS name, DATE_FORMAT(created_at, '%Y-%m-%d') AS joining_date, department, position, email, phone_number, aadhaar_number, pan_number, salary
     FROM employees
   `,
   SEARCH_EMPLOYEES: `
-    SELECT employee_id, CONCAT(first_name,' ', last_name) AS name, photo_url AS photo, department, position, email, aadhaar_number, pan_number, salary
+    SELECT employee_id, CONCAT(first_name,' ', last_name) AS name, DATE_FORMAT(created_at, '%Y-%m-%d') AS joining_date, department, position, email, aadhaar_number, pan_number, salary
     FROM employees
     WHERE first_name LIKE ? 
        OR last_name LIKE ? 
@@ -232,7 +241,8 @@ WHERE
   GET_EMPLOYEE:`
   SELECT
       employee_id,
-      CONCAT(first_name, ' ', last_name) AS name,
+      first_name,
+      last_name,
       department,
       position,
       email,
@@ -243,11 +253,17 @@ WHERE
       pan_number,
       photo_url,
       salary,
-      role
+      role,
+      father_name,
+      mother_name
     FROM employees
     WHERE employee_id = ?;
   `,
   GET_EMPLOYEE_BY_EMAIL: `SELECT * FROM employees WHERE email = ?
   `,
-  
+  ADD_QUERY: `INSERT INTO employee_queries (sender_id, department, question) VALUES (?, ?, ?)`,
+  GET_QUERIES_BY_EMPLOYEE: `SELECT id, department, question, reply, created_at FROM employee_queries WHERE sender_id = ? ORDER BY created_at DESC`,
+  GET_ALL_QUERIES: `SELECT id, sender_id, department, question, reply, created_at FROM employee_queries ORDER BY created_at DESC`,
+  ADD_ADMIN_REPLY: `UPDATE employee_queries SET reply = ? WHERE id = ?;`,
+
 };

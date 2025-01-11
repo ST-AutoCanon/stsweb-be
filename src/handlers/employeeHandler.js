@@ -1,6 +1,9 @@
 const employeeService = require('../services/employeeService');
 const ErrorHandler = require('../utils/errorHandler');
 
+/**
+ * Handler to add an employee and send password reset link through email.
+ */
 exports.addEmployee = async (req, res) => {
   try {
     const employeeData = req.body;
@@ -34,8 +37,6 @@ exports.searchEmployees = async (req, res) => {
     return res.status(500).json(ErrorHandler.generateErrorResponse(500, 'Failed to fetch employees'));
   }
 };
-
-
 
 /**
  * Handler to edit an employee.

@@ -57,6 +57,7 @@ class LoginHandler {
         dashboard,
       }));
     } catch (err) { 
+      console.log(err);
       return res.status(500).json(ErrorHandler.generateErrorResponse(500, "Internal server error"));
     }
   }

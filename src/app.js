@@ -3,6 +3,7 @@ const bodyParser = require("body-parser");
 const loginRoutes = require("./routes/login");
 const leaveRoutes = require("./routes/leave");
 const employeeRoutes = require("./routes/employee");
+const employeeQueries = require("./routes/employeeQueries");
 const resetPasswordRoutes = require("./routes/resetPassword");
 const forgotPasswordRoutes = require("./routes/forgotPassword");
 const apiKeyMiddleware = require("./middleware/apiKeyMiddleware"); 
@@ -15,7 +16,7 @@ const app = express();
 app.use(cors({
   origin: 'http://localhost:3000', // Only allow requests from your frontend
   methods: ['GET', 'POST', 'PUT', 'DELETE'], // Allowed methods
-  allowedHeaders: ['Content-Type', 'x-api-key'], // Allowed headers
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key'], // Allowed headers
 }));
 
 
@@ -29,6 +30,7 @@ app.use(bodyParser.json());
 app.use("/", loginRoutes);
 app.use("/", leaveRoutes);
 app.use("/", employeeRoutes);
+app.use("/", employeeQueries);
 app.use("/", resetPasswordRoutes);
 app.use("/", forgotPasswordRoutes);
 

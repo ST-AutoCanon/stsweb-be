@@ -6,7 +6,7 @@ const queries = require("../constants/queries");
  * 
  * @param {Object} filters - Filters to narrow down results.
  * @param {string} [filters.status] - Filter by leave status (e.g., Approved, Rejected).
- * @param {string} [filters.search] - Search by employee ID or reason for leave.
+ * @param {string} [filters.search] - Search by employee ID, reason, or employee name.
  * @returns {Promise<Object[]>} Leave query records that match the filters.
  */
 const getLeaveQueries = async (filters = {}) => {
@@ -40,7 +40,8 @@ const getLeaveQueries = async (filters = {}) => {
     const [rows] = await db.execute(query, params);
     return rows;
   } catch (err) {
-    throw new Error("Error fetching leave queries");
+    console.error("Error fetching leave queries:", err.message);
+    throw new Error("Failed to fetch leave queries.");
   }
 };
 
@@ -57,21 +58,74 @@ const updateLeaveRequest = async ({ leaveId, status, rejectionReason = null }) =
     const query = queries.UPDATE_LEAVE_STATUS;
     const params = [status, rejectionReason, leaveId];
 
-    // Log the query and parameters for debugging
-    console.log('Executing update with params:', query, params);
+    console.log('Executing updateLeaveRequest:', { query, params });
 
     const [result] = await db.execute(query, params);
 
     if (result.affectedRows === 0) {
-      throw new Error("Leave request not found");
+      throw new Error("Leave request not found.");
     }
   } catch (err) {
-    console.log("Error updating leave request:", err); // Log detailed error message
-    throw new Error("Error updating leave request");
+    console.error("Error updating leave request:", err.message);
+    throw new Error("Failed to update leave request.");
+  }
+};
+
+/**
+ * Submit a new leave request.
+ * 
+ * @param {string} employeeId - ID of the employee submitting the request.
+ * @param {string} startDate - Leave start date.
+ * @param {string} endDate - Leave end date.
+ * @param {string} reason - Reason for leave.
+ * @param {string} leavetype - Type of leave (e.g., Sick, Vacation).
+ * @returns {Promise<Object>} Details of the submitted leave request.
+ */
+const submitLeaveRequest = async ({ employeeId, startDate, endDate, reason, leavetype }) => {
+  try {
+    const query = queries.INSERT_LEAVE_REQUEST;
+    const params = [employeeId, startDate, endDate, reason, leavetype];
+    
+    const [result] = await db.execute(query, params);
+
+    return {
+      id: result.insertId,
+      employeeId,
+      startDate,
+      endDate,
+      reason,
+      leavetype,
+      status: "Pending",
+      rejectionReason: null,
+    };
+  } catch (err) {
+    console.error("Error submitting leave request:", err.message);
+    throw new Error("Failed to submit leave request.");
+  }
+};
+
+
+/**
+ * Retrieves leave requests for a specific employee by their ID.
+ * 
+ * @param {string} employeeId - Employee ID.
+ * @returns {Promise<Object[]>} List of leave requests for the employee.
+ */
+const getLeaveRequests = async (employeeId) => {
+  try {
+    const query = queries.SELECT_LEAVE_REQUESTS;
+    const params = [employeeId];
+    const [rows] = await db.execute(query, params);
+    return rows;
+  } catch (err) {
+    console.error("Error retrieving leave requests:", err.message);
+    throw new Error("Failed to retrieve leave requests.");
   }
 };
 
 module.exports = {
   getLeaveQueries,
   updateLeaveRequest,
+  submitLeaveRequest,
+  getLeaveRequests,
 };

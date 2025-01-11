@@ -29,7 +29,7 @@ exports.forgotPassword = async (req, res) => {
     await saveResetToken(email, resetToken, tokenExpiry);
 
     // 4. Generate the reset link
-    const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
+    const resetLink = `${process.env.FRONTEND_URL}/ResetPassword?token=${resetToken}`;
 
     // 5. Send the reset link via email using SendGrid
     const emailContent = {

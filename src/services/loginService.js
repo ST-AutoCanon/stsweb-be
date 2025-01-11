@@ -66,39 +66,41 @@ class LoginService {
     // Fetch financial statistics
     const [financialStats] = await db.execute(queries.GET_FINANCIAL_STATS);
 
-    return {
-      name: admin.name,
-      employee_id: admin.employee_id,
-      email: admin.email,
-      position: admin.position,
-      department: admin.department,
-      total_employees: dashboardStats[0].total_employees,
-      attendance: {
-        present: dashboardStats[0].present,
-        sick_leave: dashboardStats[0].sick_leave,
-        other_absence: dashboardStats[0].other_absence,
-      },
-      salary_distribution: salaryDistribution[0],
-      department_distribution: departmentDistribution,
-      login_timer_graph: loginData,
-      financial_stats: {
-        previous_month_expenses: financialStats[0]?.previous_month_expenses || 0,
-        previous_month_salary: financialStats[0]?.previous_month_salary || 0,
-        previous_month_credit: financialStats[0]?.previous_month_credit || 0,
-      },
-      projects: {
-        current: currentProjects.map(project => ({
-          project_name: project.project_name,
-          job_type: project.job_type,
-          department: project.department,
-          start_date: project.start_date,
-          end_date: project.end_date,
-          comments: project.comments,
-        })),
-        upcoming: upcomingProjects,
-        previous: previousProjects,
-      },
-    };
+    // In your fetchAdminDashboard method (LoginService)
+return {
+  name: admin.name,
+  employee_id: admin.employee_id,
+  email: admin.email,
+  position: admin.position,
+  department: admin.department,
+  total_employees: dashboardStats[0]?.total_employees || 0,  // Default to 0 if not available
+  attendance: {
+    present: dashboardStats[0]?.present || 0,  // Default to 0 if null
+    sick_leave: dashboardStats[0]?.sick_leave || 0,  // Default to 0 if null
+    other_absence: dashboardStats[0]?.other_absence || 0,  // Default to 0 if null
+  },
+  salary_distribution: salaryDistribution[0] || { average_salary: 0, min_salary: 0, max_salary: 0 }, // Default salary if null
+  department_distribution: departmentDistribution || [],  // Empty array if no department distribution
+  login_timer_graph: loginData || [],  // Empty array if no login data
+  financial_stats: {
+    previous_month_expenses: financialStats[0]?.previous_month_expenses || 0,
+    previous_month_salary: financialStats[0]?.previous_month_salary || 0,
+    previous_month_credit: financialStats[0]?.previous_month_credit || 0,
+  },
+  projects: {
+    current: currentProjects.map(project => ({
+      project_name: project.project_name,
+      job_type: project.job_type,
+      department: project.department,
+      start_date: project.start_date,
+      end_date: project.end_date,
+      comments: project.comments,
+    })) || [],  // Empty array if no projects
+    upcoming: upcomingProjects || [],
+    previous: previousProjects || [],
+  },
+};
+
   }
 
   /**
@@ -118,8 +120,8 @@ class LoginService {
       const employee = rows[0];
 
       return {
-        first_name: employee.full_name.split(' ')[0],
-        last_name: employee.full_name.split(' ')[1],
+        name: employee.name,
+        position: employee.position,
         salary: employee.salary,
         attendance_count: employee.attendance_count,
         leave_queries_count: employee.leave_queries_count,

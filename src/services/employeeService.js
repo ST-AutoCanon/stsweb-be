@@ -13,7 +13,7 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY);
  */
 const sendResetEmail = async (employeeEmail) => {
   const resetToken = uuidv4(); // Generate a unique reset token
-  const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
+  const resetLink = `${process.env.FRONTEND_URL}/ResetPassword?token=${resetToken}`;
 
   // Save reset token to database
   await db.execute(queries.SAVE_RESET_TOKEN, [employeeEmail, resetToken]);
@@ -26,7 +26,7 @@ const sendResetEmail = async (employeeEmail) => {
     text: `Welcome to the company! Please reset your password using the link below:\n${resetLink}\n\nThis link is valid for 1 hour.`,
     html: `<p>Welcome to the company!</p>
            <p>Please reset your password using the link below:</p>
-           <a href="${resetLink}">Reset Password</a>
+           <a href="${resetLink}" style="color: blue; text-decoration: underline;">Reset Password</a>
            <p>This link is valid for 1 hour.</p>`,
   };
 
@@ -63,20 +63,20 @@ exports.addEmployee = async (employeeData) => {
   const params = [
     employeeData.first_name || '',
     employeeData.last_name || '',
-    employeeData.dob || null,
+    employeeData.dob || '',
     employeeData.email || '',
-    employeeData.aadhaar_number || null,
-    employeeData.pan_number || null,
-    employeeData.address || '',
+    employeeData.aadhaar_number || '',
+    employeeData.pan_number || '',
+    employeeData.address || null,
     employeeData.phone_number || '',
     employeeData.father_name || null,
     employeeData.mother_name || null,
-    employeeData.department || '',
+    employeeData.department || null,
     departmentId,  // Use department_id from the department query result
-    employeeData.position || '',
+    employeeData.position || null,
     employeeData.photo_url || null,
     employeeData.salary || null,
-    employeeData.role || '',
+    employeeData.role || null,
     hashedPassword // Insert the hashed temporary password into the database
   ];
 

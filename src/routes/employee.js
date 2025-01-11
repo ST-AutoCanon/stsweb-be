@@ -7,6 +7,6 @@ router.post('/admin/employees', employeeHandler.addEmployee);
 router.get('/admin/employees', employeeHandler.searchEmployees);
 router.put('/admin/employees/:employeeId', employeeHandler.editEmployee);
 router.delete('/admin/employees/:employeeId', employeeHandler.deleteEmployee);
-router.get('/employee/profile/:employeeId', employeeHandler.getEmployee);
+router.get('/employee/:employeeId', employeeHandler.getEmployee);
 
 module.exports = router;
