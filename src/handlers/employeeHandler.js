@@ -25,18 +25,29 @@ exports.addEmployee = async (req, res) => {
 };
 
 /**
- * Handler to fetch all employees or search employees based on the search query.
+ * Handler to fetch all employees or search employees based on the search query and date filters.
  */
 exports.searchEmployees = async (req, res) => {
   try {
-    const { search } = req.query;
-    const employees = await employeeService.searchEmployees(search);
-    return res.status(200).json(ErrorHandler.generateSuccessResponse(200, { data: employees }));
+    const { search, fromDate, toDate } = req.query;
+
+    // Fetch employees using the service with search and date filters
+    const employees = await employeeService.searchEmployees(search, fromDate, toDate);
+
+    // Return a success response
+    return res
+      .status(200)
+      .json(ErrorHandler.generateSuccessResponse(200, { data: employees }));
   } catch (error) {
-    console.log(error);
-    return res.status(500).json(ErrorHandler.generateErrorResponse(500, 'Failed to fetch employees'));
+    console.error('Error fetching employees:', error);
+
+    // Return an error response
+    return res
+      .status(500)
+      .json(ErrorHandler.generateErrorResponse(500, 'Failed to fetch employees'));
   }
 };
+
 
 /**
  * Handler to edit an employee.

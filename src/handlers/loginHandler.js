@@ -3,7 +3,10 @@ const LoginService = require("../services/loginService");
 const ErrorHandler = require("../utils/errorHandler");
 const jwt = require('jsonwebtoken');
 const dotenv = require('dotenv');
+const moment = require('moment-timezone'); // Import moment-timezone
 dotenv.config();
+
+const TIMEZONE = 'Asia/Kolkata'; // Define the fixed timezone
 
 class LoginHandler {
   /**
@@ -28,11 +31,15 @@ class LoginHandler {
         return res.status(401).json(ErrorHandler.generateErrorResponse(401, "Invalid credentials"));
       }
 
+      // Get the current time in the fixed timezone
+      const currentTimeIST = moment.tz(TIMEZONE).format(); // Optional, for logging or debugging
+      console.log(`Login attempt at: ${currentTimeIST}`);
+
       // Create a JWT token after successful login
       const token = jwt.sign(
         { userId: user.employee_id, role: user.role }, 
         process.env.JWT_SECRET, 
-        { expiresIn: '20m' }
+        { expiresIn: '20m' } // This is in seconds but uses the system time, so no direct change needed
       );
 
       // Dynamically fetch dashboard based on role
@@ -50,7 +57,6 @@ class LoginHandler {
 
       const dashboard = await dashboardFunction(user.employee_id);
 
-      
       return res.status(200).json(ErrorHandler.generateSuccessResponse({
         token,
         role: user.role,

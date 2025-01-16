@@ -92,27 +92,39 @@ exports.addEmployee = async (employeeData) => {
 /**
  * Service to search employees based on search criteria.
  */
-exports.searchEmployees = async (search) => {
+exports.searchEmployees = async (search, fromDate, toDate) => {
   try {
     let query;
     let params = [];
 
     if (search) {
-      // If search is provided, use the search query
       query = queries.SEARCH_EMPLOYEES;
       params = [`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`];
     } else {
-      // Otherwise, fetch all employees
       query = queries.GET_ALL_EMPLOYEES;
     }
 
-    // Execute the query and return the results
+    if (fromDate) {
+      query += ' AND created_at >= ?';
+      params.push(fromDate);
+    }
+
+    if (toDate) {
+      query += ' AND created_at <= ?';
+      params.push(toDate);
+    }
+
+    console.log('Executing query:', query);
+    console.log('With params:', params);
+
     const [rows] = await db.execute(query, params);
     return rows;
   } catch (error) {
+    console.error('Error fetching employees from database:', error);
     throw new Error('Error fetching employees from database');
   }
 };
+
 
 /**
  * Edit employee details.

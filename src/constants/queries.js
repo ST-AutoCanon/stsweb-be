@@ -128,7 +128,7 @@ module.exports = {
   //Query to fetch employee dashboard statistics
   GET_EMPLOYEE_DASHBOARD: `
   SELECT 
-    CONCAT(e.first_name, ' ', e.last_name) AS name,
+    CONCAT(e.first_name, ' ', e.last_name) AS name, e.employee_id,
     position,
     e.salary AS salary,
     (SELECT COUNT(*) 
@@ -215,6 +215,7 @@ WHERE
   GET_ALL_EMPLOYEES: `
     SELECT employee_id, CONCAT(first_name,' ', last_name) AS name, DATE_FORMAT(created_at, '%Y-%m-%d') AS joining_date, department, position, email, phone_number, aadhaar_number, pan_number, salary
     FROM employees
+    WHERE 1=1
   `,
   SEARCH_EMPLOYEES: `
     SELECT employee_id, CONCAT(first_name,' ', last_name) AS name, DATE_FORMAT(created_at, '%Y-%m-%d') AS joining_date, department, position, email, aadhaar_number, pan_number, salary
@@ -225,6 +226,7 @@ WHERE
        OR employee_id LIKE ? 
        OR department LIKE ?
   `,
+
   GET_EMPLOYEE_BY_ID: `SELECT * FROM employees WHERE employee_id = ?`,
   DELETE_EMPLOYEE: `DELETE FROM employees WHERE employee_id = ?
   `,
@@ -265,5 +267,8 @@ WHERE
   GET_QUERIES_BY_EMPLOYEE: `SELECT id, department, question, reply, created_at FROM employee_queries WHERE sender_id = ? ORDER BY created_at DESC`,
   GET_ALL_QUERIES: `SELECT id, sender_id, department, question, reply, created_at FROM employee_queries ORDER BY created_at DESC`,
   ADD_ADMIN_REPLY: `UPDATE employee_queries SET reply = ? WHERE id = ?;`,
+
+  ADD_DEPARTMENT: 'INSERT INTO departments (name) VALUES (?)',
+  GET_DEPARTMENTS: 'SELECT * FROM departments',
 
 };

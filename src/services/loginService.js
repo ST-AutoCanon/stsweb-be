@@ -121,6 +121,7 @@ return {
 
       return {
         name: employee.name,
+        employeeId: employee.employee_id,
         position: employee.position,
         salary: employee.salary,
         attendance_count: employee.attendance_count,

@@ -6,6 +6,7 @@ const employeeRoutes = require("./routes/employee");
 const employeeQueries = require("./routes/employeeQueries");
 const resetPasswordRoutes = require("./routes/resetPassword");
 const forgotPasswordRoutes = require("./routes/forgotPassword");
+const addDepartmentRoutes = require("./routes/addDepartment");
 const apiKeyMiddleware = require("./middleware/apiKeyMiddleware"); 
 const sessionMiddleware = require("./middleware/sessionMiddleware"); 
 const cors = require('cors');
@@ -33,6 +34,7 @@ app.use("/", employeeRoutes);
 app.use("/", employeeQueries);
 app.use("/", resetPasswordRoutes);
 app.use("/", forgotPasswordRoutes);
+app.use("/", addDepartmentRoutes);
 
 const PORT = process.env.PORT;
 app.listen(PORT, () => {

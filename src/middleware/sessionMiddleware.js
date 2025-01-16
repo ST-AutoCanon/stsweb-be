@@ -1,6 +1,10 @@
 const jwt = require('jsonwebtoken');
+const moment = require('moment-timezone');
 const { isSessionValid, expireSoon } = require('../utils/sessionManager');
 const ErrorHandler = require('../utils/errorHandler');
+
+// Define the fixed timezone (Indian Standard Time - IST)
+const TIMEZONE = 'Asia/Kolkata';
 
 /**
  * Middleware for validating JWT session token.
@@ -27,7 +31,7 @@ const validateSessionToken = (req, res, next) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET); // Verifies the token
 
-    const isSessionValidResult = isSessionValid(token); // Validate the session
+    const isSessionValidResult = isSessionValid(token, TIMEZONE); // Validate the session using fixed timezone
 
     if (!isSessionValidResult) {
       return res.status(401).json(ErrorHandler.generateErrorResponse(401, 'Session expired, please login again'));
@@ -35,7 +39,8 @@ const validateSessionToken = (req, res, next) => {
 
     const tokenData = jwt.decode(token); // Decode without verification
 
-    if (expireSoon(tokenData.exp)) {
+    // Check if the session will expire soon using fixed timezone
+    if (expireSoon(tokenData.exp, TIMEZONE)) {
       res.setHeader('Warning', 'Session expiring soon');
       console.log('Session is about to expire soon.');
     }
