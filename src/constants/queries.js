@@ -7,14 +7,28 @@
 module.exports = {
   // Query to fetch user details by email
   GET_USER_BY_EMAIL: `
-    SELECT role, employee_id, CONCAT(first_name,' ', last_name) AS name, email, password, position, department 
-    FROM employees 
-    WHERE email = ?;
+    SELECT 
+  e.role, 
+  e.employee_id, 
+  CONCAT(e.first_name, ' ', e.last_name) AS name, 
+  e.email, 
+  e.password,
+  e.position, 
+  d.name AS department 
+FROM 
+  employees e
+LEFT JOIN 
+  departments d 
+ON 
+  e.department_id = d.id
+WHERE 
+  e.email = ?;
+
   `,
 
   // Query to fetch admin details by employee_id
   GET_ADMIN_DETAILS: `
-    SELECT role, employee_id, CONCAT(first_name,' ', last_name) AS name, email, password, position, department 
+    SELECT role, employee_id, CONCAT(first_name,' ', last_name) AS name, email 
     FROM employees 
     WHERE employee_id = ?;
   `,
@@ -55,10 +69,16 @@ module.exports = {
   // Query to fetch department-wise employee distribution
   GET_DEPARTMENT_DISTRIBUTION: `
     SELECT 
-      department, 
-      COUNT(*) AS count 
-    FROM employees 
-    GROUP BY department;
+  d.name AS department_name, 
+  COUNT(e.department_id) AS count 
+FROM 
+  employees e
+LEFT JOIN 
+  departments d 
+ON 
+  e.department_id = d.id
+GROUP BY 
+  e.department_id, d.name;
   `,
 
   // Query to fetch financial statistics for the previous month
@@ -201,9 +221,9 @@ WHERE
   `,
   ADD_EMPLOYEE: `
     INSERT INTO employees (
-      first_name, last_name, dob, email, aadhaar_number, pan_number, 
-      address, phone_number, father_name, mother_name, department, department_id, position, photo_url, salary, role, password
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      first_name, last_name, dob, email, aadhaar_number, pan_number, gender, marital_status, spouse_name,
+      address, phone_number, father_name, mother_name, department_id, position, photo_url, salary, role, password
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   SAVE_RESET_TOKEN: `
   INSERT INTO password_resets (email, token, expiry_time) 
@@ -212,11 +232,21 @@ WHERE
     token = VALUES(token), 
     expiry_time = VALUES(expiry_time)
 `,
-  GET_ALL_EMPLOYEES: `
-    SELECT employee_id, CONCAT(first_name,' ', last_name) AS name, DATE_FORMAT(created_at, '%Y-%m-%d') AS joining_date, department, position, email, phone_number, aadhaar_number, pan_number, salary
-    FROM employees
-    WHERE 1=1
-  `,
+GET_ALL_EMPLOYEES: `
+SELECT e.employee_id, 
+       CONCAT(e.first_name, ' ', e.last_name) AS name, 
+       DATE_FORMAT(e.created_at, '%Y-%m-%d') AS joining_date, 
+       d.name AS department, 
+       e.position, 
+       e.email, 
+       e.phone_number, 
+       e.aadhaar_number, 
+       e.pan_number, 
+       e.salary
+FROM employees e
+LEFT JOIN departments d ON e.department_id = d.id
+WHERE 1=1
+`,
   SEARCH_EMPLOYEES: `
     SELECT employee_id, CONCAT(first_name,' ', last_name) AS name, DATE_FORMAT(created_at, '%Y-%m-%d') AS joining_date, department, position, email, aadhaar_number, pan_number, salary
     FROM employees
@@ -240,27 +270,31 @@ WHERE
     SET password = ? 
     WHERE email = ?;
   `,
-  GET_EMPLOYEE:`
-  SELECT
-      employee_id,
-      first_name,
-      last_name,
-      department,
-      position,
-      email,
-      phone_number,
-      dob,
-      address,
-      aadhaar_number,
-      pan_number,
-      photo_url,
-      salary,
-      role,
-      father_name,
-      mother_name
-    FROM employees
-    WHERE employee_id = ?;
-  `,
+  GET_EMPLOYEE: `
+  SELECT 
+      e.employee_id, 
+      e.first_name, 
+      e.last_name, 
+      d.name AS department,  -- Fetching the department name from the department table
+      e.position, 
+      e.email, 
+      e.phone_number, 
+      e.dob, 
+      e.address, 
+      e.aadhaar_number, 
+      e.pan_number, 
+      e.photo_url, 
+      e.salary, 
+      e.role,
+      e.gender,
+      e.marital_status,
+      e.spouse_name, 
+      e.father_name, 
+      e.mother_name
+  FROM employees e
+  LEFT JOIN departments d ON e.department_id = d.id
+  WHERE e.employee_id = ?;
+`,
   GET_EMPLOYEE_BY_EMAIL: `SELECT * FROM employees WHERE email = ?
   `,
   ADD_QUERY: `INSERT INTO employee_queries (sender_id, department, question) VALUES (?, ?, ?)`,

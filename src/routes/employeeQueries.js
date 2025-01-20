@@ -4,7 +4,7 @@ const employeeQueries = require('../handlers/employeeQueries');
 
 // Employee routes
 router.post('/addquery', employeeQueries.addQuery);
-router.get('/employee/:sender_id', employeeQueries.getQueriesByEmployee);
+router.get('/emp/:sender_id', employeeQueries.getQueriesByEmployee);
 
 // Admin routes
 router.get('/all', employeeQueries.getAllQueries);

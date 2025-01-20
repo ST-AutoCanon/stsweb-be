@@ -43,12 +43,16 @@ const sendResetEmail = async (employeeEmail) => {
  * Add a new employee and send a password reset email.
  */
 exports.addEmployee = async (employeeData) => {
-  // Fetch department_id based on department name
-  const [departmentResult] = await db.execute(queries.GET_DEPARTMENT_ID_BY_NAME, [employeeData.department]);
-  if (departmentResult.length === 0) {
-    throw new Error('Department not found');
+  let departmentId = null; // Default to null for Admin role
+
+  // Check if the role is not Admin, then fetch department_id
+  if (employeeData.role !== 'Admin') {
+    const [departmentResult] = await db.execute(queries.GET_DEPARTMENT_ID_BY_NAME, [employeeData.department]);
+    if (departmentResult.length === 0) {
+      throw new Error('Department not found');
+    }
+    departmentId = departmentResult[0].id; // Use the id from the query result
   }
-  const departmentId = departmentResult[0].id; // Use the id from the query result
 
   // Function to generate a random temporary password (12 characters long)
   const generateTemporaryPassword = () => {
@@ -67,12 +71,14 @@ exports.addEmployee = async (employeeData) => {
     employeeData.email || '',
     employeeData.aadhaar_number || '',
     employeeData.pan_number || '',
+    employeeData.gender || '',
+    employeeData.marital_status || '',
+    employeeData.spouse_name || '',
     employeeData.address || null,
     employeeData.phone_number || '',
     employeeData.father_name || null,
     employeeData.mother_name || null,
-    employeeData.department || null,
-    departmentId,  // Use department_id from the department query result
+    departmentId, // Use department_id if not Admin, otherwise null
     employeeData.position || null,
     employeeData.photo_url || null,
     employeeData.salary || null,
@@ -133,6 +139,15 @@ exports.editEmployee = async (employeeId, updatedData) => {
   const params = [];
   const updates = [];
 
+  // If department name is provided, fetch the department_id first
+  if (updatedData.department) {
+    const [departmentResult] = await db.execute(queries.GET_DEPARTMENT_ID_BY_NAME, [updatedData.department]);
+    if (departmentResult.length === 0) {
+      throw new Error('Department not found');
+    }
+    updatedData.department_id = departmentResult[0].id; // Set the department_id for the update
+  }
+
   // Add parameters dynamically based on the provided data
   if (updatedData.first_name) {
     updates.push("first_name = ?");
@@ -166,6 +181,18 @@ exports.editEmployee = async (employeeId, updatedData) => {
     updates.push("pan_number = ?");
     params.push(updatedData.pan_number);
   }
+  if (updatedData.pan_number) {
+    updates.push("gender = ?");
+    params.push(updatedData.gender);
+  }
+  if (updatedData.pan_number) {
+    updates.push("marital_status = ?");
+    params.push(updatedData.marital_status);
+  }
+  if (updatedData.pan_number) {
+    updates.push("spouse_name = ?");
+    params.push(updatedData.spouse_name);
+  }
   if (updatedData.position) {
     updates.push("position = ?");
     params.push(updatedData.position);
@@ -184,11 +211,7 @@ exports.editEmployee = async (employeeId, updatedData) => {
   }
   if (updatedData.department_id) {
     updates.push("department_id = ?");
-    params.push(updatedData.department_id);
-  }
-  if (updatedData.department) {
-    updates.push("department = ?");
-    params.push(updatedData.department);
+    params.push(updatedData.department_id);  // Use the department_id fetched
   }
   if (updatedData.father_name) {
     updates.push("father_name = ?");
@@ -219,24 +242,6 @@ exports.editEmployee = async (employeeId, updatedData) => {
     console.error("Failed to update employee:", error);
     throw error;
   }
-};
-
-
-/**
- * Delete an employee by employee_id.
- */
-exports.deleteEmployee = async (employeeId) => {
-  // Check if employee exists
-  const [employee] = await db.execute(queries.GET_EMPLOYEE_BY_ID, [employeeId]);
-  if (employee.length === 0) {
-    throw new Error(`Employee with ID ${employeeId} does not exist.`);
-  }
-
-  // Delete employee
-  const [result] = await db.execute(queries.DELETE_EMPLOYEE, [employeeId]);
-
-  console.log(`Employee with ID ${employeeId} has been deleted.`);
-  return result;
 };
 
 /**
