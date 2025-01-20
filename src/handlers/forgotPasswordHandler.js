@@ -31,7 +31,7 @@ exports.forgotPassword = async (req, res) => {
     // 4. Generate the reset link
     const resetLink = `${process.env.FRONTEND_URL}/ResetPassword?token=${resetToken}`;
 
-    // 5. Send the reset link via email using SendGrid
+    // 5. Send the reset link via email using SendGrid/////////////
     const emailContent = {
       to: email,
       from: process.env.SENDGRID_SENDER_EMAIL,
@@ -54,5 +54,5 @@ exports.forgotPassword = async (req, res) => {
       'An error occurred while processing your request.'
     );
     res.status(500).json(errorResponse);
-  }
+  }      
 };
