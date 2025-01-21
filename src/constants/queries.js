@@ -181,6 +181,7 @@ GROUP BY
       leavequeries.status, 
       leavequeries.start_date, 
       leavequeries.end_date, 
+      leavequeries.comments,
       leavequeries.created_at, 
       CONCAT(employees.first_name, ' ', employees.last_name) AS name,
       departments.name AS department_name
@@ -195,7 +196,8 @@ GROUP BY
     leavequeries.reason, 
     leavequeries.status, 
     leavequeries.start_date, 
-    leavequeries.end_date, 
+    leavequeries.end_date,
+    leavequeries.comments,
     leavequeries.created_at,
     CONCAT(employees.first_name, ' ', employees.last_name) AS name,
     departments.name AS department_name
@@ -213,7 +215,7 @@ WHERE
   UPDATE_LEAVE_STATUS: `
     UPDATE leavequeries 
     SET status = ?, 
-        rejection_reason = ? 
+        comments = ? 
     WHERE id = ?
   `,
   GET_DEPARTMENT_ID_BY_NAME: `

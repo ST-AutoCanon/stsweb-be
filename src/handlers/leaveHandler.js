@@ -59,7 +59,7 @@ class LeaveHandler {
       }
 
       const { leaveId } = req.params;
-      const { status, rejectionReason } = req.body;
+      const { status, comments } = req.body;
 
       if (!["Approved", "Rejected"].includes(status)) {
         return res
@@ -72,7 +72,7 @@ class LeaveHandler {
           );
       }
 
-      if (status === "Rejected" && !rejectionReason) {
+      if (status === "Rejected" && !comments) {
         return res
           .status(400)
           .json(
@@ -86,13 +86,13 @@ class LeaveHandler {
       await LeaveService.updateLeaveRequest({
         leaveId,
         status,
-        rejectionReason: rejectionReason || null,
+        comments: comments || null,
       });
 
       return res
         .status(200)
         .json(
-          ErrorHandler.generateSuccessResponse(
+          ErrorHandler.generateSuccessResponse(200,
             `Leave request ${status.toLowerCase()} successfully.`
           )
         );

@@ -16,6 +16,7 @@ const getLeaveQueries = async (filters = {}) => {
     let query = queries.GET_LEAVE_QUERIES;
     const params = [];
     const whereConditions = [];
+   
 
     if (status) {
       whereConditions.push(`leavequeries.status = ?`);
@@ -51,14 +52,13 @@ const getLeaveQueries = async (filters = {}) => {
  * @param {Object} data - Data for updating the leave request.
  * @param {number} data.leaveId - Leave request ID.
  * @param {string} data.status - Status to set (Approved or Rejected).
- * @param {string} [data.rejectionReason] - Reason for rejection, if applicable.
+ * @param {string} [data.comments] - Reason for rejection, if applicable.
  */
-const updateLeaveRequest = async ({ leaveId, status, rejectionReason = null }) => {
+const updateLeaveRequest = async ({ leaveId, status, comments = null }) => {
   try {
     const query = queries.UPDATE_LEAVE_STATUS;
-    const params = [status, rejectionReason, leaveId];
+    const params = [status, comments, leaveId];
 
-    console.log('Executing updateLeaveRequest:', { query, params });
 
     const [result] = await db.execute(query, params);
 
@@ -96,7 +96,7 @@ const submitLeaveRequest = async ({ employeeId, startDate, endDate, reason, leav
       reason,
       leavetype,
       status: "Pending",
-      rejectionReason: null,
+      comments: null,
     };
   } catch (err) {
     console.error("Error submitting leave request:", err.message);
