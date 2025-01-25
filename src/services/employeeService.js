@@ -1,5 +1,5 @@
 const db = require('../config');
-const queries = require('../constants/queries');
+const queries = require('../constants/empDetailsQueries');
 const sgMail = require('@sendgrid/mail');
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');

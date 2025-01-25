@@ -1,5 +1,5 @@
 const db = require("../config");
-const queries = require("../constants/queries");
+const queries = require("../constants/leaveQueries");
 
 /**
  * Fetch leave queries from the database with optional filters.
@@ -7,19 +7,20 @@ const queries = require("../constants/queries");
  * @param {Object} filters - Filters to narrow down results.
  * @param {string} [filters.status] - Filter by leave status (e.g., Approved, Rejected).
  * @param {string} [filters.search] - Search by employee ID, reason, or employee name.
+ * @param {string} [filters.from_date] - Filter by leave start date (inclusive).
+ * @param {string} [filters.to_date] - Filter by leave end date (inclusive).
  * @returns {Promise<Object[]>} Leave query records that match the filters.
  */
 const getLeaveQueries = async (filters = {}) => {
-  const { status, search } = filters;
+  const { status, search, from_date, to_date } = filters;
 
   try {
     let query = queries.GET_LEAVE_QUERIES;
     const params = [];
     const whereConditions = [];
-   
 
     if (status) {
-      whereConditions.push(`leavequeries.status = ?`);
+      whereConditions.push("leavequeries.status = ?");
       params.push(status);
     }
 
@@ -29,9 +30,17 @@ const getLeaveQueries = async (filters = {}) => {
         leavequeries.reason LIKE ? OR 
         CONCAT(employees.first_name, ' ', employees.last_name) LIKE ?)
       `);
-      params.push(`%${search}%`);
-      params.push(`%${search}%`);
-      params.push(`%${search}%`);
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    }
+
+    if (from_date) {
+      whereConditions.push("leavequeries.start_date >= ?");
+      params.push(from_date);
+    }
+
+    if (to_date) {
+      whereConditions.push("leavequeries.end_date <= ?");
+      params.push(to_date);
     }
 
     if (whereConditions.length > 0) {
@@ -59,7 +68,6 @@ const updateLeaveRequest = async ({ leaveId, status, comments = null }) => {
     const query = queries.UPDATE_LEAVE_STATUS;
     const params = [status, comments, leaveId];
 
-
     const [result] = await db.execute(query, params);
 
     if (result.affectedRows === 0) {
@@ -74,18 +82,19 @@ const updateLeaveRequest = async ({ leaveId, status, comments = null }) => {
 /**
  * Submit a new leave request.
  * 
- * @param {string} employeeId - ID of the employee submitting the request.
- * @param {string} startDate - Leave start date.
- * @param {string} endDate - Leave end date.
- * @param {string} reason - Reason for leave.
- * @param {string} leavetype - Type of leave (e.g., Sick, Vacation).
+ * @param {Object} data - Data for submitting the leave request.
+ * @param {string} data.employeeId - ID of the employee submitting the request.
+ * @param {string} data.startDate - Leave start date.
+ * @param {string} data.endDate - Leave end date.
+ * @param {string} data.reason - Reason for leave.
+ * @param {string} data.leavetype - Type of leave (e.g., Sick, Vacation).
  * @returns {Promise<Object>} Details of the submitted leave request.
  */
 const submitLeaveRequest = async ({ employeeId, startDate, endDate, reason, leavetype }) => {
   try {
     const query = queries.INSERT_LEAVE_REQUEST;
     const params = [employeeId, startDate, endDate, reason, leavetype];
-    
+
     const [result] = await db.execute(query, params);
 
     return {
@@ -104,9 +113,8 @@ const submitLeaveRequest = async ({ employeeId, startDate, endDate, reason, leav
   }
 };
 
-
 /**
- * Retrieves leave requests for a specific employee by their ID.
+ * Retrieve leave requests for a specific employee by their ID.
  * 
  * @param {string} employeeId - Employee ID.
  * @returns {Promise<Object[]>} List of leave requests for the employee.

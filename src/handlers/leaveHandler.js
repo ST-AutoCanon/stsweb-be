@@ -3,7 +3,7 @@ const ErrorHandler = require("../utils/errorHandler");
 
 class LeaveHandler {
   /**
-   * Fetch leave queries with optional filtering and search.
+   * Fetch leave queries with optional filtering, search, and date range.
    *
    * @param {Object} req - HTTP request object.
    * @param {Object} res - HTTP response object.
@@ -22,8 +22,21 @@ class LeaveHandler {
         );
       }
 
-      const { status = "", search = "" } = req.query;
-      const leaveQueries = await LeaveService.getLeaveQueries({ status, search });
+      const { status = "", search = "", from_date = "", to_date = "" } = req.query;
+
+      // Validate date inputs
+      if ((from_date && isNaN(Date.parse(from_date))) || (to_date && isNaN(Date.parse(to_date)))) {
+        return res
+          .status(400)
+          .json(ErrorHandler.generateErrorResponse(400, "Invalid date format."));
+      }
+
+      const leaveQueries = await LeaveService.getLeaveQueries({
+        status,
+        search,
+        from_date,
+        to_date,
+      });
 
       return res.status(200).json({
         success: true,
@@ -34,7 +47,7 @@ class LeaveHandler {
       console.error("Error in LeaveHandler.getLeaveQueries:", err);
       return res
         .status(500)
-        .json(ErrorHandler.generateErrorResponse(500, err.message));
+        .json(ErrorHandler.generateErrorResponse(500, "Internal server error."));
     }
   }
 
@@ -63,10 +76,10 @@ class LeaveHandler {
 
       if (!["Approved", "Rejected"].includes(status)) {
         return res
-          .status(403)
+          .status(400)
           .json(
             ErrorHandler.generateErrorResponse(
-              403,
+              400,
               "Invalid status. Status must be 'Approved' or 'Rejected'."
             )
           );
@@ -89,18 +102,17 @@ class LeaveHandler {
         comments: comments || null,
       });
 
-      return res
-        .status(200)
-        .json(
-          ErrorHandler.generateSuccessResponse(200,
-            `Leave request ${status.toLowerCase()} successfully.`
-          )
-        );
+      return res.status(200).json(
+        ErrorHandler.generateSuccessResponse(
+          200,
+          `Leave request ${status.toLowerCase()} successfully.`
+        )
+      );
     } catch (err) {
       console.error("Error in LeaveHandler.updateLeaveRequest:", err);
       return res
         .status(500)
-        .json(ErrorHandler.generateErrorResponse(500, err.message));
+        .json(ErrorHandler.generateErrorResponse(500, "Internal server error."));
     }
   }
 
@@ -112,13 +124,13 @@ class LeaveHandler {
   static async submitLeaveRequestHandler(req, res) {
     try {
       const { employeeId, startDate, endDate, reason, leavetype } = req.body;
-  
+
       if (!employeeId || !startDate || !endDate || !reason || !leavetype) {
         return res
           .status(400)
           .json(ErrorHandler.generateErrorResponse(400, "All fields are required."));
       }
-  
+
       const leaveRequest = await LeaveService.submitLeaveRequest({
         employeeId,
         startDate,
@@ -126,15 +138,13 @@ class LeaveHandler {
         reason,
         leavetype,
       });
-  
-      return res
-        .status(200)
-        .json(
-          ErrorHandler.generateSuccessResponse(
-            "Leave request submitted successfully.",
-            leaveRequest
-          )
-        );
+
+      return res.status(200).json(
+        ErrorHandler.generateSuccessResponse(
+          "Leave request submitted successfully.",
+          leaveRequest
+        )
+      );
     } catch (err) {
       console.error("Error in submitLeaveRequestHandler:", {
         error: err.message,
@@ -145,17 +155,15 @@ class LeaveHandler {
         .json(ErrorHandler.generateErrorResponse(500, "Failed to submit leave request."));
     }
   }
-  
-  
 
   /**
-   * Retrieve leave requests for an employee.
+   * Retrieve leave requests for an employee using route parameters.
    * @param {Object} req - HTTP request object.
    * @param {Object} res - HTTP response object.
    */
   static async getLeaveRequestsHandler(req, res) {
     try {
-      const { employeeId } = req.query;
+      const { employeeId } = req.params;
 
       if (!employeeId) {
         return res
@@ -165,14 +173,12 @@ class LeaveHandler {
 
       const leaveRequests = await LeaveService.getLeaveRequests(employeeId);
 
-      return res
-        .status(200)
-        .json(
-          ErrorHandler.generateSuccessResponse(
-            "Leave requests fetched successfully.",
-            leaveRequests
-          )
-        );
+      return res.status(200).json(
+        ErrorHandler.generateSuccessResponse(
+          "Leave requests fetched successfully.",
+          leaveRequests
+        )
+      );
     } catch (err) {
       console.error("Error in getLeaveRequestsHandler:", err);
       return res

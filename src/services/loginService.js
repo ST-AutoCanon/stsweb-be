@@ -5,7 +5,7 @@
  */
 
 const db = require("../config");
-const queries = require("../constants/queries");
+const queries = require("../constants/loginQueries");
 const moment = require("moment");
 
 class LoginService {
@@ -71,8 +71,7 @@ return {
   name: admin.name,
   employee_id: admin.employee_id,
   email: admin.email,
-  position: admin.position,
-  department: admin.department,
+  gender: admin.gender,
   total_employees: dashboardStats[0]?.total_employees || 0,  // Default to 0 if not available
   attendance: {
     present: dashboardStats[0]?.present || 0,  // Default to 0 if null
@@ -123,6 +122,8 @@ return {
         name: employee.name,
         employeeId: employee.employee_id,
         position: employee.position,
+        gender: employee.gender,
+        department_id: employee.department_id,
         salary: employee.salary,
         attendance_count: employee.attendance_count,
         leave_queries_count: employee.leave_queries_count,

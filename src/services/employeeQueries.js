@@ -1,5 +1,5 @@
 const db = require("../config");
-const queries = require("../constants/queries");
+const queries = require("../constants/empDetailsQueries");
 
 class EmployeeQueries {
   /**
