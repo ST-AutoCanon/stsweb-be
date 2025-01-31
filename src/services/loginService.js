@@ -137,6 +137,18 @@ return {
       throw new Error("Error fetching employee dashboard data");
     }
   }
+
+/**
+   * Fetch sidebar menu items based on role.
+   * 
+   * @param {string} role - User role.
+   * @returns {Promise<Array>} List of sidebar menu items.
+   */
+static async fetchSidebarMenu(role) {
+  const [menuItems] = await db.execute(queries.GET_SIDEBAR_MENU, [role]);
+  return menuItems;
 }
+}
+
 
 module.exports = LoginService;
