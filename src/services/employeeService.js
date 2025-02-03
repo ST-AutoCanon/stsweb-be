@@ -245,6 +245,24 @@ exports.editEmployee = async (employeeId, updatedData) => {
 };
 
 /**
+ * Delete an employee by ID.
+ */
+exports.deleteEmployee = async (employeeId) => {
+  try {
+    const [result] = await db.execute(queries.DELETE_EMPLOYEE, [employeeId]);
+
+    if (result.affectedRows === 0) {
+      throw new Error('Employee not found or already deleted');
+    }
+
+    return { message: 'Employee deleted successfully' };
+  } catch (error) {
+    console.error('Error in deleteEmployee:', error.message);
+    throw error;
+  }
+};
+
+/**
  * Fetch employee details.
  */
 exports.getEmployee = async (employeeId) => {
