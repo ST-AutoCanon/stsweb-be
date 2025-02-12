@@ -167,5 +167,101 @@ GROUP BY
   FROM employees e
   WHERE e.employee_id = ?;
 `,
+
+
+
 GET_SIDEBAR_MENU: `SELECT label, path, icon FROM sidebar_menu WHERE FIND_IN_SET(?, roles)`,
+
+GET_EMPLOYEE_COUNT_BY_DEPARTMENT: `
+  SELECT 
+    d.name AS department_name, 
+    COUNT(CASE WHEN e.gender = 'Male' THEN 1 END) AS men,
+    COUNT(CASE WHEN e.gender = 'Female' THEN 1 END) AS women
+  FROM 
+    employees e
+  LEFT JOIN 
+    departments d 
+  ON 
+    e.department_id = d.id
+  GROUP BY 
+    d.name;
+`,
+
+GET_ATTENDANCE_STATUS_COUNT: `
+  
+  SELECT 
+    (SELECT COUNT(DISTINCT employee_id) FROM employee_attendance) AS totalEmployees,
+    JSON_ARRAYAGG(
+        JSON_OBJECT(
+            'label', status,
+            'count', status_count,
+            'color', 
+            CASE
+                WHEN status = 'Present' THEN '#004DC6'
+                WHEN status = 'Sick Leave' THEN '#438CFF'
+                WHEN status = 'Absent' THEN '#C7DDFF'
+                ELSE '#FFFFFF'
+            END
+        )
+    ) AS categories
+FROM (
+    SELECT 
+        status, 
+        COUNT(*) AS status_count
+    FROM employee_attendance
+    GROUP BY status
+) AS status_counts;
+
+`,
+
+GET_EMPLOYEE_LOGIN_DATA_COUNT:
+`SELECT 
+    DATE_FORMAT(ld.login_time, '%h:%i %p') AS label,
+    COUNT(ld.id) AS daily,
+    (SELECT COUNT(*) FROM login_data 
+     WHERE login_time >= NOW() - INTERVAL 7 DAY 
+     AND DATE_FORMAT(login_time, '%h:%i %p') = DATE_FORMAT(ld.login_time, '%h:%i %p')) AS weekly,
+    (SELECT COUNT(*) FROM login_data 
+     WHERE login_time >= NOW() - INTERVAL 30 DAY 
+     AND DATE_FORMAT(login_time, '%h:%i %p') = DATE_FORMAT(ld.login_time, '%h:%i %p')) AS monthly
+FROM login_data ld
+GROUP BY label, ld.login_time
+ORDER BY ld.login_time;`,
+
+GET_EMPLOYEE_SALARY_RANGE:
+`SELECT 
+    salary_range AS label,
+    COUNT(*) AS data
+FROM salary_ranges
+GROUP BY salary_range
+ORDER BY FIELD(salary_range, '<30k', '30k-50k', '50k-70k', '70k+', '90k+');
+`
+,
+GET_EMPLOYEE_BY_DEPARTMENT: `
+        SELECT 
+            d.name AS department_name, 
+            COUNT(CASE WHEN e.gender = 'Male' THEN 1 END) AS men,
+            COUNT(CASE WHEN e.gender = 'Female' THEN 1 END) AS women
+        FROM 
+            employees e
+        LEFT JOIN 
+            departments d ON e.department_id = d.id
+        GROUP BY 
+            d.name;
+    `,
+
+
+
+GET_EMPLOYEE_PAYROLL:
+`SELECT
+  SUM(CASE WHEN card_label = 'Previous Month Credit' THEN card_value ELSE 0 END) AS total_previous_month_credit,
+  SUM(CASE WHEN card_label = 'Previous Month Expenses' THEN card_value ELSE 0 END) AS total_previous_month_expenses,
+  SUM(CASE WHEN card_label = 'Previous Month Salary' THEN card_value ELSE 0 END) AS total_previous_month_salary
+FROM employee_payrolldata
+WHERE card_label IN ('Previous Month Credit', 'Previous Month Expenses', 'Previous Month Salary');
+
+`
+,
+
+
 };
