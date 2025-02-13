@@ -6,7 +6,7 @@ const employeeHandler = require('../handlers/employeeHandler');
 router.post('/admin/employees', employeeHandler.addEmployee);
 router.get('/admin/employees', employeeHandler.searchEmployees);
 router.put('/admin/employees/:employeeId', employeeHandler.editEmployee);
-router.delete('/admin/employees/:employeeId', employeeHandler.deleteEmployee);
+router.put('/admin/employees/:employeeId/deactivate', employeeHandler.deactivateEmployee);
 router.get('/employee/:employeeId', employeeHandler.getEmployee);
 
 module.exports = router;
