@@ -189,28 +189,14 @@ GET_EMPLOYEE_COUNT_BY_DEPARTMENT: `
 
 GET_ATTENDANCE_STATUS_COUNT: `
   
-  SELECT 
-    (SELECT COUNT(DISTINCT employee_id) FROM employee_attendance) AS totalEmployees,
-    JSON_ARRAYAGG(
-        JSON_OBJECT(
-            'label', status,
-            'count', status_count,
-            'color', 
-            CASE
-                WHEN status = 'Present' THEN '#004DC6'
-                WHEN status = 'Sick Leave' THEN '#438CFF'
-                WHEN status = 'Absent' THEN '#C7DDFF'
-                ELSE '#FFFFFF'
-            END
-        )
-    ) AS categories
-FROM (
-    SELECT 
-        status, 
-        COUNT(*) AS status_count
-    FROM employee_attendance
-    GROUP BY status
-) AS status_counts;
+  
+SELECT 
+    (SELECT COUNT(DISTINCT employee_id) FROM sukalpadata.employees) AS totalEmployees,
+    (SELECT COUNT(DISTINCT employee_id) FROM sukalpadata.attendance WHERE DATE(date) = CURDATE()) AS present,
+    (SELECT COUNT(DISTINCT employee_id) FROM sukalpadata.employees 
+     WHERE employee_id NOT IN (SELECT DISTINCT employee_id FROM sukalpadata.attendance WHERE DATE(date) = CURDATE())) AS absent,
+    (SELECT COUNT(DISTINCT employee_id) FROM sukalpadata.leavequeries 
+     WHERE status = 'Approved' AND DATE(start_date) <= CURDATE() AND DATE(end_date) >= CURDATE()) AS approved_leave;
 
 `,
 
@@ -230,11 +216,18 @@ ORDER BY ld.login_time;`,
 
 GET_EMPLOYEE_SALARY_RANGE:
 `SELECT 
-    salary_range AS label,
-    COUNT(*) AS data
-FROM salary_ranges
+    CASE 
+        WHEN salary < 30000 THEN '<30k'
+        WHEN salary BETWEEN 30000 AND 50000 THEN '30k-50k'
+        WHEN salary BETWEEN 50001 AND 70000 THEN '50k-70k'
+        WHEN salary BETWEEN 70001 AND 90000 THEN '70k+'
+        ELSE '90k+'
+    END AS salary_range,
+    COUNT(*) AS count
+FROM sukalpadata.employees
 GROUP BY salary_range
 ORDER BY FIELD(salary_range, '<30k', '30k-50k', '50k-70k', '70k+', '90k+');
+
 `
 ,
 GET_EMPLOYEE_BY_DEPARTMENT: `

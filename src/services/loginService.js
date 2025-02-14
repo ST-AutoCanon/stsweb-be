@@ -829,6 +829,33 @@ class LoginService {
     }
   }
 
+  // static async getAttendanceStatusCount() {
+  //   try {
+  //     console.log("Executing SQL Query: ", queries.GET_ATTENDANCE_STATUS_COUNT);
+  //     const [rows] = await db.execute(queries.GET_ATTENDANCE_STATUS_COUNT);
+      
+  //     console.log("Query Result:", rows);
+      
+  //     if (!rows || rows.length === 0 || !rows[0]?.categories) {
+  //       return { totalEmployees: 0, categories: [] };
+  //     }
+      
+  //     console.log("Categories before parsing:", rows[0].categories);
+  //     const categories = typeof rows[0].categories === 'string' 
+  //       ? JSON.parse(rows[0].categories) 
+  //       : rows[0].categories;
+
+  //     return {
+  //       totalEmployees: rows[0]?.totalEmployees || 0,
+  //       categories: categories || [],
+  //     };
+  //   } catch (error) {
+  //     console.error("Error fetching attendance status count:", error);
+  //     throw new Error("Failed to fetch attendance status count: " + error.message);
+  //   }
+  // }
+
+
   static async getAttendanceStatusCount() {
     try {
       console.log("Executing SQL Query: ", queries.GET_ATTENDANCE_STATUS_COUNT);
@@ -836,24 +863,26 @@ class LoginService {
       
       console.log("Query Result:", rows);
       
-      if (!rows || rows.length === 0 || !rows[0]?.categories) {
+      if (!rows || rows.length === 0) {
         return { totalEmployees: 0, categories: [] };
       }
       
-      console.log("Categories before parsing:", rows[0].categories);
-      const categories = typeof rows[0].categories === 'string' 
-        ? JSON.parse(rows[0].categories) 
-        : rows[0].categories;
-
+      const { totalEmployees, present, sick_leave, absent } = rows[0];
+      
       return {
-        totalEmployees: rows[0]?.totalEmployees || 0,
-        categories: categories || [],
+        totalEmployees: totalEmployees || 0,
+        categories: [
+          { label: "Present", count: present || 0, color: "#004DC6" },
+          { label: "Sick Leave", count: sick_leave || 0, color: "#438CFF" },
+          { label: "Absent", count: absent || 0, color: "#C7DDFF" }
+        ]
       };
     } catch (error) {
       console.error("Error fetching attendance status count:", error);
       throw new Error("Failed to fetch attendance status count: " + error.message);
     }
   }
+
 
   static async fetchEmployeeLoginDataCount() {
     try {
@@ -868,13 +897,16 @@ class LoginService {
   static async fetchSalaryRanges() {
     try {
       const [rows] = await db.execute(queries.GET_EMPLOYEE_SALARY_RANGE);
+      
       return {
-        labels: rows.map(({ label }) => label),
-        datasets: [{
-          label: "Salaries",
-          data: rows.map(({ data }) => data),
-          backgroundColor: ["#82DAFE", "#00A1DA", "#0078CF", "#012FBA", "#011F7B"],
-        }],
+        labels: rows.map(row => row.salary_range),
+        datasets: [
+          {
+            label: "Salaries",
+            data: rows.map(row => row.count),
+            backgroundColor: ["#82DAFE", "#00A1DA", "#0078CF", "#012FBA", "#011F7B"],
+          },
+        ],
       };
     } catch (error) {
       console.error("Error fetching salary ranges:", error);
