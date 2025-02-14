@@ -83,6 +83,7 @@ module.exports = {
     WHERE 
       role = 'Manager' AND department_id = ?
   `,
+  
   FETCH_THREADS:`SELECT t.id, t.subject, t.department_id, t.created_at, t.status, 
   COUNT(q.id) AS message_count
 FROM threads t

@@ -9,6 +9,11 @@ const forgotPasswordRoutes = require("./routes/forgotPassword");
 const addDepartmentRoutes = require("./routes/addDepartment");
 const apiKeyMiddleware = require("./middleware/apiKeyMiddleware"); 
 const sessionMiddleware = require("./middleware/sessionMiddleware"); 
+
+
+
+// const employeeRoutes2 = require("./routes/adminDashboardRoutes");
+
 const cors = require('cors');
 require("dotenv").config();
 
@@ -19,6 +24,7 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE'], // Allowed methods
   allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key'], // Allowed headers
 }));
+
 
 
 // Apply API key middleware universally
@@ -35,6 +41,11 @@ app.use("/", employeeQueries);
 app.use("/", resetPasswordRoutes);
 app.use("/", forgotPasswordRoutes);
 app.use("/", addDepartmentRoutes);
+
+// app.use("/", employeeRoutes2);
+
+
+// app.use("/admindash", validateApiKey, adminDashboardRoutes);
 
 const PORT = process.env.PORT;
 app.listen(PORT, () => {
