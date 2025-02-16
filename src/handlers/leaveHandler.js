@@ -4,13 +4,11 @@ const ErrorHandler = require("../utils/errorHandler");
 class LeaveHandler {
   /**
    * Fetch leave queries with optional filtering, search, and date range.
-   *
-   * @param {Object} req - HTTP request object.
-   * @param {Object} res - HTTP response object.
    */
   static async getLeaveQueries(req, res) {
     try {
       const userRole = req.user.role;
+      console.log("userRole=", userRole);
       const allowedRoles = ["Admin"];
 
       if (!allowedRoles.includes(userRole)) {
@@ -24,7 +22,6 @@ class LeaveHandler {
 
       const { status = "", search = "", from_date = "", to_date = "" } = req.query;
 
-      // Validate date inputs
       if ((from_date && isNaN(Date.parse(from_date))) || (to_date && isNaN(Date.parse(to_date)))) {
         return res
           .status(400)
@@ -44,6 +41,7 @@ class LeaveHandler {
         data: leaveQueries,
       });
     } catch (err) {
+      console.log("Error in LeaveHandler.getLeaveQueries:", err);
       console.error("Error in LeaveHandler.getLeaveQueries:", err);
       return res
         .status(500)
@@ -53,9 +51,6 @@ class LeaveHandler {
 
   /**
    * Approve or reject a leave request.
-   *
-   * @param {Object} req - HTTP request object.
-   * @param {Object} res - HTTP response object.
    */
   static async updateLeaveRequest(req, res) {
     try {
@@ -118,14 +113,12 @@ class LeaveHandler {
 
   /**
    * Submit a leave request.
-   * @param {Object} req - HTTP request object.
-   * @param {Object} res - HTTP response object.
    */
   static async submitLeaveRequestHandler(req, res) {
     try {
-      const { employeeId, startDate, endDate, reason, leavetype } = req.body;
+      const { employeeId, startDate, endDate, h_f_day, reason, leavetype } = req.body;
 
-      if (!employeeId || !startDate || !endDate || !reason || !leavetype) {
+      if (!employeeId || !startDate || !endDate || !h_f_day || !reason || !leavetype) {
         return res
           .status(400)
           .json(ErrorHandler.generateErrorResponse(400, "All fields are required."));
@@ -135,6 +128,7 @@ class LeaveHandler {
         employeeId,
         startDate,
         endDate,
+        h_f_day,
         reason,
         leavetype,
       });
@@ -157,13 +151,12 @@ class LeaveHandler {
   }
 
   /**
-   * Retrieve leave requests for an employee using route parameters.
-   * @param {Object} req - HTTP request object.
-   * @param {Object} res - HTTP response object.
+   * Retrieve leave requests for an employee using route parameters and optional date filters.
    */
   static async getLeaveRequestsHandler(req, res) {
     try {
       const { employeeId } = req.params;
+      const { from_date, to_date } = req.query;
 
       if (!employeeId) {
         return res
@@ -171,7 +164,7 @@ class LeaveHandler {
           .json(ErrorHandler.generateErrorResponse(400, "Employee ID is required."));
       }
 
-      const leaveRequests = await LeaveService.getLeaveRequests(employeeId);
+      const leaveRequests = await LeaveService.getLeaveRequests(employeeId, from_date, to_date);
 
       return res.status(200).json(
         ErrorHandler.generateSuccessResponse(
@@ -184,6 +177,77 @@ class LeaveHandler {
       return res
         .status(500)
         .json(ErrorHandler.generateErrorResponse(500, "Error fetching leave requests."));
+    }
+  }
+
+  /**
+   * Edit a pending leave request.
+   */
+  static async editLeaveRequestHandler(req, res) {
+    try {
+      const { leaveId } = req.params;
+  
+console.log("Received leaveId:", leaveId);
+
+      const { employeeId, startDate, endDate, h_f_day, reason, leavetype } = req.body;
+      console.log("Request Body:", req.body);
+
+
+      if (!leaveId || !employeeId || !startDate || !endDate || !h_f_day || !reason || !leavetype) {
+        return res
+          .status(400)
+          .json(ErrorHandler.generateErrorResponse(400, "All fields are required."));
+      }
+
+      const updatedLeaveRequest = await LeaveService.editLeaveRequest({
+        leaveId,
+        employeeId,
+        startDate,
+        endDate,
+        h_f_day,
+        reason,
+        leavetype,
+      });
+
+      return res.status(200).json(
+        ErrorHandler.generateSuccessResponse(
+          "Leave request updated successfully.",
+          updatedLeaveRequest
+        )
+      );
+    } catch (err) {
+      console.error("Error in editLeaveRequestHandler:", err);
+      return res
+        .status(500)
+        .json(ErrorHandler.generateErrorResponse(500, err.message));
+    }
+  }
+
+  /**
+   * Cancel a pending leave request.
+   */
+  static async cancelLeaveRequestHandler(req, res) {
+    try {
+      const { leaveId, employeeId } = req.params;
+
+      if (!leaveId || !employeeId) {
+        return res
+          .status(400)
+          .json(ErrorHandler.generateErrorResponse(400, "Leave ID and Employee ID are required."));
+      }
+
+      const message = await LeaveService.cancelLeaveRequest(leaveId, employeeId);
+
+      return res.status(200).json(
+        ErrorHandler.generateSuccessResponse(
+          message
+        )
+      );
+    } catch (err) {
+      console.error("Error in cancelLeaveRequestHandler:", err);
+      return res
+        .status(500)
+        .json(ErrorHandler.generateErrorResponse(500, err.message));
     }
   }
 }

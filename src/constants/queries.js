@@ -21,8 +21,12 @@ module.exports = {
   `,
 
   /* add-department queries*/
-  ADD_DEPARTMENT: 'INSERT INTO departments (name) VALUES (?)',
-  GET_DEPARTMENTS: 'SELECT * FROM departments',
+  ADD_DEPARTMENT: 'INSERT INTO departments (name, icon) VALUES (?, ?)',
+      GET_DEPARTMENTS: 'SELECT * FROM departments',
+
+
+      GET_HOLIDAYS: "SELECT date, occasion, type FROM holidays WHERE YEAR(date) = YEAR(CURDATE())"
+      
 
   /* employee-queries */
   CREATE_THREAD: `
@@ -92,4 +96,5 @@ WHERE t.sender_id = ?
 GROUP BY t.id, t.subject, t.department_id, t.created_at
 ORDER BY t.created_at DESC;
 `
+
 };

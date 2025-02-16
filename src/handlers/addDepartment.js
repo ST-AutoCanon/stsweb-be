@@ -6,11 +6,14 @@ const addDepartmentHandler = async (req, res) => {
         if (!name) {
             return res.status(400).json({ message: 'Department name is required' });
         }
-        await addDepartmentService(name);
+
+        const icon = req.file ? `/uploads/${req.file.filename}` : null;
+        await addDepartmentService(name, icon);
+
         return res.status(201).json({ message: 'Department added successfully' });
     } catch (error) {
         if (error.message === 'Department already exists') {
-            return res.status(409).json({ message: error.message }); // Conflict status code
+            return res.status(409).json({ message: error.message });
         }
         console.error('Error adding department:', error);
         return res.status(500).json({ message: 'Internal Server Error' });

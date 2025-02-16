@@ -1,9 +1,9 @@
 const db = require("../config");
 const { ADD_DEPARTMENT, GET_DEPARTMENTS } = require('../constants/queries');
 
-const addDepartmentService = async (name) => {
+const addDepartmentService = async (name, icon) => {
     try {
-        const [results] = await db.query(ADD_DEPARTMENT, [name]);
+        const [results] = await db.query(ADD_DEPARTMENT, [name, icon]);
         return results;
     } catch (error) {
         if (error.code === 'ER_DUP_ENTRY') {

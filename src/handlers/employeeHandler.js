@@ -13,7 +13,6 @@ exports.addEmployee = async (req, res) => {
   } catch (error) {
     console.log(error);
     if (error.code === "ER_DUP_ENTRY") {
-      // Handle duplicate entry error
       return res.status(400).json(
         ErrorHandler.generateErrorResponse(400, "Email already exists. Please try a different email.")
       );
@@ -31,17 +30,14 @@ exports.searchEmployees = async (req, res) => {
   try {
     const { search, fromDate, toDate } = req.query;
 
-    // Fetch employees using the service with search and date filters
     const employees = await employeeService.searchEmployees(search, fromDate, toDate);
 
-    // Return a success response
     return res
       .status(200)
       .json(ErrorHandler.generateSuccessResponse(200, { data: employees }));
   } catch (error) {
     console.error('Error fetching employees:', error);
 
-    // Return an error response
     return res
       .status(500)
       .json(ErrorHandler.generateErrorResponse(500, 'Failed to fetch employees'));
@@ -69,18 +65,19 @@ exports.editEmployee = async (req, res) => {
 };
 
 /**
- * Handler to delete an employee.
+ * Handler to deactivate an employee.
  */
-exports.deleteEmployee = async (req, res) => {
+exports.deactivateEmployee = async (req, res) => {
   try {
     const employeeId = req.params.employeeId;
-    await employeeService.deleteEmployee(employeeId);
-    return res.status(200).json(ErrorHandler.generateSuccessResponse(200, 'Employee deleted successfully' ));
+    await employeeService.deactivateEmployee(employeeId);
+    return res.status(200).json(ErrorHandler.generateSuccessResponse(200, 'Employee deactivated successfully' ));
   } catch (error) {
     console.log(error);
-    return res.status(400).json(ErrorHandler.generateErrorResponse(400, 'Failed to delete employee'));
+    return res.status(400).json(ErrorHandler.generateErrorResponse(400, 'Failed to deactivate employee'));
   }
 };
+
 
 /**
  * Handler to fetch an employee.
@@ -88,12 +85,10 @@ exports.deleteEmployee = async (req, res) => {
 exports.getEmployee = async (req, res) => {
   const employeeId = req.query.employeeId || req.params.employeeId;
   if (!employeeId) {
-    // Return 400 Bad Request for missing ID
     return res.status(400).json(ErrorHandler.generateErrorResponse(400, "Employee ID is required."));
   }
 try {
   const profile = await employeeService.getEmployee(employeeId);
-  // Successful response with profile details
   return res.status(200).json({
     status: 'success',
     code:200,
@@ -102,7 +97,6 @@ try {
   });
 } catch (error) {
   console.error("Error in getEmployee:", error.message);
-  // Return 500 Internal Server Error for failed fetch
   return res.status(500).json(ErrorHandler.generateErrorResponse(500, "Failed to fetch employee profile."));
 }
 };
