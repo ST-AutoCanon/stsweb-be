@@ -15,6 +15,15 @@ const forgotPasswordRoutes = require("./routes/forgotPassword");
 const addDepartmentRoutes = require("./routes/addDepartment");
 const apiKeyMiddleware = require("./middleware/apiKeyMiddleware");
 const sessionMiddleware = require("./middleware/sessionMiddleware");
+const apiKeyMiddleware = require("./middleware/apiKeyMiddleware"); 
+const sessionMiddleware = require("./middleware/sessionMiddleware"); 
+
+
+
+// const employeeRoutes2 = require("./routes/adminDashboardRoutes");
+
+const cors = require('cors');
+require("dotenv").config();
 
 const { initializeSocket } = require("./socket"); // Import socket initialization function
 
@@ -30,7 +39,12 @@ app.use(
   })
 );
 
+
 // Apply middlewares
+
+
+// Apply API key middleware universally
+
 app.use(apiKeyMiddleware);
 app.use(sessionMiddleware);
 app.use(bodyParser.json());
@@ -46,9 +60,19 @@ app.use("/", resetPasswordRoutes);
 app.use("/", forgotPasswordRoutes);
 app.use("/", addDepartmentRoutes);
 
+
 // Ensure the Server Starts Correctly
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
+
+// app.use("/", employeeRoutes2);
+
+
+// app.use("/admindash", validateApiKey, adminDashboardRoutes);
+
+const PORT = process.env.PORT;
+app.listen(PORT, () => {
+
   console.log(`Server is running on port ${PORT}`);
 });
 
