@@ -5,23 +5,20 @@ const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 
-// Set SendGrid API Key
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 /**
  * Generate a password reset token, store it, and send a reset link to the employee.
  */
 const sendResetEmail = async (employeeEmail) => {
-  const resetToken = uuidv4(); // Generate a unique reset token
+  const resetToken = uuidv4();
   const resetLink = `${process.env.FRONTEND_URL}/ResetPassword?token=${resetToken}`;
 
-  // Save reset token to database
   await db.execute(queries.SAVE_RESET_TOKEN, [employeeEmail, resetToken]);
 
-  // Email content
   const msg = {
     to: employeeEmail,
-    from: process.env.SENDGRID_SENDER_EMAIL, // Verified sender email
+    from: process.env.SENDGRID_SENDER_EMAIL,
     subject: 'Password Reset Link - Welcome to Our Company',
     text: `Welcome to the company! Please reset your password using the link below:\n${resetLink}\n\nThis link is valid for 1 hour.`,
     html: `<p>Welcome to the company!</p>
@@ -31,39 +28,60 @@ const sendResetEmail = async (employeeEmail) => {
   };
 
   try {
-    // Send email
     await sgMail.send(msg);
   } catch (error) {
     throw new Error(`Error sending email: ${error.response.body.errors[0].message}`);
   }
 };
 
+/**
+ * Update Employee Photo.
+ */
+exports.updateEmployeePhoto = async (employeeId, photoUrl) => {
+  try {
+    // Validate inputs to prevent SQL injection
+    if (!employeeId || !photoUrl) {
+      throw new Error('Invalid input');
+    }
+
+    // Parameterized query to prevent SQL injection
+    const [result] = await db.execute(
+      queries.UPDATE_EMPLOYEE_PHOTO,
+      [photoUrl, employeeId]
+    );
+
+    if (result.affectedRows === 0) {
+      throw new Error('Employee not found');
+    }
+
+    return { message: 'Employee photo updated successfully' };
+  } catch (error) {
+    console.error('Error in updateEmployeePhoto:', error.message);
+    throw error;
+  }
+};
 
 /**
  * Add a new employee and send a password reset email.
  */
 exports.addEmployee = async (employeeData) => {
-  let departmentId = null; // Default to null for Admin role
+  let departmentId = null;
 
-  // Check if the role is not Admin, then fetch department_id
   if (employeeData.role !== 'Admin') {
     const [departmentResult] = await db.execute(queries.GET_DEPARTMENT_ID_BY_NAME, [employeeData.department]);
     if (departmentResult.length === 0) {
       throw new Error('Department not found');
     }
-    departmentId = departmentResult[0].id; // Use the id from the query result
+    departmentId = departmentResult[0].id;
   }
 
-  // Function to generate a random temporary password (12 characters long)
   const generateTemporaryPassword = () => {
-    return crypto.randomBytes(6).toString('hex'); // Generates a 12-character password
+    return crypto.randomBytes(6).toString('hex');
   };
 
   const temporaryPassword = generateTemporaryPassword();
+  const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
 
-  const hashedPassword = await bcrypt.hash(temporaryPassword, 10); // Hash the password before storing
-
-  // Prepare params for inserting employee data into the database
   const params = [
     employeeData.first_name || '',
     employeeData.last_name || '',
@@ -74,26 +92,122 @@ exports.addEmployee = async (employeeData) => {
     employeeData.gender || '',
     employeeData.marital_status || '',
     employeeData.spouse_name || '',
+    employeeData.marriage_date || null,
     employeeData.address || null,
     employeeData.phone_number || '',
     employeeData.father_name || null,
     employeeData.mother_name || null,
-    departmentId, // Use department_id if not Admin, otherwise null
+    departmentId,
     employeeData.position || null,
     employeeData.photo_url || null,
     employeeData.salary || null,
     employeeData.role || null,
-    hashedPassword // Insert the hashed temporary password into the database
+    hashedPassword
   ];
 
-  // Add the employee to the database
   const [result] = await db.execute(queries.ADD_EMPLOYEE, params);
+  await sendResetEmail(employeeData.email);
 
-  // Send the password reset email after adding the employee
-  await sendResetEmail(employeeData.email); // Pass only the email to the reset email function
-
-  return result; // Return result (employee added)
+  return result;
 };
+
+/**
+ * Edit employee details with safety checks for SQL injection.
+ */
+exports.editEmployee = async (employeeId, updatedData) => {
+  const params = [];
+  const updates = [];
+
+  if (updatedData.department) {
+    const [departmentResult] = await db.execute(queries.GET_DEPARTMENT_ID_BY_NAME, [updatedData.department]);
+    if (departmentResult.length === 0) {
+      throw new Error('Department not found');
+    }
+    updatedData.department_id = departmentResult[0].id;
+  }
+
+  if (updatedData.first_name) {
+    updates.push("first_name = ?");
+    params.push(updatedData.first_name);
+  }
+  if (updatedData.last_name) {
+    updates.push("last_name = ?");
+    params.push(updatedData.last_name);
+  }
+  if (updatedData.email) {
+    updates.push("email = ?");
+    params.push(updatedData.email);
+  }
+  if (updatedData.phone_number) {
+    updates.push("phone_number = ?");
+    params.push(updatedData.phone_number);
+  }
+  if (updatedData.dob) {
+    updates.push("dob = ?");
+    params.push(updatedData.dob);
+  }
+  if (updatedData.address) {
+    updates.push("address = ?");
+    params.push(updatedData.address);
+  }
+  if (updatedData.aadhaar_number) {
+    updates.push("aadhaar_number = ?");
+    params.push(updatedData.aadhaar_number);
+  }
+  if (updatedData.pan_number) {
+    updates.push("pan_number = ?");
+    params.push(updatedData.pan_number);
+  }
+  if (updatedData.position) {
+    updates.push("position = ?");
+    params.push(updatedData.position);
+  }
+  if (updatedData.photo_url) {
+    updates.push("photo_url = ?");
+    params.push(updatedData.photo_url);
+  }
+  if (updatedData.salary) {
+    updates.push("salary = ?");
+    params.push(updatedData.salary);
+  }
+  if (updatedData.role) {
+    updates.push("role = ?");
+    params.push(updatedData.role);
+  }
+  if (updatedData.department_id) {
+    updates.push("department_id = ?");
+    params.push(updatedData.department_id);
+  }
+  if (updatedData.father_name) {
+    updates.push("father_name = ?");
+    params.push(updatedData.father_name);
+  }
+  if (updatedData.mother_name) {
+    updates.push("mother_name = ?");
+    params.push(updatedData.mother_name);
+  }
+
+  if (updates.length === 0) {
+    throw new Error("No fields provided to update.");
+  }
+
+  params.push(employeeId);
+
+  const sqlQuery = `
+    UPDATE employees
+    SET ${updates.join(", ")}
+    WHERE employee_id = ?`;
+
+  try {
+    const [result] = await db.execute(sqlQuery, params);
+    return result;
+  } catch (error) {
+    console.error("Failed to update employee:", error);
+    throw error;
+  }
+};
+
+
 
 /**
  * Service to search employees based on search criteria.
@@ -133,134 +247,23 @@ exports.searchEmployees = async (search, fromDate, toDate) => {
 
 
 /**
- * Edit employee details.
+ * Deactivate an employee by setting status to 'Inactive'.
  */
-exports.editEmployee = async (employeeId, updatedData) => {
-  const params = [];
-  const updates = [];
-
-  // If department name is provided, fetch the department_id first
-  if (updatedData.department) {
-    const [departmentResult] = await db.execute(queries.GET_DEPARTMENT_ID_BY_NAME, [updatedData.department]);
-    if (departmentResult.length === 0) {
-      throw new Error('Department not found');
-    }
-    updatedData.department_id = departmentResult[0].id; // Set the department_id for the update
-  }
-
-  // Add parameters dynamically based on the provided data
-  if (updatedData.first_name) {
-    updates.push("first_name = ?");
-    params.push(updatedData.first_name);
-  }
-  if (updatedData.last_name) {
-    updates.push("last_name = ?");
-    params.push(updatedData.last_name);
-  }
-  if (updatedData.email) {
-    updates.push("email = ?");
-    params.push(updatedData.email);
-  }
-  if (updatedData.phone_number) {
-    updates.push("phone_number = ?");
-    params.push(updatedData.phone_number);
-  }
-  if (updatedData.dob) {
-    updates.push("dob = ?");
-    params.push(updatedData.dob);
-  }
-  if (updatedData.address) {
-    updates.push("address = ?");
-    params.push(updatedData.address);
-  }
-  if (updatedData.aadhaar_number) {
-    updates.push("aadhaar_number = ?");
-    params.push(updatedData.aadhaar_number);
-  }
-  if (updatedData.pan_number) {
-    updates.push("pan_number = ?");
-    params.push(updatedData.pan_number);
-  }
-  if (updatedData.pan_number) {
-    updates.push("gender = ?");
-    params.push(updatedData.gender);
-  }
-  if (updatedData.pan_number) {
-    updates.push("marital_status = ?");
-    params.push(updatedData.marital_status);
-  }
-  if (updatedData.pan_number) {
-    updates.push("spouse_name = ?");
-    params.push(updatedData.spouse_name);
-  }
-  if (updatedData.position) {
-    updates.push("position = ?");
-    params.push(updatedData.position);
-  }
-  if (updatedData.photo_url) {
-    updates.push("photo_url = ?");
-    params.push(updatedData.photo_url);
-  }
-  if (updatedData.salary) {
-    updates.push("salary = ?");
-    params.push(updatedData.salary);
-  }
-  if (updatedData.role) {
-    updates.push("role = ?");
-    params.push(updatedData.role);
-  }
-  if (updatedData.department_id) {
-    updates.push("department_id = ?");
-    params.push(updatedData.department_id);  // Use the department_id fetched
-  }
-  if (updatedData.father_name) {
-    updates.push("father_name = ?");
-    params.push(updatedData.father_name);
-  }
-  if (updatedData.mother_name) {
-    updates.push("mother_name = ?");
-    params.push(updatedData.mother_name);
-  }
-
-  if (updates.length === 0) {
-    throw new Error("No fields provided to update.");
-  }
-
-  // Always add the employeeId as the final parameter
-  params.push(employeeId);
-
-  // Dynamically construct the query
-  const sqlQuery = `
-    UPDATE employees
-    SET ${updates.join(", ")}
-    WHERE employee_id = ?`;
-
+exports.deactivateEmployee = async (employeeId) => {
   try {
-    const [result] = await db.execute(sqlQuery, params);
-    return result;
-  } catch (error) {
-    console.error("Failed to update employee:", error);
-    throw error;
-  }
-};
-
-/**
- * Delete an employee by ID.
- */
-exports.deleteEmployee = async (employeeId) => {
-  try {
-    const [result] = await db.execute(queries.DELETE_EMPLOYEE, [employeeId]);
+    const [result] = await db.execute(queries.UPDATE_EMPLOYEE_STATUS, [employeeId]);
 
     if (result.affectedRows === 0) {
-      throw new Error('Employee not found or already deleted');
+      throw new Error('Employee not found or already deactivated');
     }
 
-    return { message: 'Employee deleted successfully' };
+    return { message: 'Employee deactivated successfully' };
   } catch (error) {
-    console.error('Error in deleteEmployee:', error.message);
+    console.error('Error in deactivateEmployee:', error.message);
     throw error;
   }
 };
+
 
 /**
  * Fetch employee details.
