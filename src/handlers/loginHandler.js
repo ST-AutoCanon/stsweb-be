@@ -1,9 +1,8 @@
+// LoginHandler.js
 const bcrypt = require('bcrypt');
 const LoginService = require("../services/loginService");
 const ErrorHandler = require("../utils/errorHandler");
-const jwt = require('jsonwebtoken');
 const dotenv = require('dotenv');
-const moment = require('moment'); // Remove moment-timezone as we're using UTC
 dotenv.config();
 
 class LoginHandler {
@@ -23,12 +22,8 @@ class LoginHandler {
         return res.status(401).json(ErrorHandler.generateErrorResponse(401, "Invalid credentials"));
       }
 
-      // Generate JWT token
-      const token = jwt.sign(
-        { userId: user.employee_id, role: user.role },
-        process.env.JWT_SECRET,
-        { expiresIn: '20m' }
-      );
+      // Store last active time (optional: you can store it in DB if needed)
+      req.session.lastActive = Date.now();
 
       // Fetch dashboard data based on role
       const roleToDashboardFunction = {
@@ -41,17 +36,15 @@ class LoginHandler {
       // Fetch sidebar menu based on role
       const sidebarMenu = await LoginService.fetchSidebarMenu(user.role);
 
-      // Respond with token, role, dashboard, and sidebar menu
       return res.status(200).json({
         status: "success",
         code: 200,
         message: {
-          token,
           role: user.role,
           name: user.name,
           gender: user.gender,
           dashboard,
-          sidebarMenu, // Include sidebar menu data
+          sidebarMenu,
         },
       });
     } catch (err) {

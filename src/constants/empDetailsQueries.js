@@ -5,9 +5,9 @@ module.exports = {
   `,
   ADD_EMPLOYEE: `
     INSERT INTO employees (
-      first_name, last_name, dob, email, aadhaar_number, pan_number, gender, marital_status, spouse_name,
+      first_name, last_name, dob, email, aadhaar_number, pan_number, gender, marital_status, spouse_name, marriage_date,
       address, phone_number, father_name, mother_name, department_id, position, photo_url, salary, role, password
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   SAVE_RESET_TOKEN: `
   INSERT INTO password_resets (email, token, expiry_time) 
@@ -19,7 +19,8 @@ module.exports = {
 GET_ALL_EMPLOYEES: `
 SELECT e.employee_id, 
        CONCAT(e.first_name, ' ', e.last_name) AS name, 
-       DATE_FORMAT(e.created_at, '%Y-%m-%d') AS joining_date, 
+       DATE_FORMAT(e.created_at, '%Y-%m-%d') AS joining_date,
+       e.status, 
        d.name AS department, 
        e.position, 
        e.email, 
@@ -35,6 +36,7 @@ SEARCH_EMPLOYEES: `
 SELECT e.employee_id, 
        CONCAT(e.first_name, ' ', e.last_name) AS name, 
        DATE_FORMAT(e.created_at, '%Y-%m-%d') AS joining_date, 
+       e.status,
        d.name AS department, 
        e.position, 
        e.email, 
@@ -50,10 +52,9 @@ WHERE e.first_name LIKE ?
    OR e.employee_id LIKE ? 
    OR d.name LIKE ?
 `,
+  
+UPDATE_EMPLOYEE_STATUS: `UPDATE employees SET status = 'Inactive' WHERE employee_id = ?`,
 
-  GET_EMPLOYEE_BY_ID: `SELECT * FROM employees WHERE employee_id = ?`,
-  DELETE_EMPLOYEE: `DELETE FROM employees WHERE employee_id = ?
-  `,
   VERIFY_RESET_TOKEN: `
     SELECT email 
     FROM password_resets 
@@ -64,6 +65,9 @@ WHERE e.first_name LIKE ?
     SET password = ? 
     WHERE email = ?;
   `,
+  
+  UPDATE_EMPLOYEE_PHOTO: 'UPDATE employees SET photo_url = ? WHERE employee_id = ?',
+
   GET_EMPLOYEE: `
   SELECT 
       e.employee_id, 
@@ -82,7 +86,8 @@ WHERE e.first_name LIKE ?
       e.role,
       e.gender,
       e.marital_status,
-      e.spouse_name, 
+      e.spouse_name,
+      e.marriage_date, 
       e.father_name, 
       e.mother_name
   FROM employees e
