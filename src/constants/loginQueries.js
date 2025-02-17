@@ -167,5 +167,94 @@ GROUP BY
   FROM employees e
   WHERE e.employee_id = ?;
 `,
+
+
+
 GET_SIDEBAR_MENU: `SELECT label, path, icon FROM sidebar_menu WHERE FIND_IN_SET(?, roles)`,
+
+GET_EMPLOYEE_COUNT_BY_DEPARTMENT: `
+  SELECT 
+    d.name AS department_name, 
+    COUNT(CASE WHEN e.gender = 'Male' THEN 1 END) AS men,
+    COUNT(CASE WHEN e.gender = 'Female' THEN 1 END) AS women
+  FROM 
+    employees e
+  LEFT JOIN 
+    departments d 
+  ON 
+    e.department_id = d.id
+  GROUP BY 
+    d.name;
+`,
+
+GET_ATTENDANCE_STATUS_COUNT: `
+  
+  
+SELECT 
+    (SELECT COUNT(DISTINCT employee_id) FROM sukalpadata.employees) AS totalEmployees,
+    (SELECT COUNT(DISTINCT employee_id) FROM sukalpadata.attendance WHERE DATE(date) = CURDATE()) AS present,
+    (SELECT COUNT(DISTINCT employee_id) FROM sukalpadata.employees 
+     WHERE employee_id NOT IN (SELECT DISTINCT employee_id FROM sukalpadata.attendance WHERE DATE(date) = CURDATE())) AS absent,
+    (SELECT COUNT(DISTINCT employee_id) FROM sukalpadata.leavequeries 
+     WHERE status = 'Approved' AND DATE(start_date) <= CURDATE() AND DATE(end_date) >= CURDATE()) AS approved_leave;
+
+`,
+
+GET_EMPLOYEE_LOGIN_DATA_COUNT:
+`SELECT 
+    DATE_FORMAT(ld.login_time, '%h:%i %p') AS label,
+    COUNT(ld.id) AS daily,
+    (SELECT COUNT(*) FROM login_data 
+     WHERE login_time >= NOW() - INTERVAL 7 DAY 
+     AND DATE_FORMAT(login_time, '%h:%i %p') = DATE_FORMAT(ld.login_time, '%h:%i %p')) AS weekly,
+    (SELECT COUNT(*) FROM login_data 
+     WHERE login_time >= NOW() - INTERVAL 30 DAY 
+     AND DATE_FORMAT(login_time, '%h:%i %p') = DATE_FORMAT(ld.login_time, '%h:%i %p')) AS monthly
+FROM login_data ld
+GROUP BY label, ld.login_time
+ORDER BY ld.login_time;`,
+
+GET_EMPLOYEE_SALARY_RANGE:
+`SELECT 
+    CASE 
+        WHEN salary < 30000 THEN '<30k'
+        WHEN salary BETWEEN 30000 AND 50000 THEN '30k-50k'
+        WHEN salary BETWEEN 50001 AND 70000 THEN '50k-70k'
+        WHEN salary BETWEEN 70001 AND 90000 THEN '70k+'
+        ELSE '90k+'
+    END AS salary_range,
+    COUNT(*) AS count
+FROM sukalpadata.employees
+GROUP BY salary_range
+ORDER BY FIELD(salary_range, '<30k', '30k-50k', '50k-70k', '70k+', '90k+');
+
+`
+,
+GET_EMPLOYEE_BY_DEPARTMENT: `
+        SELECT 
+            d.name AS department_name, 
+            COUNT(CASE WHEN e.gender = 'Male' THEN 1 END) AS men,
+            COUNT(CASE WHEN e.gender = 'Female' THEN 1 END) AS women
+        FROM 
+            employees e
+        LEFT JOIN 
+            departments d ON e.department_id = d.id
+        GROUP BY 
+            d.name;
+    `,
+
+
+
+GET_EMPLOYEE_PAYROLL:
+`SELECT
+  SUM(CASE WHEN card_label = 'Previous Month Credit' THEN card_value ELSE 0 END) AS total_previous_month_credit,
+  SUM(CASE WHEN card_label = 'Previous Month Expenses' THEN card_value ELSE 0 END) AS total_previous_month_expenses,
+  SUM(CASE WHEN card_label = 'Previous Month Salary' THEN card_value ELSE 0 END) AS total_previous_month_salary
+FROM employee_payrolldata
+WHERE card_label IN ('Previous Month Credit', 'Previous Month Expenses', 'Previous Month Salary');
+
+`
+,
+
+
 };
