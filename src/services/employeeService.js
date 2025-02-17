@@ -34,6 +34,32 @@ const sendResetEmail = async (employeeEmail) => {
   }
 };
 
+/**
+ * Update Employee Photo.
+ */
+exports.updateEmployeePhoto = async (employeeId, photoUrl) => {
+  try {
+    // Validate inputs to prevent SQL injection
+    if (!employeeId || !photoUrl) {
+      throw new Error('Invalid input');
+    }
+
+    // Parameterized query to prevent SQL injection
+    const [result] = await db.execute(
+      queries.UPDATE_EMPLOYEE_PHOTO,
+      [photoUrl, employeeId]
+    );
+
+    if (result.affectedRows === 0) {
+      throw new Error('Employee not found');
+    }
+
+    return { message: 'Employee photo updated successfully' };
+  } catch (error) {
+    console.error('Error in updateEmployeePhoto:', error.message);
+    throw error;
+  }
+};
 
 /**
  * Add a new employee and send a password reset email.
@@ -54,7 +80,6 @@ exports.addEmployee = async (employeeData) => {
   };
 
   const temporaryPassword = generateTemporaryPassword();
-
   const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
 
   const params = [
@@ -67,7 +92,7 @@ exports.addEmployee = async (employeeData) => {
     employeeData.gender || '',
     employeeData.marital_status || '',
     employeeData.spouse_name || '',
-    employeeData.marriage_date || '',
+    employeeData.marriage_date || null,
     employeeData.address || null,
     employeeData.phone_number || '',
     employeeData.father_name || null,
@@ -81,51 +106,13 @@ exports.addEmployee = async (employeeData) => {
   ];
 
   const [result] = await db.execute(queries.ADD_EMPLOYEE, params);
-
   await sendResetEmail(employeeData.email);
 
   return result;
 };
 
 /**
- * Service to search employees based on search criteria.
- */
-exports.searchEmployees = async (search, fromDate, toDate) => {
-  try {
-    let query;
-    let params = [];
-
-    if (search) {
-      query = queries.SEARCH_EMPLOYEES;
-      params = [`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`];
-    } else {
-      query = queries.GET_ALL_EMPLOYEES;
-    }
-
-    if (fromDate) {
-      query += ' AND created_at >= ?';
-      params.push(fromDate);
-    }
-
-    if (toDate) {
-      query += ' AND created_at <= ?';
-      params.push(toDate);
-    }
-
-    console.log('Executing query:', query);
-    console.log('With params:', params);
-
-    const [rows] = await db.execute(query, params);
-    return rows;
-  } catch (error) {
-    console.error('Error fetching employees from database:', error);
-    throw new Error('Error fetching employees from database');
-  }
-};
-
-
-/**
- * Edit employee details.
+ * Edit employee details with safety checks for SQL injection.
  */
 exports.editEmployee = async (employeeId, updatedData) => {
   const params = [];
@@ -170,22 +157,6 @@ exports.editEmployee = async (employeeId, updatedData) => {
   if (updatedData.pan_number) {
     updates.push("pan_number = ?");
     params.push(updatedData.pan_number);
-  }
-  if (updatedData.gender) {
-    updates.push("gender = ?");
-    params.push(updatedData.gender);
-  }
-  if (updatedData.marital_status) {
-    updates.push("marital_status = ?");
-    params.push(updatedData.marital_status);
-  }
-  if (updatedData.spouse_name) {
-    updates.push("spouse_name = ?");
-    params.push(updatedData.spouse_name);
-  }
-  if (updatedData.marriage_date) {
-    updates.push("marriage_date = ?");
-    params.push(updatedData.marriage_date);
   }
   if (updatedData.position) {
     updates.push("position = ?");
@@ -235,6 +206,45 @@ exports.editEmployee = async (employeeId, updatedData) => {
     throw error;
   }
 };
+
+
+
+/**
+ * Service to search employees based on search criteria.
+ */
+exports.searchEmployees = async (search, fromDate, toDate) => {
+  try {
+    let query;
+    let params = [];
+
+    if (search) {
+      query = queries.SEARCH_EMPLOYEES;
+      params = [`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`];
+    } else {
+      query = queries.GET_ALL_EMPLOYEES;
+    }
+
+    if (fromDate) {
+      query += ' AND created_at >= ?';
+      params.push(fromDate);
+    }
+
+    if (toDate) {
+      query += ' AND created_at <= ?';
+      params.push(toDate);
+    }
+
+    console.log('Executing query:', query);
+    console.log('With params:', params);
+
+    const [rows] = await db.execute(query, params);
+    return rows;
+  } catch (error) {
+    console.error('Error fetching employees from database:', error);
+    throw new Error('Error fetching employees from database');
+  }
+};
+
 
 /**
  * Deactivate an employee by setting status to 'Inactive'.

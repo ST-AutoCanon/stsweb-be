@@ -149,7 +149,7 @@ GROUP BY
   //Query to fetch employee dashboard statistics
   GET_EMPLOYEE_DASHBOARD: `
   SELECT 
-    CONCAT(e.first_name, ' ', e.last_name) AS name, e.employee_id, e.gender, e.department_id,
+    CONCAT(e.first_name, ' ', e.last_name) AS name, e.employee_id, e.gender, e.department_id, e.photo_url,
     e.position,
     e.salary AS salary,
     (SELECT COUNT(*) 

@@ -40,10 +40,8 @@ router.get('/departments', getDepartmentsHandler);
 
 router.get('/uploads/:filename', (req, res) => {
     const apiKey = req.headers['x-api-key'];
-    const authToken = req.headers['authorization'];
-
-    if (!apiKey || !authToken) {
-        return res.status(403).json({ message: "API key and authentication required" });
+    if (!apiKey) {
+        return res.status(403).json({ message: "API key is required" });
     }
 
     const filePath = path.join(__dirname, '../uploads', req.params.filename);

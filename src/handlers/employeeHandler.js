@@ -1,14 +1,27 @@
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const upload = require('../utils/multerConfig')
 const employeeService = require('../services/employeeService');
 const ErrorHandler = require('../utils/errorHandler');
 
-/**
- * Handler to add an employee and send password reset link through email.
- */
+
+// Update the addEmployee Handler to handle file upload
 exports.addEmployee = async (req, res) => {
   try {
     const employeeData = req.body;
+    console.log(employeeData);
+
+    // Get photo URL if uploaded
+    if (req.file) {
+      employeeData.photo_url = `photos/${req.file.filename}`;
+    }
+
     const newEmployee = await employeeService.addEmployee(employeeData);
-    return res.status(201).json(ErrorHandler.generateSuccessResponse(201, "Employee added successfully. Reset email sent.", { data: employeeData })
+    return res.status(201).json(
+      ErrorHandler.generateSuccessResponse(201, "Employee added successfully. Reset email sent.", {
+        data: employeeData,
+      })
     );
   } catch (error) {
     console.log(error);
@@ -44,7 +57,6 @@ exports.searchEmployees = async (req, res) => {
   }
 };
 
-
 /**
  * Handler to edit an employee.
  */
@@ -52,7 +64,29 @@ exports.editEmployee = async (req, res) => {
   try {
     const employeeId = req.params.employeeId;
     const updatedData = req.body;
-    await employeeService.editEmployee(employeeId, updatedData);
+
+    // Check if a new photo is uploaded
+    if (req.file) {
+      updatedData.photo_url = `photos/${req.file.filename}`;
+
+      // Fetch the existing employee to get the old photo URL
+      const existingEmployee = await employeeService.getEmployee(employeeId);
+
+      // Update employee with new photo URL first
+      await employeeService.editEmployee(employeeId, updatedData);
+
+      // Delete the old photo only if the new one is successfully saved
+      if (existingEmployee && existingEmployee.photo_url) {
+        const oldPhotoPath = path.join(__dirname, '../../', existingEmployee.photo_url);
+        if (fs.existsSync(oldPhotoPath)) {
+          fs.unlinkSync(oldPhotoPath);
+        }
+      }
+    } else {
+      // If no new photo is uploaded, update other data
+      await employeeService.editEmployee(employeeId, updatedData);
+    }
+
     return res.status(200).json(
       ErrorHandler.generateSuccessResponse(200, 'Employee updated successfully.')
     );
@@ -63,6 +97,8 @@ exports.editEmployee = async (req, res) => {
     );
   }
 };
+
+
 
 /**
  * Handler to deactivate an employee.

@@ -125,6 +125,7 @@ return {
         gender: employee.gender,
         department_id: employee.department_id,
         salary: employee.salary,
+        photoUrl: employee.photo_url,
         attendance_count: employee.attendance_count,
         leave_queries_count: employee.leave_queries_count,
         attendance_breakdown: {

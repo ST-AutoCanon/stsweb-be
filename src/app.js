@@ -4,6 +4,7 @@ const bodyParser = require("body-parser");
 const cors = require("cors");
 require("dotenv").config();
 const path = require("path");
+const session = require('express-session');
 
 const holidayRoutes = require("./routes/holidayRoutes");
 const loginRoutes = require("./routes/login");
@@ -14,13 +15,13 @@ const resetPasswordRoutes = require("./routes/resetPassword");
 const forgotPasswordRoutes = require("./routes/forgotPassword");
 const addDepartmentRoutes = require("./routes/addDepartment");
 const apiKeyMiddleware = require("./middleware/apiKeyMiddleware");
-const sessionMiddleware = require("./middleware/sessionMiddleware");
+const idleTimeout = require('./middleware/idleTimeout');
 
-const { initializeSocket } = require("./socket"); // Import socket initialization function
+const { initializeSocket } = require("./socket");
 
 const app = express();
 const server = http.createServer(app);
-const io = initializeSocket(server); // Initialize socket.io
+const io = initializeSocket(server); 
 
 app.use(
   cors({
@@ -30,9 +31,20 @@ app.use(
   })
 );
 
-// Apply middlewares
+// Apply API key middleware first
 app.use(apiKeyMiddleware);
-app.use(sessionMiddleware);
+
+// Initialize session before idleTimeout
+app.use(session({
+  secret: process.env.SESSION_SECRET,
+  resave: false,
+  saveUninitialized: true,
+  cookie: { secure: false }
+}));
+
+// Apply idleTimeout after session is initialized
+app.use(idleTimeout);
+
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
