@@ -52,8 +52,6 @@ WHERE e.first_name LIKE ?
    OR e.employee_id LIKE ? 
    OR d.name LIKE ?
 `,
-
-  GET_EMPLOYEE_BY_ID: `SELECT * FROM employees WHERE employee_id = ?`,
   
 UPDATE_EMPLOYEE_STATUS: `UPDATE employees SET status = 'Inactive' WHERE employee_id = ?`,
 
@@ -67,6 +65,9 @@ UPDATE_EMPLOYEE_STATUS: `UPDATE employees SET status = 'Inactive' WHERE employee
     SET password = ? 
     WHERE email = ?;
   `,
+  
+  UPDATE_EMPLOYEE_PHOTO: 'UPDATE employees SET photo_url = ? WHERE employee_id = ?',
+
   GET_EMPLOYEE: `
   SELECT 
       e.employee_id, 
@@ -85,7 +86,8 @@ UPDATE_EMPLOYEE_STATUS: `UPDATE employees SET status = 'Inactive' WHERE employee
       e.role,
       e.gender,
       e.marital_status,
-      e.spouse_name, 
+      e.spouse_name,
+      e.marriage_date, 
       e.father_name, 
       e.mother_name
   FROM employees e
