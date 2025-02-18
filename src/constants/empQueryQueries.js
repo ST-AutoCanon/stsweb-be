@@ -81,7 +81,7 @@ module.exports = {
   FROM 
     employees 
   WHERE 
-    role = 'Manager' AND department_id = ?
+    role = 'Team Lead' AND department_id = ?
   `,
   
   FETCH_THREADS: `
