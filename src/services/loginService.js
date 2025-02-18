@@ -125,6 +125,7 @@ return {
         gender: employee.gender,
         department_id: employee.department_id,
         salary: employee.salary,
+        photoUrl: employee.photo_url,
         attendance_count: employee.attendance_count,
         leave_queries_count: employee.leave_queries_count,
         attendance_breakdown: {
@@ -135,6 +136,99 @@ return {
       };
     } catch (err) {
       throw new Error("Error fetching employee dashboard data");
+    }
+  }
+
+/**
+   * Fetch sidebar menu items based on role.
+   * 
+   * @param {string} role - User role.
+   * @returns {Promise<Array>} List of sidebar menu items.
+   */
+static async fetchSidebarMenu(role) {
+  const [menuItems] = await db.execute(queries.GET_SIDEBAR_MENU, [role]);
+  return menuItems;
+}
+
+static async getAttendanceStatusCount() {
+    try {
+      console.log("Executing SQL Query: ", queries.GET_ATTENDANCE_STATUS_COUNT);
+      const [rows] = await db.execute(queries.GET_ATTENDANCE_STATUS_COUNT);
+      
+      console.log("Query Result:", rows);
+      
+      if (!rows || rows.length === 0) {
+        return { totalEmployees: 0, categories: [] };
+      }
+      
+      const { totalEmployees, present, sick_leave, absent } = rows[0];
+      
+      return {
+        totalEmployees: totalEmployees || 0,
+        categories: [
+          { label: "Present", count: present || 0, color: "#004DC6" },
+          { label: "Sick Leave", count: sick_leave || 0, color: "#438CFF" },
+          { label: "Absent", count: absent || 0, color: "#C7DDFF" }
+        ]
+      };
+    } catch (error) {
+      console.error("Error fetching attendance status count:", error);
+      throw new Error("Failed to fetch attendance status count: " + error.message);
+    }
+  }
+
+
+  static async fetchEmployeeLoginDataCount() {
+    try {
+      const [rows] = await db.execute(queries.GET_EMPLOYEE_LOGIN_DATA_COUNT);
+      return rows;
+    } catch (error) {
+      console.error("Error fetching login data count:", error);
+      throw new Error("Failed to fetch login data count");
+    }
+  }
+
+  static async fetchSalaryRanges() {
+    try {
+      const [rows] = await db.execute(queries.GET_EMPLOYEE_SALARY_RANGE);
+      
+      return {
+        labels: rows.map(row => row.salary_range),
+        datasets: [
+          {
+            label: "Salaries",
+            data: rows.map(row => row.count),
+            backgroundColor: ["#82DAFE", "#00A1DA", "#0078CF", "#012FBA", "#011F7B"],
+          },
+        ],
+      };
+    } catch (error) {
+      console.error("Error fetching salary ranges:", error);
+      throw new Error("Failed to fetch salary ranges");
+    }
+  }
+
+  static async getEmployeeCountByDepartment() {
+    try {
+      const [rows] = await db.execute(queries.GET_EMPLOYEE_BY_DEPARTMENT);
+      return rows;
+    } catch (error) {
+      console.error("Error fetching employee count by department:", error);
+      throw new Error("Failed to fetch employee count by department");
+    }
+  }
+
+  static async getEmployeePayrollData() {
+    try {
+      const [rows] = await db.execute(queries.GET_EMPLOYEE_PAYROLL);
+      return {
+        total_previous_month_credit: rows[0]?.total_previous_month_credit || 0,
+        total_previous_month_expenses: rows[0]?.total_previous_month_expenses || 0,
+        total_previous_month_salary: rows[0]?.total_previous_month_salary || 0,
+      };
+    } catch (error) {
+      console.error("Error fetching employee payroll data:", error);
+      throw new Error("Failed to fetch payroll data");
     }
   }
 }
