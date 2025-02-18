@@ -17,6 +17,7 @@ const addDepartmentRoutes = require("./routes/addDepartment");
 const apiKeyMiddleware = require("./middleware/apiKeyMiddleware");
 const idleTimeout = require('./middleware/idleTimeout');
 
+
 const { initializeSocket } = require("./socket");
 
 const app = express();

@@ -149,7 +149,7 @@ static async fetchSidebarMenu(role) {
   const [menuItems] = await db.execute(queries.GET_SIDEBAR_MENU, [role]);
   return menuItems;
 }
-}
+
 static async getAttendanceStatusCount() {
     try {
       console.log("Executing SQL Query: ", queries.GET_ATTENDANCE_STATUS_COUNT);
