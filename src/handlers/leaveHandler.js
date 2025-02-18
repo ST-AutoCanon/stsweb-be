@@ -7,18 +7,7 @@ class LeaveHandler {
    */
   static async getLeaveQueries(req, res) {
     try {
-      const userRole = req.user.role;
-      console.log("userRole=", userRole);
-      const allowedRoles = ["Admin"];
-
-      if (!allowedRoles.includes(userRole)) {
-        return res.status(403).json(
-          ErrorHandler.generateErrorResponse(
-            403,
-            `Forbidden: Your role (${userRole}) does not have permission to access this resource.`
-          )
-        );
-      }
+      
 
       const { status = "", search = "", from_date = "", to_date = "" } = req.query;
 
@@ -54,17 +43,7 @@ class LeaveHandler {
    */
   static async updateLeaveRequest(req, res) {
     try {
-      const userRole = req.user.role;
-      const allowedRoles = ["Admin"];
-
-      if (!allowedRoles.includes(userRole)) {
-        return res.status(403).json(
-          ErrorHandler.generateErrorResponse(
-            403,
-            `Forbidden: Your role (${userRole}) does not have permission to access this resource.`
-          )
-        );
-      }
+     
 
       const { leaveId } = req.params;
       const { status, comments } = req.body;
