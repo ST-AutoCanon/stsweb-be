@@ -22,6 +22,21 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 exports.upload = upload; // Export the upload middleware
 
+// Handler for starting a new thread (query)
+exports.startThread = async (req, res) => {
+  const { sender_id, sender_role, department_id, subject, message } = req.body;
+  console.log(req.body);
+  try {
+    const threadId = await EmployeeQueries.startThread(sender_id, sender_role, department_id, subject, message);
+    const response = ErrorHandler.generateSuccessResponse(201, "Thread started successfully!", { threadId });
+    res.status(201).send(response);
+  } catch (error) {
+    console.error(error);
+    const response = ErrorHandler.generateErrorResponse(500, "Failed to start thread.");
+    res.status(500).send(response);
+  }
+};
+
 // Handler for adding a message with an attachment
 exports.addMessage = async (req, res) => {
   try {
@@ -64,22 +79,6 @@ exports.addMessage = async (req, res) => {
   } catch (error) {
     console.error("Error adding message:", error);
     res.status(500).json(ErrorHandler.generateErrorResponse(500, "Failed to add message"));
-  }
-};
-
-
-
-// Handler for starting a new thread (query)
-exports.startThread = async (req, res) => {
-  const { sender_id, department_id, subject, question } = req.body;
-  try {
-    const threadId = await EmployeeQueries.startThread(sender_id, department_id, subject, question);
-    const response = ErrorHandler.generateSuccessResponse(201, "Thread started successfully!", { threadId });
-    res.status(201).send(response);
-  } catch (error) {
-    console.error(error);
-    const response = ErrorHandler.generateErrorResponse(500, "Failed to start thread.");
-    res.status(500).send(response);
   }
 };
 

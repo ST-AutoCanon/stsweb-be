@@ -3,19 +3,23 @@ const queries = require("../constants/empQueryQueries");
 
 class EmployeeQueries {
   // Start a new thread for an employee query
-  static async startThread(sender_id, department_id, subject, question) {
-    // Get the department manager
+  static async startThread(sender_id, sender_role, department_id, subject, message) {
+    // Get the department team lead
     const [recipients] = await db.execute(queries.GET_MANAGER_BY_DEPARTMENT, [department_id]);
     
     if (!recipients || recipients.length === 0) {
-      throw new Error("No department manager found.");
+      throw new Error("No department team lead found.");
     }
 
     const recipient_id = recipients[0].employee_id;
+    console.log(recipient_id);
     const [result] = await db.execute(queries.CREATE_THREAD, [sender_id, recipient_id, subject, department_id]);
+    console.log(result);
     const threadId = result.insertId;
     
-    await db.execute(queries.ADD_MESSAGE, [threadId, sender_id, "employee", question, true, null]); // No attachment initially
+    await db.execute(queries.ADD_MESSAGE, [threadId, sender_id, sender_role, message, null]); // No attachment initially
+    console.log(queries.ADD_MESSAGE);
+    console.log(threadId, sender_id, sender_role, sender_role, message, true, null);
     return threadId;
   }
 
