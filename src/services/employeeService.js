@@ -118,12 +118,20 @@ exports.editEmployee = async (employeeId, updatedData) => {
   const params = [];
   const updates = [];
 
+  // Check if department needs to be updated and get the department ID by name
   if (updatedData.department) {
-    const [departmentResult] = await db.execute(queries.GET_DEPARTMENT_ID_BY_NAME, [updatedData.department]);
-    if (departmentResult.length === 0) {
-      throw new Error('Department not found');
+    if (updatedData.role !== 'Admin') {
+      const [departmentResult] = await db.execute(queries.GET_DEPARTMENT_ID_BY_NAME, [updatedData.department]);
+      if (departmentResult.length === 0) {
+        throw new Error('Department not found');
+      }
+      updatedData.department_id = departmentResult[0].id;
+      updates.push("department_id = ?");
+      params.push(updatedData.department_id);
+    } else {
+      // If Admin, remove the department_id to avoid updating it
+      delete updatedData.department_id;
     }
-    updatedData.department_id = departmentResult[0].id;
   }
 
   if (updatedData.first_name) {
@@ -174,10 +182,6 @@ exports.editEmployee = async (employeeId, updatedData) => {
     updates.push("role = ?");
     params.push(updatedData.role);
   }
-  if (updatedData.department_id) {
-    updates.push("department_id = ?");
-    params.push(updatedData.department_id);
-  }
   if (updatedData.father_name) {
     updates.push("father_name = ?");
     params.push(updatedData.father_name);
@@ -185,6 +189,22 @@ exports.editEmployee = async (employeeId, updatedData) => {
   if (updatedData.mother_name) {
     updates.push("mother_name = ?");
     params.push(updatedData.mother_name);
+  }
+  if (updatedData.gender) {
+    updates.push("gender = ?");
+    params.push(updatedData.gender);
+  }
+  if (updatedData.marital_status) {
+    updates.push("marital_status = ?");
+    params.push(updatedData.marital_status);
+  }
+  if (updatedData.spouse_name) {
+    updates.push("spouse_name = ?");
+    params.push(updatedData.spouse_name);
+  }
+  if (updatedData.marriage_date) {
+    updates.push("marriage_date = ?");
+    params.push(updatedData.marriage_date);
   }
 
   if (updates.length === 0) {
@@ -206,7 +226,6 @@ exports.editEmployee = async (employeeId, updatedData) => {
     throw error;
   }
 };
-
 
 
 /**
