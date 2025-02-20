@@ -151,31 +151,31 @@ static async fetchSidebarMenu(role) {
 }
 
 static async getAttendanceStatusCount() {
-    try {
+  try {
       console.log("Executing SQL Query: ", queries.GET_ATTENDANCE_STATUS_COUNT);
       const [rows] = await db.execute(queries.GET_ATTENDANCE_STATUS_COUNT);
-      
+
       console.log("Query Result:", rows);
-      
+
       if (!rows || rows.length === 0) {
-        return { totalEmployees: 0, categories: [] };
+          return { totalEmployees: 0, categories: [] };
       }
-      
-      const { totalEmployees, present, sick_leave, absent } = rows[0];
-      
+
+      const { totalEmployees, present, approved_leave, absent } = rows[0];
+
       return {
-        totalEmployees: totalEmployees || 0,
-        categories: [
-          { label: "Present", count: present || 0, color: "#004DC6" },
-          { label: "Sick Leave", count: sick_leave || 0, color: "#438CFF" },
-          { label: "Absent", count: absent || 0, color: "#C7DDFF" }
-        ]
+          totalEmployees: totalEmployees || 0,
+          categories: [
+              { label: "Present", count: present || 0, color: "#004DC6" },
+              { label: "Leave", count: approved_leave || 0, color: "#438CFF" },
+              { label: "Absent", count: absent || 0, color: "#C7DDFF" }
+          ]
       };
-    } catch (error) {
+  } catch (error) {
       console.error("Error fetching attendance status count:", error);
       throw new Error("Failed to fetch attendance status count: " + error.message);
-    }
   }
+}
 
 
   static async fetchEmployeeLoginDataCount() {
