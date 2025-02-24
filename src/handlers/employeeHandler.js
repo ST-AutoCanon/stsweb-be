@@ -12,7 +12,6 @@ exports.addEmployee = async (req, res) => {
     const employeeData = req.body;
     console.log(employeeData);
 
-    // Get photo URL if uploaded
     if (req.file) {
       employeeData.photo_url = `photos/${req.file.filename}`;
     }
@@ -29,12 +28,17 @@ exports.addEmployee = async (req, res) => {
       return res.status(400).json(
         ErrorHandler.generateErrorResponse(400, "Email already exists. Please try a different email.")
       );
+    } else if (error.code === "DUPLICATE_AADHAAR_PAN") {
+      return res.status(400).json(
+        ErrorHandler.generateErrorResponse(400, "Employee already exists. Please verify the details.")
+      );
     }
     return res.status(500).json(
       ErrorHandler.generateErrorResponse(500, "Failed to add employee and send email")
     );
   }
 };
+
 
 /**
  * Handler to fetch all employees or search employees based on the search query and date filters.
