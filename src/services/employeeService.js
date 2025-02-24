@@ -61,9 +61,6 @@ exports.updateEmployeePhoto = async (employeeId, photoUrl) => {
   }
 };
 
-/**
- * Add a new employee and send a password reset email.
- */
 exports.addEmployee = async (employeeData) => {
   let departmentId = null;
 
@@ -73,6 +70,16 @@ exports.addEmployee = async (employeeData) => {
       throw new Error('Department not found');
     }
     departmentId = departmentResult[0].id;
+  }
+
+  // Check for duplicate Aadhaar or PAN number
+  const [existingEmployee] = await db.execute(queries.CHECK_DUPLICATE_EMPLOYEE, [
+    employeeData.aadhaar_number,
+    employeeData.pan_number
+  ]);
+
+  if (existingEmployee.length > 0) {
+    throw { code: "DUPLICATE_AADHAAR_PAN", message: "Aadhaar or PAN number already exists." };
   }
 
   const generateTemporaryPassword = () => {

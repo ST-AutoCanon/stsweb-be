@@ -10,6 +10,7 @@ router.post('/admin/employees', upload.single('photo'), employeeHandler.addEmplo
 router.get('/admin/employees', employeeHandler.searchEmployees);
 router.put('/admin/employees/:employeeId', upload.single('photo'), employeeHandler.editEmployee);
 router.get('/employee/:employeeId', employeeHandler.getEmployee);
+router.put('/admin/employees/:employeeId/deactivate', employeeHandler.deactivateEmployee);
 
 router.get('/photos/:photoUrl', (req, res) => {
     const apiKey = req.headers['x-api-key'];
