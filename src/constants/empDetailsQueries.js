@@ -95,4 +95,65 @@ UPDATE_EMPLOYEE_STATUS: `UPDATE employees SET status = 'Inactive' WHERE employee
   LEFT JOIN departments d ON e.department_id = d.id
   WHERE e.employee_id = ?;
 `,
+
+
+
+GET_LEAVE_QUERIES_IN_DASHBOARD:
+`SELECT 
+    leave_type AS 'Leave Type', 
+    start_date AS 'Start Date', 
+    end_date AS 'End Date', 
+    H_F_day AS 'Half/Full Day', 
+    reason AS 'Reason', 
+    status AS 'Status', 
+    comments AS 'Comments'
+FROM leavequeries
+WHERE employee_id = ? 
+ORDER BY created_at DESC 
+LIMIT 5;
+`
+,
+
+
+
+
+GET_REIMBURSEMENT_STATS :`
+  SELECT 
+      -- Current Month Data
+      SUM(CASE WHEN status = 'Approved' 
+               AND MONTH(approved_date) = MONTH(CURRENT_DATE) 
+               AND YEAR(approved_date) = YEAR(CURRENT_DATE) THEN 1 ELSE 0 END) AS current_approved,
+      
+      SUM(CASE WHEN status = 'Pending' 
+               AND MONTH(created_at) = MONTH(CURRENT_DATE) 
+               AND YEAR(created_at) = YEAR(CURRENT_DATE) THEN 1 ELSE 0 END) AS current_pending,
+      
+      SUM(CASE WHEN status = 'Rejected' 
+               AND MONTH(created_at) = MONTH(CURRENT_DATE) 
+               AND YEAR(created_at) = YEAR(CURRENT_DATE) THEN 1 ELSE 0 END) AS current_rejected,
+      
+      COUNT(CASE WHEN MONTH(created_at) = MONTH(CURRENT_DATE) 
+                 AND YEAR(created_at) = YEAR(CURRENT_DATE) THEN 1 END) AS current_submitted,
+
+      -- Previous Month Data
+      SUM(CASE WHEN status = 'Approved' 
+               AND MONTH(approved_date) = MONTH(CURRENT_DATE - INTERVAL 1 MONTH) 
+               AND YEAR(approved_date) = YEAR(CURRENT_DATE - INTERVAL 1 MONTH) THEN 1 ELSE 0 END) AS prev_approved,
+      
+      SUM(CASE WHEN status = 'Pending' 
+               AND MONTH(created_at) = MONTH(CURRENT_DATE - INTERVAL 1 MONTH) 
+               AND YEAR(created_at) = YEAR(CURRENT_DATE - INTERVAL 1 MONTH) THEN 1 ELSE 0 END) AS prev_pending,
+      
+      SUM(CASE WHEN status = 'Rejected' 
+               AND MONTH(created_at) = MONTH(CURRENT_DATE - INTERVAL 1 MONTH) 
+               AND YEAR(created_at) = YEAR(CURRENT_DATE - INTERVAL 1 MONTH) THEN 1 ELSE 0 END) AS prev_rejected,
+
+      COUNT(CASE WHEN MONTH(created_at) = MONTH(CURRENT_DATE - INTERVAL 1 MONTH) 
+                 AND YEAR(created_at) = YEAR(CURRENT_DATE - INTERVAL 1 MONTH) THEN 1 END) AS prev_submitted
+
+  FROM reimbursement
+  WHERE employee_id = ?;
+`,
+
+
 };

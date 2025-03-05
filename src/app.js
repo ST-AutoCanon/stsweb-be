@@ -5,6 +5,8 @@ const cors = require("cors");
 require("dotenv").config();
 const path = require("path");
 const session = require('express-session');
+require("./services/punchCronService"); // Runs the cron job automatically
+
 
 const holidayRoutes = require("./routes/holidayRoutes");
 const loginRoutes = require("./routes/login");
@@ -16,6 +18,15 @@ const forgotPasswordRoutes = require("./routes/forgotPassword");
 const addDepartmentRoutes = require("./routes/addDepartment");
 const apiKeyMiddleware = require("./middleware/apiKeyMiddleware");
 const idleTimeout = require('./middleware/idleTimeout');
+
+///employeedashboardroutes////
+const attendanceRoutes = require("./routes/attendance_Routes");
+const empSessionRoutes =require("./routes/empSessionRoute")
+const reimbursementRoutes = require("./routes/reimbursementRoutes");
+const workDayRoutes = require("./routes/empWorkDay");
+const workHourSummaryRoutes = require('./routes/empWorkHour');
+const empLeaveQueryDashboard=require("./routes/empLeaveQueryDashboardRoutes")
+
 
 
 const { initializeSocket } = require("./socket");
@@ -58,6 +69,16 @@ app.use("/", employeeQueries);
 app.use("/", resetPasswordRoutes);
 app.use("/", forgotPasswordRoutes);
 app.use("/", addDepartmentRoutes);
+
+
+//Esmpdashboard Routes
+app.use("/attendance", attendanceRoutes);
+app.use("/", reimbursementRoutes);
+app.use("/", workDayRoutes);
+app.use("/", empSessionRoutes);
+app.use('/api', workHourSummaryRoutes);
+app.use("/",empLeaveQueryDashboard)
+
 
 
 const PORT = process.env.PORT;
