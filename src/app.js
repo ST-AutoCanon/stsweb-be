@@ -5,8 +5,7 @@ const cors = require("cors");
 require("dotenv").config();
 const path = require("path");
 const session = require('express-session');
-require("./services/punchCronService"); // Runs the cron job automatically
-
+require("./services/punchCronService"); // Runs the cron job automaticall
 
 const holidayRoutes = require("./routes/holidayRoutes");
 const loginRoutes = require("./routes/login");
@@ -26,6 +25,13 @@ const reimbursementRoutes = require("./routes/reimbursementRoutes");
 const workDayRoutes = require("./routes/empWorkDay");
 const workHourSummaryRoutes = require('./routes/empWorkHour');
 const empLeaveQueryDashboard=require("./routes/empLeaveQueryDashboardRoutes")
+
+//payrollroutes
+
+
+const salaryRoutes = require("./routes/salaryRoutes");
+const payrollRoutes = require("./routes/payrollRoutes");
+const bankDetailsRoutes = require("./routes/payrollRoutes"); // Ensure correct path
 
 
 
@@ -78,6 +84,15 @@ app.use("/", workDayRoutes);
 app.use("/", empSessionRoutes);
 app.use('/api', workHourSummaryRoutes);
 app.use("/",empLeaveQueryDashboard)
+
+
+
+app.use("/salary", salaryRoutes); // This means all salary routes are prefixed with "/salary"
+app.use("/api", payrollRoutes);
+
+app.use("/api", bankDetailsRoutes); // Make sure prefix matches your request
+
+app.use("/", workDayRoutes);
 
 
 
