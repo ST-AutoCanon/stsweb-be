@@ -95,7 +95,8 @@ class LeaveHandler {
    */
   static async submitLeaveRequestHandler(req, res) {
     try {
-      const { employeeId, startDate, endDate, h_f_day, reason, leavetype } = req.body;
+      const { employeeId, reason, leavetype, h_f_day, startDate, endDate} = req.body;
+      console.log("body", req.body);
 
       if (!employeeId || !startDate || !endDate || !h_f_day || !reason || !leavetype) {
         return res
@@ -146,7 +147,7 @@ class LeaveHandler {
       const leaveRequests = await LeaveService.getLeaveRequests(employeeId, from_date, to_date);
 
       return res.status(200).json(
-        ErrorHandler.generateSuccessResponse(
+        ErrorHandler.generateSuccessResponse(200,
           "Leave requests fetched successfully.",
           leaveRequests
         )
@@ -189,7 +190,7 @@ console.log("Received leaveId:", leaveId);
       });
 
       return res.status(200).json(
-        ErrorHandler.generateSuccessResponse(
+        ErrorHandler.generateSuccessResponse(200,
           "Leave request updated successfully.",
           updatedLeaveRequest
         )
@@ -227,6 +228,23 @@ console.log("Received leaveId:", leaveId);
       return res
         .status(500)
         .json(ErrorHandler.generateErrorResponse(500, err.message));
+    }
+  }
+
+  static async getLeaveRequestsForTeamLeadHandler(req, res) {
+    const { teamLeadId } = req.params;
+    console.log("id:", teamLeadId);
+    const filters = req.query;
+  
+    try {
+      const leaveRequests = await LeaveService.getLeaveQueriesForTeamLead(filters, teamLeadId);
+      return res.status(200).json(ErrorHandler.generateSuccessResponse(200, {
+        data: leaveRequests,
+      }));
+    } catch (err) {
+      console.log("Error fetching leave requests for team lead:", err);
+      console.error("Error fetching leave requests for team lead:", err.message);
+      return res.status(500).json({ message: "Failed to fetch leave requests for team lead." });
     }
   }
 }

@@ -27,10 +27,12 @@ module.exports = {
         leavequeries.id AS leave_id, 
         leavequeries.employee_id,
         leavequeries.leave_type,
+        leavequeries.H_F_day,
         leavequeries.reason, 
         leavequeries.status, 
         leavequeries.start_date, 
-        leavequeries.end_date, 
+        leavequeries.end_date,
+        leavequeries.comments, 
         leavequeries.created_at, 
         CONCAT(employees.first_name, ' ', employees.last_name) AS name,
         departments.name AS department_name
@@ -66,4 +68,32 @@ module.exports = {
           comments = ? 
       WHERE id = ?
     `,
+
+    // Fetch leave queries for a team lead's department
+    GET_EMPLOYEE_BY_ID: `
+    SELECT * FROM employees WHERE employee_id = ?
+  `,
+  GET_EMPLOYEES_BY_DEPARTMENT: `
+    SELECT employee_id FROM employees WHERE department_id = ?
+  `,
+  GET_LEAVE_QUERIES_FOR_TEAM: `
+    SELECT 
+      leavequeries.id AS leave_id, 
+      leavequeries.employee_id,
+      leavequeries.leave_type,
+      leavequeries.H_F_day,
+      leavequeries.reason, 
+      leavequeries.status, 
+      leavequeries.start_date, 
+      leavequeries.end_date,
+      leavequeries.comments, 
+      leavequeries.created_at, 
+      CONCAT(employees.first_name, ' ', employees.last_name) AS name,
+      departments.name AS department_name
+    FROM leavequeries
+    INNER JOIN employees ON leavequeries.employee_id = employees.employee_id
+    INNER JOIN departments ON employees.department_id = departments.id
+    WHERE 1=1  -- Placeholder for dynamic WHERE conditions
+  `
+
   };  
