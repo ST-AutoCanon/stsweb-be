@@ -9,6 +9,6 @@ router.get('/admin/leave', LeaveHandler.getLeaveQueries);
 router.put('/admin/leave/:leaveId', LeaveHandler.updateLeaveRequest);
 router.put("/edit/:leaveId", LeaveHandler.editLeaveRequestHandler);
 router.delete("/cancel/:leaveId/:employeeId", LeaveHandler.cancelLeaveRequestHandler);
-
+router.get("/team-lead/:teamLeadId", LeaveHandler.getLeaveRequestsForTeamLeadHandler);
 
 module.exports = router;

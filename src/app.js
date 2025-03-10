@@ -21,7 +21,9 @@ const idleTimeout = require('./middleware/idleTimeout');
 ///employeedashboardroutes////
 const attendanceRoutes = require("./routes/attendance_Routes");
 const empSessionRoutes =require("./routes/empSessionRoute")
-const reimbursementRoutes = require("./routes/reimbursementRoutes");
+const dashboardReimbursementRoutes = require("./routes/dashboardReimbursementRoutes");
+
+
 const workDayRoutes = require("./routes/empWorkDay");
 const workHourSummaryRoutes = require('./routes/empWorkHour');
 const empLeaveQueryDashboard=require("./routes/empLeaveQueryDashboardRoutes")
@@ -33,7 +35,8 @@ const salaryRoutes = require("./routes/salaryRoutes");
 const payrollRoutes = require("./routes/payrollRoutes");
 const bankDetailsRoutes = require("./routes/payrollRoutes"); // Ensure correct path
 
-
+//reimbursement 
+const reimbursementRoutes = require("./routes/reimbursementRoute");
 
 const { initializeSocket } = require("./socket");
 
@@ -75,11 +78,12 @@ app.use("/", employeeQueries);
 app.use("/", resetPasswordRoutes);
 app.use("/", forgotPasswordRoutes);
 app.use("/", addDepartmentRoutes);
+app.use("/", reimbursementRoutes);
 
 
 //Esmpdashboard Routes
 app.use("/attendance", attendanceRoutes);
-app.use("/", reimbursementRoutes);
+app.use("/", dashboardReimbursementRoutes);
 app.use("/", workDayRoutes);
 app.use("/", empSessionRoutes);
 app.use('/api', workHourSummaryRoutes);

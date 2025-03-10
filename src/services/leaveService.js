@@ -96,9 +96,11 @@ const updateLeaveRequest = async ({ leaveId, status, comments = null }) => {
 const submitLeaveRequest = async ({ employeeId, startDate, endDate, h_f_day, reason, leavetype }) => {
   try {
     const query = queries.INSERT_LEAVE_REQUEST;
+    console.log(query);
     const params = [employeeId, startDate, endDate, h_f_day, reason, leavetype];
-
+    console.log(params);
     const [result] = await db.execute(query, params);
+    console.log(result);
 
     return {
       id: result.insertId,
@@ -236,6 +238,90 @@ const cancelLeaveRequest = async (leaveId, employeeId) => {
   }
 };
 
+/**
+ * Fetch leave queries for a team lead's department.
+ * 
+ * @param {Object} filters - Filters to narrow down results.
+ * @param {string} filters.status - Filter by leave status (e.g., Approved, Rejected).
+ * @param {string} filters.search - Search by employee ID, reason, or employee name.
+ * @param {string} filters.from_date - Filter by leave start date (inclusive).
+ * @param {string} filters.to_date - Filter by leave end date (inclusive).
+ * @param {string} teamLeadId - ID of the team lead.
+ * @returns {Promise<Object[]>} Leave query records that match the filters.
+ */
+const constructWhereClause = (filters, employeeIds) => {
+  const { status, search, from_date, to_date } = filters;
+  const whereConditions = [];
+  const params = [];
+
+  if (status) {
+    whereConditions.push("leavequeries.status = ?");
+    params.push(status);
+  }
+
+  if (search) {
+    whereConditions.push(`
+      (leavequeries.employee_id LIKE ? OR 
+      leavequeries.reason LIKE ? OR 
+      CONCAT(employees.first_name, ' ', employees.last_name) LIKE ?)
+    `);
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+  }
+
+  if (from_date) {
+    whereConditions.push("leavequeries.start_date >= ?");
+    params.push(from_date);
+  }
+
+  if (to_date) {
+    whereConditions.push("leavequeries.end_date <= ?");
+    params.push(to_date);
+  }
+
+  // Filter by team members (employeeIds from the team)
+  if (employeeIds.length > 0) {
+    whereConditions.push(`leavequeries.employee_id IN (${employeeIds.map(() => '?').join(', ')})`);
+    params.push(...employeeIds);
+  }
+
+  return { whereConditions, params };
+};
+
+const getLeaveQueriesForTeamLead = async (filters = {}, teamLeadId) => {
+  try {
+    // Get the department of the team lead
+    const [teamLead] = await db.execute(queries.GET_EMPLOYEE_BY_ID, [teamLeadId]);
+
+    if (teamLead.length === 0) {
+      throw new Error("Team lead not found.");
+    }
+
+    const departmentId = teamLead[0].department_id;
+
+    // Get all employees in the same department
+    const [teamMembers] = await db.execute(queries.GET_EMPLOYEES_BY_DEPARTMENT, [departmentId]);
+
+    if (teamMembers.length === 0) {
+      throw new Error("No team members found in the same department.");
+    }
+
+    const employeeIds = teamMembers.map(member => member.employee_id);
+
+    // Construct WHERE clause dynamically based on filters
+    const { whereConditions, params } = constructWhereClause(filters, employeeIds);
+
+    // If there are conditions, append them to the base query
+    const query = queries.GET_LEAVE_QUERIES_FOR_TEAM + (whereConditions.length ? ' AND ' + whereConditions.join(' AND ') : '');
+
+    const [rows] = await db.execute(query, params);
+    return rows;
+  } catch (err) {
+    console.log("Error fetching leave queries for team lead:", err);
+    console.error("Error fetching leave queries for team lead:", err.message);
+    throw new Error("Failed to fetch leave queries for team lead.");
+  }
+};
+
 module.exports = {
   getLeaveQueries,
   updateLeaveRequest,
@@ -243,4 +329,5 @@ module.exports = {
   getLeaveRequests,
   editLeaveRequest,
   cancelLeaveRequest,
+  getLeaveQueriesForTeamLead,
 };
