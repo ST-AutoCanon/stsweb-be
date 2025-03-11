@@ -47,6 +47,8 @@ exports.searchEmployees = async (req, res) => {
   try {
     const { search, fromDate, toDate } = req.query;
 
+    console.log(fromDate, toDate);
+
     const employees = await employeeService.searchEmployees(search, fromDate, toDate);
 
     return res
