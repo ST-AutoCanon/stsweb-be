@@ -12,6 +12,7 @@ const loginRoutes = require("./routes/login");
 const leaveRoutes = require("./routes/leave");
 const employeeRoutes = require("./routes/employee");
 const employeeQueries = require("./routes/employeeQueries");
+const projects = require("./routes/project");
 const resetPasswordRoutes = require("./routes/resetPassword");
 const forgotPasswordRoutes = require("./routes/forgotPassword");
 const addDepartmentRoutes = require("./routes/addDepartment");
@@ -49,6 +50,7 @@ app.use(
     origin: process.env.FRONTEND_URL,
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization", "x-api-key"],
+    credentials: true
   })
 );
 
@@ -59,8 +61,13 @@ app.use(apiKeyMiddleware);
 app.use(session({
   secret: process.env.SESSION_SECRET,
   resave: false,
-  saveUninitialized: true,
-  cookie: { secure: false }
+  saveUninitialized: false,
+  cookie: {
+    secure: false,
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000,
+    sameSite: "lax"
+  }
 }));
 
 // Apply idleTimeout after session is initialized
@@ -73,6 +80,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use("/", holidayRoutes);
 app.use("/", loginRoutes);
 app.use("/", leaveRoutes);
+app.use("/", projects);
 app.use("/", employeeRoutes);
 app.use("/", employeeQueries);
 app.use("/", resetPasswordRoutes);

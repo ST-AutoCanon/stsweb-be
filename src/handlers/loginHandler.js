@@ -9,22 +9,19 @@ class LoginHandler {
   static async login(req, res) {
     try {
       const { email, password } = req.body;
-
+  
       // Fetch user by email
       const user = await LoginService.fetchUserByEmail(email);
       if (!user) {
         return res.status(401).json(ErrorHandler.generateErrorResponse(401, "Invalid credentials"));
       }
-
+  
       // Validate password
       const isPasswordValid = await bcrypt.compare(password, user.password);
       if (!isPasswordValid) {
         return res.status(401).json(ErrorHandler.generateErrorResponse(401, "Invalid credentials"));
       }
-
-      // Store last active time (optional: you can store it in DB if needed)
-      req.session.lastActive = Date.now();
-
+  
       // Fetch dashboard data based on role
       const roleToDashboardFunction = {
         Admin: LoginService.fetchAdminDashboard,
@@ -32,33 +29,49 @@ class LoginHandler {
       };
       const dashboardFunction = roleToDashboardFunction[user.role] || LoginService.fetchEmployeeDashboard;
       const dashboard = await dashboardFunction(user.employee_id);
-
+  
       // Fetch sidebar menu based on role
       const sidebarMenu = await LoginService.fetchSidebarMenu(user.role);
-      
+  
       const attendanceCount = await LoginService.getAttendanceStatusCount(); // Attendance Status
       const loginDataCount = await LoginService.fetchEmployeeLoginDataCount(); // Login Data Count
       const employeeCountByDepartment = await LoginService.getEmployeeCountByDepartment(); // Employee Count
-
-      return res.status(200).json({
-        status: "success",
-        code: 200,
-        message: {
-          role: user.role,
-          name: user.name,
-          gender: user.gender,
-          dashboard,
-          sidebarMenu,
-          attendanceCount, // Include attendance count
-          loginDataCount,  // Include login data count
-          employeeCountByDepartment, // Include employee count by department
-        },
-      });
+  
+      // Now set session variables
+      req.session.lastActive = Date.now();
+      console.log("User role from DB:", user.role);
+      req.session.userRole = user.role;
+      console.log("Session ID:", req.sessionID);
+  
+      // Save session then return the response
+      req.session.save((err) => {
+        if (err) {
+          console.error("Session save error:", err);
+        } else {
+          console.log("Session saved with userRole:", req.session.userRole);
+        }
+        return res.status(200).json({
+          status: "success",
+          code: 200,
+          message: {
+            role: user.role,
+            name: user.name,
+            gender: user.gender,
+            dashboard,
+            sidebarMenu,
+            attendanceCount,
+            loginDataCount,
+            employeeCountByDepartment,
+          },
+        });
+      });      
     } catch (err) {
       console.error(err);
       return res.status(500).json(ErrorHandler.generateErrorResponse(500, "Internal server error"));
     }
   }
+
+  
   /**
    * Handler to get the count of attendance status (Present, Sick Leave, Absent).
    */

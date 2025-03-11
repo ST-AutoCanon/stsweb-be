@@ -47,11 +47,11 @@ SELECT e.employee_id,
        e.salary
 FROM employees e
 LEFT JOIN departments d ON e.department_id = d.id
-WHERE e.first_name LIKE ? 
+WHERE (e.first_name LIKE ? 
    OR e.last_name LIKE ? 
    OR e.email LIKE ? 
    OR e.employee_id LIKE ? 
-   OR d.name LIKE ?
+   OR d.name LIKE ?)
 `,
   
 UPDATE_EMPLOYEE_STATUS: `UPDATE employees SET status = 'Inactive' WHERE employee_id = ?`,
