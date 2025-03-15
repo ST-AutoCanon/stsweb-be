@@ -240,34 +240,55 @@ exports.editEmployee = async (employeeId, updatedData) => {
  */
 exports.searchEmployees = async (search, fromDate, toDate) => {
   try {
-    let query;
+    let query = queries.GET_ALL_EMPLOYEES;
     let params = [];
 
     if (search) {
       query = queries.SEARCH_EMPLOYEES;
       params = [`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`];
-    } else {
-      query = queries.GET_ALL_EMPLOYEES;
     }
 
-    if (fromDate) {
-      query += ' AND created_at >= ?';
-      params.push(fromDate);
+    // ✅ Fix Date Handling to Prevent UTC Shift
+    function formatToMySQLDate(dateStr, isEndOfDay = false) {
+      if (!dateStr) return null;
+
+      // Convert to Local Time (Avoid UTC shift)
+      const date = new Date(dateStr + "T00:00:00"); // Ensures midnight local time
+      if (isEndOfDay) {
+        date.setHours(23, 59, 59, 999);
+      } else {
+        date.setHours(0, 0, 0, 0);
+      }
+
+      // Convert to MySQL DATETIME format
+      return date.toISOString().slice(0, 19).replace("T", " ");
     }
 
-    if (toDate) {
-      query += ' AND created_at <= ?';
-      params.push(toDate);
+    const formattedFromDate = formatToMySQLDate(fromDate);
+    const formattedToDate = formatToMySQLDate(toDate, true);
+
+    if (formattedFromDate && formattedToDate) {
+      query += " AND e.created_at BETWEEN ? AND ?";
+      params.push(formattedFromDate, formattedToDate);
+    } else if (formattedFromDate) {
+      query += " AND e.created_at >= ?";
+      params.push(formattedFromDate);
+    } else if (formattedToDate) {
+      query += " AND e.created_at <= ?";
+      params.push(formattedToDate);
     }
 
-    console.log('Executing query:', query);
-    console.log('With params:', params);
+    // Debug Logs
+    console.log("🔍 Executing Query:", query);
+    console.log("🕒 From Date:", formattedFromDate);
+    console.log("🕒 To Date:", formattedToDate);
+    console.log("📌 Query Parameters:", params);
 
     const [rows] = await db.execute(query, params);
     return rows;
   } catch (error) {
-    console.error('Error fetching employees from database:', error);
-    throw new Error('Error fetching employees from database');
+    console.error("❌ Error fetching employees from database:", error);
+    throw new Error("Error fetching employees from database");
   }
 };
 

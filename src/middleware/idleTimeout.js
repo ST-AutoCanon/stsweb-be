@@ -1,5 +1,5 @@
 module.exports = (req, res, next) => {
-  const idleLimit = 15 * 60 * 1000; // 15 minutes
+  const idleLimit = 10 * 60 * 1000; // 15 minutes
 
   // If no session or last active time, continue
   if (!req.session || !req.session.lastActive) {
