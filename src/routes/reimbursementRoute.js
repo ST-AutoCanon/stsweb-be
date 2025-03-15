@@ -4,6 +4,7 @@ const reimbursementHandler = require("../handlers/reimbursementHandler");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const { createReimbursement } = require("../services/reimbursementService");
 
 // Configure multer storage dynamically
 const storage = multer.diskStorage({
@@ -53,6 +54,7 @@ router.get("/reimbursement/:employeeId", reimbursementHandler.getReimbursementsB
 
 // Updated route with multiple file uploads
 router.post("/reimbursement", upload.array("attachments", 5), reimbursementHandler.createReimbursement);
+console.log("fileuploads",createReimbursement);
 
 router.put("/reimbursement/:id", upload.array("attachments", 5), reimbursementHandler.updateReimbursement);
 

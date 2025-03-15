@@ -48,7 +48,7 @@ async function mergeAttachments(pdfPath, attachments) {
             if (!fs.existsSync(att.file_path)) continue;
 
             const optimizedImage = await optimizeImage(att.file_path);
-            let image = att.file_path.endsWith(".png")
+            let image = att.file_path.endsWith(".png") ||  att.file_path.endsWith(".PNG")
                 ? await pdfDoc.embedPng(optimizedImage)
                 : await pdfDoc.embedJpg(optimizedImage);
 
