@@ -59,12 +59,16 @@ console.log("✅ Flattened Attachments:", attachments);
 
 attachments.forEach((att, index) => {
     console.log(`Attachment ${index + 1}:`, att);
-    if (!att.file_path) {
-        console.error("⚠️ Missing file path for attachment:", att);
-    } else if (!fs.existsSync(att.file_path)) {
-        console.error("⚠️ File does not exist:", att.file_path);
+   
+    if (!att || !att.file_path) {
+        console.error(`⚠️ Attachment ${index + 1} is missing a file path:`, att);
+        return; // Skip this iteration
+    }
+
+    if (!fs.existsSync(att.file_path)) {
+        console.error(`⚠️ File does not exist: ${att.file_path}`);
     } else {
-        console.log("✅ Valid attachment found:", att.file_path);
+        console.log(`✅ Valid attachment found: ${att.file_path}`);
     }
 });
 

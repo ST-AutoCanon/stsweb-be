@@ -1,4 +1,3 @@
-
 const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType } = require("docx");
 const fs = require("fs");
 const path = require("path");
@@ -57,74 +56,56 @@ exports.generateDocx = async (claim, employee) => {
             children: [
                 new TableCell({ 
                     width: { size: 15, type: WidthType.PERCENTAGE }, 
-                    children: [new Paragraph({ children: [new TextRun({ text: "Date", bold: true })] })] 
+                    children: [new Paragraph({ children: [new TextRun({ text: "Date", bold: true })] })],
+                    margins: { top: 100, bottom: 100, left: 100, right: 100 }, 
                 }),
                 new TableCell({ 
                     width: { size: 50, type: WidthType.PERCENTAGE }, 
-                    children: [new Paragraph({ children: [new TextRun({ text: "Description", bold: true })] })] 
+                    children: [new Paragraph({ children: [new TextRun({ text: "Description", bold: true })] })],
+                    margins: { top: 100, bottom: 100, left: 100, right: 100 }, 
                 }),
                 new TableCell({ 
                     width: { size: 10, type: WidthType.PERCENTAGE }, 
-                    children: [new Paragraph({ children: [new TextRun({ text: "Unit", bold: true })] })] 
+                    children: [new Paragraph({ children: [new TextRun({ text: "Unit", bold: true })] })],
+                    margins: { top: 100, bottom: 100, left: 100, right: 100 }, 
                 }),
                 new TableCell({ 
                     width: { size: 12.5, type: WidthType.PERCENTAGE }, 
-                    children: [new Paragraph({ children: [new TextRun({ text: "Price", bold: true })] })] 
+                    children: [new Paragraph({ children: [new TextRun({ text: "Price", bold: true })] })],
+                    margins: { top: 100, bottom: 100, left: 100, right: 100 }, 
                 }),
                 new TableCell({ 
                     width: { size: 12.5, type: WidthType.PERCENTAGE }, 
-                    children: [new Paragraph({ children: [new TextRun({ text: "Amount", bold: true })] })] 
+                    children: [new Paragraph({ children: [new TextRun({ text: "Amount", bold: true })] })],
+                    margins: { top: 100, bottom: 100, left: 100, right: 100 }, 
                 }),
             ],
         }),
     ];
 
     const addClaimRow = (date, description, unit, price, amount) => {
-        let finalUnit = unit;
-        let finalPrice = price;
-        let finalAmount = amount;
-        // Check if description is empty or a placeholder dash.
-        if (!description || description.trim() === "" || description === "-") {
-            finalUnit = "";
-            finalPrice = "";
-            finalAmount = "";
-        }
+        const safeText = (value) => (value ? value.toString() : "-"); // Ensure non-null values
+    
         reimbursementTableRows.push(
             new TableRow({
                 children: [
-                    new TableCell({ children: [new Paragraph(date)] }),
-                    new TableCell({ children: [new Paragraph(description)] }),
-                    new TableCell({ children: [new Paragraph(finalUnit ? finalUnit.toString() : "")] }),
                     new TableCell({
-                        children: [
-                            new Paragraph({
-                                children: [
-                                    new TextRun(
-                                        finalPrice && !isNaN(parseFloat(finalPrice))
-                                            ? `₹${parseFloat(finalPrice).toFixed(2)}`
-                                            : ""
-                                    )
-                                ]
-                            })
-                        ]
-                    }),
-                    new TableCell({
-                        children: [
-                            new Paragraph({
-                                children: [
-                                    new TextRun(
-                                        finalAmount && !isNaN(parseFloat(finalAmount))
-                                            ? `₹${parseFloat(finalAmount).toFixed(2)}`
-                                            : ""
-                                    )
-                                ]
-                            })
-                        ]
-                    }),
+                        children: [new Paragraph({ children: [new TextRun(safeText(date))] })],
+                        margins: { top: 100, bottom: 100, left: 100, right: 100 },
+                    }),                    
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun(safeText(description))] })],
+                    margins: { top: 100, bottom: 100, left: 100, right: 100 }, }),
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun(safeText(unit))] })],
+                    margins: { top: 100, bottom: 100, left: 100, right: 100 }, }),
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun(safeText(price))] })],
+                    margins: { top: 100, bottom: 100, left: 100, right: 100 }, }),
+                    new TableCell({ children: [new Paragraph({ children: [new TextRun(safeText(amount))] })],
+                    margins: { top: 100, bottom: 100, left: 100, right: 100 }, }),
                 ],
             })
         );
     };
+    
 
     // ✅ Handling Date Column for Different Claims
     let formattedDate = "-";
@@ -140,39 +121,34 @@ exports.generateDocx = async (claim, employee) => {
         switch (claim.claim_type) {
             case "Transportation":
                 claimDetails.push(
-                    { description: "Transport Amount", value: claim.transport_amount },
-                    { description: "Accomodation Fees", value: claim.accommodation_fees },
-                    { description: "DA", value: claim.da }
+                    { description: "Transport Amount", value: claim.transport_amount || "0" },
+                    { description: "Accomodation Fees", value: claim.accommodation_fees || "0" },
+                    { description: "DA", value: claim.da || "0" }
                 );
                 break;
-    
             case "Telecommunication":
                 claimDetails.push(
-                    { description: claim.service_provider, value: claim.total_amount }
+                    { description: claim.service_provider || "Unknown Provider", value: claim.total_amount || "0" }
                 );
                 break;
-    
             case "Meals":
                 claimDetails.push(
-                    { description: claim.meal_type, value: claim.total_amount }
+                    { description: claim.meal_type || "Meal", value: claim.total_amount || "0" }
                 );
                 break;
-    
             case "Stationary":
                 claimDetails.push(
-                    { description: claim.purpose, value: claim.stationary },
-                    { description: claim.purchasing_item, value: claim.total_amount }
+                    { description: claim.purpose || "Stationary Purchase", value: claim.stationary || "0" },
+                    { description: claim.purchasing_item || "Item", value: claim.total_amount || "0" }
                 );
                 break;
-    
             case "Miscellaneous":
                 claimDetails.push(
-                    { description: claim.purpose, value: claim.total_amount }
+                    { description: claim.purpose || "Miscellaneous", value: claim.total_amount || "0" }
                 );
                 break;
-    
             default:
-                claimDetails.push({ description: claim.purpose, value: claim.total_amount });
+                claimDetails.push({ description: claim.purpose || "Unknown", value: claim.total_amount || "0" });
                 break;
         }
     
@@ -187,16 +163,17 @@ exports.generateDocx = async (claim, employee) => {
     
 
     // Ensure at least 8 rows for uniformity
-    while (reimbursementTableRows.length < 9) {
-        addClaimRow("-", "-", "1", claim.total_amount || "0", claim.total_amount || "0");
-    }
+    while (reimbursementTableRows.length < 15) { // Adjust number as needed
+        addClaimRow(" ", " ", " ", " ", " ");
+    }    
 
     // ✅ Add Total Amount Row (adjusted column span for 5 columns)
     reimbursementTableRows.push(
         new TableRow({
             children: [
                 new TableCell({ children: [], columnSpan: 3 }),
-                new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Total Amount", bold: true })] })] }),
+                new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "Total Amount", bold: true })] })],
+                margins: { top: 100, bottom: 100, left: 100, right: 100 }, }),
                 new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: `₹${claim.total_amount}`, bold: true })] })] }),
             ],
         })
@@ -204,9 +181,11 @@ exports.generateDocx = async (claim, employee) => {
 
     // ✅ Reimbursement Table
     const reimbursementTable = new Table({
-        width: { size: 100, type: WidthType.PERCENTAGE },
+        width: { size: 100, type: WidthType.PERCENTAGE }, // Make it full width
         rows: reimbursementTableRows,
+        margins: { top: 0, bottom: 0, left: 0, right: 0 }, // Reduce internal cell margins
     });
+    
 
     // Convert total amount to words
     const amountWords = numberToWords.toWords(claim.total_amount);
@@ -287,13 +266,13 @@ exports.generateDocx = async (claim, employee) => {
         sections: [
             {
                 properties: {
-                    pageSize: { width: 11906, height: 16838 },
-                    pageMargins: { top: 1440, right: 1440, bottom: 1440, left: 1440 }
+                    pageSize: { width: 11906, height: 16838 }, // A4 size
+                    pageMargins: { top: 50, right: 50, bottom: 50, left: 50 } // Reduce margins
                 },
                 children: [outerTable],
             },
         ],
-    });
+    });    
 
     // ✅ Save DOCX File
     const docxPath = path.join(__dirname, `../temp/Reimbursement_${claim.id}.docx`);
