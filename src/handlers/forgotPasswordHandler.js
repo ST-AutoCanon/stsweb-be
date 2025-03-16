@@ -1,6 +1,9 @@
-const crypto = require('crypto');
-const sgMail = require('@sendgrid/mail');
-const { saveResetToken, getEmployeeByEmail } = require('../services/forgotPasswordService');
+const crypto = require("crypto");
+const sgMail = require("@sendgrid/mail");
+const {
+  saveResetToken,
+  getEmployeeByEmail,
+} = require("../services/forgotPasswordService");
 const ErrorHandler = require("../utils/errorHandler");
 
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
@@ -17,13 +20,16 @@ exports.forgotPassword = async (req, res) => {
     const employee = await getEmployeeByEmail(email);
 
     if (!employee) {
-      const errorResponse = ErrorHandler.generateErrorResponse(404, 'Email not found.');
+      const errorResponse = ErrorHandler.generateErrorResponse(
+        404,
+        "Email not found."
+      );
       return res.status(404).json(errorResponse);
     }
 
     // 2. Generate a unique reset token
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    const tokenExpiry = new Date(Date.now() + 3600 * 1000); // Token valid for 1 hour
+    const resetToken = crypto.randomBytes(32).toString("hex");
+    const tokenExpiry = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000); // Token valid for 3 days
 
     // 3. Save the reset token and expiry in the password_resets table
     await saveResetToken(email, resetToken, tokenExpiry);
@@ -31,28 +37,30 @@ exports.forgotPassword = async (req, res) => {
     // 4. Generate the reset link
     const resetLink = `${process.env.FRONTEND_URL}/ResetPassword?token=${resetToken}`;
 
-    // 5. Send the reset link via email using SendGrid/////////////
+    // 5. Send the reset link via email using SendGrid
     const emailContent = {
       to: email,
       from: process.env.SENDGRID_SENDER_EMAIL,
-      subject: 'Password Reset Request',
-      text: `You requested a password reset. Click the link below to reset your password:\n\n${resetLink}\n\nThis link is valid for 1 hour.`,
-      html: `<p>You requested a password reset. Click the link below to reset your password:</p><a href="${resetLink}">Reset Password</a><p>This link is valid for 1 hour.</p>`,
+      subject: "Password Reset Request",
+      text: `You requested a password reset. Click the link below to reset your password:\n\n${resetLink}\n\nThis link is valid for 3 days.`,
+      html: `<p>You requested a password reset. Click the link below to reset your password:</p>
+             <p><a href="${resetLink}" style="color: blue; text-decoration: underline;">Reset Password</a></p>
+             <p>This link is valid for <strong>3 days</strong>.</p>`,
     };
 
     await sgMail.send(emailContent);
 
     const successResponse = ErrorHandler.generateSuccessResponse(200, {
-      message: 'Password reset link has been sent to your email.',
+      message: "Password reset link has been sent to your email.",
     });
     res.status(200).json(successResponse);
   } catch (error) {
-    console.error('Error processing forgot password request:', error);
+    console.error("Error processing forgot password request:", error);
 
     const errorResponse = ErrorHandler.generateErrorResponse(
       500,
-      'An error occurred while processing your request.'
+      "An error occurred while processing your request."
     );
     res.status(500).json(errorResponse);
-  }      
+  }
 };

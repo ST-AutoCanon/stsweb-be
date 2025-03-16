@@ -18,7 +18,14 @@ const storage = multer.diskStorage({
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, "0"); // Ensure two-digit format
-    const basePath = path.join(__dirname, "..", "reimbursement", `${year}`, `${month}`, `${employeeId}`);
+    const basePath = path.join(
+      __dirname,
+      "..",
+      "reimbursement",
+      `${year}`,
+      `${month}`,
+      `${employeeId}`
+    );
 
     if (!fs.existsSync(basePath)) {
       fs.mkdirSync(basePath, { recursive: true });
@@ -31,15 +38,24 @@ const storage = multer.diskStorage({
     const now = new Date();
     const date = now.toISOString().split("T")[0]; // YYYY-MM-DD
     const { employeeId } = req.body;
-    const uploadDir = path.join(__dirname, "..", "reimbursement", `${now.getFullYear()}`, `${String(now.getMonth() + 1).padStart(2, "0")}`, `${employeeId}`);
-    
+    const uploadDir = path.join(
+      __dirname,
+      "..",
+      "reimbursement",
+      `${now.getFullYear()}`,
+      `${String(now.getMonth() + 1).padStart(2, "0")}`,
+      `${employeeId}`
+    );
+
     let counter = 1;
     let filename = `${date}_01${path.extname(file.originalname)}`;
 
     // Ensure unique filenames (YYYY-MM-DD_01, YYYY-MM-DD_02, ...)
     while (fs.existsSync(path.join(uploadDir, filename))) {
       counter++;
-      filename = `${date}_${String(counter).padStart(2, "0")}${path.extname(file.originalname)}`;
+      filename = `${date}_${String(counter).padStart(2, "0")}${path.extname(
+        file.originalname
+      )}`;
     }
 
     cb(null, filename);
@@ -50,47 +66,85 @@ const upload = multer({ storage });
 
 router.get("/reimbursements", reimbursementHandler.getAllReimbursements);
 // Routes for reimbursements
-router.get("/reimbursement/:employeeId", reimbursementHandler.getReimbursementsByEmployee);
+router.get(
+  "/reimbursement/:employeeId",
+  reimbursementHandler.getReimbursementsByEmployee
+);
 
 // Updated route with multiple file uploads
-router.post("/reimbursement", upload.array("attachments", 5), reimbursementHandler.createReimbursement);
-console.log("fileuploads",createReimbursement);
+router.post(
+  "/reimbursement",
+  upload.array("attachments", 5),
+  reimbursementHandler.createReimbursement
+);
+console.log("fileuploads", createReimbursement);
 
-router.put("/reimbursement/:id", upload.array("attachments", 5), reimbursementHandler.updateReimbursement);
+router.put(
+  "/reimbursement/:id",
+  upload.array("attachments", 5),
+  reimbursementHandler.updateReimbursement
+);
 
-router.put("/reimbursement/status/:id", reimbursementHandler.updateReimbursementStatus);
+router.put(
+  "/reimbursement/status/:id",
+  reimbursementHandler.updateReimbursementStatus
+);
 router.delete("/reimbursement/:id", reimbursementHandler.deleteReimbursement);
-router.get("/team/:employeeId/reimbursements", reimbursementHandler.getTeamReimbursements);
-router.get("/reimbursement/:reimbursementId/attachments", reimbursementHandler.getAttachmentsByReimbursementId);
+router.get(
+  "/team/:teamLeadId/reimbursements",
+  reimbursementHandler.getTeamReimbursements
+);
+router.get(
+  "/reimbursement/:reimbursementId/attachments",
+  reimbursementHandler.getAttachmentsByReimbursementId
+);
 
-router.post("/reimbursement/upload", upload.array("attachments", 5), (req, res) => {
-  if (!req.files || req.files.length === 0) {
-    return res.status(400).json({ message: "No files uploaded" });
+router.post(
+  "/reimbursement/upload",
+  upload.array("attachments", 5),
+  (req, res) => {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ message: "No files uploaded" });
+    }
+
+    const uploadedFiles = req.files.map((file) => file.filename);
+    res.json({ message: "Files uploaded successfully", files: uploadedFiles });
+  },
+  (err, req, res, next) => {
+    res.status(500).json({ message: err.message });
   }
-
-  const uploadedFiles = req.files.map(file => file.filename);
-  res.json({ message: "Files uploaded successfully", files: uploadedFiles });
-}, (err, req, res, next) => {
-  res.status(500).json({ message: err.message });
-});
+);
 
 // Secure file retrieval route
 router.get("/reimbursement/:year/:month/:employeeId/:filename", (req, res) => {
   const { year, month, employeeId, filename } = req.params;
 
-  if ([year, month, employeeId, filename].some((param) => param.includes("..") || param.includes("/"))) {
+  if (
+    [year, month, employeeId, filename].some(
+      (param) => param.includes("..") || param.includes("/")
+    )
+  ) {
     return res.status(400).json({ message: "Invalid filename" });
   }
 
-  const filePath = path.join(__dirname, "..", "reimbursement", year, month, employeeId, filename);
+  const filePath = path.join(
+    __dirname,
+    "..",
+    "reimbursement",
+    year,
+    month,
+    employeeId,
+    filename
+  );
 
   if (fs.existsSync(filePath)) {
-    const mimeType = {
-      ".jpg": "image/jpeg",
-      ".jpeg": "image/jpeg",
-      ".png": "image/png",
-      ".pdf": "application/pdf",
-    }[path.extname(filename).toLowerCase()] || "application/octet-stream";
+    const mimeType =
+      {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".pdf": "application/pdf",
+      }[path.extname(filename).toLowerCase()] || "application/octet-stream";
 
     res.setHeader("Content-Type", mimeType);
     res.setHeader("Content-Disposition", `inline; filename=${filename}`);
@@ -101,6 +155,6 @@ router.get("/reimbursement/:year/:month/:employeeId/:filename", (req, res) => {
   }
 });
 
-router.get("/download/:claimId", reimbursementHandler.generateReimbursementPDF); 
+router.get("/download/:claimId", reimbursementHandler.generateReimbursementPDF);
 
 module.exports = router;
