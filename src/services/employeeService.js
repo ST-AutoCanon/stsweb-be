@@ -1,9 +1,9 @@
-const db = require('../config');
-const queries = require('../constants/empDetailsQueries');
-const sgMail = require('@sendgrid/mail');
-const { v4: uuidv4 } = require('uuid');
-const crypto = require('crypto');
-const bcrypt = require('bcrypt');
+const db = require("../config");
+const queries = require("../constants/empDetailsQueries");
+const sgMail = require("@sendgrid/mail");
+const { v4: uuidv4 } = require("uuid");
+const crypto = require("crypto");
+const bcrypt = require("bcrypt");
 
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
@@ -11,26 +11,38 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY);
  * Generate a password reset token, store it, and send a reset link to the employee.
  */
 const sendResetEmail = async (employeeEmail) => {
+  // Generate a unique reset token
   const resetToken = uuidv4();
+  // Create the reset link
   const resetLink = `${process.env.FRONTEND_URL}/ResetPassword?token=${resetToken}`;
+  // Set the token expiry to 3 days
+  const tokenExpiry = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
 
-  await db.execute(queries.SAVE_RESET_TOKEN, [employeeEmail, resetToken]);
+  // Save the reset token and its expiry into the database
+  await db.execute(queries.SAVE_RESET_TOKEN, [
+    employeeEmail,
+    resetToken,
+    tokenExpiry,
+  ]);
 
+  // Prepare the email message with a blue clickable link and updated expiry info
   const msg = {
     to: employeeEmail,
     from: process.env.SENDGRID_SENDER_EMAIL,
-    subject: 'Password Reset Link - Welcome to Our Company',
-    text: `Welcome to the company! Please reset your password using the link below:\n${resetLink}\n\nThis link is valid for 1 hour.`,
+    subject: "Password Reset Link - Welcome to Our Company",
+    text: `Welcome to the company! Please reset your password using the link below:\n${resetLink}\n\nThis link is valid for 3 days.`,
     html: `<p>Welcome to the company!</p>
            <p>Please reset your password using the link below:</p>
            <a href="${resetLink}" style="color: blue; text-decoration: underline;">Reset Password</a>
-           <p>This link is valid for 1 hour.</p>`,
+           <p>This link is valid for 3 days.</p>`,
   };
 
   try {
     await sgMail.send(msg);
   } catch (error) {
-    throw new Error(`Error sending email: ${error.response.body.errors[0].message}`);
+    throw new Error(
+      `Error sending email: ${error.response.body.errors[0].message}`
+    );
   }
 };
 
@@ -41,22 +53,22 @@ exports.updateEmployeePhoto = async (employeeId, photoUrl) => {
   try {
     // Validate inputs to prevent SQL injection
     if (!employeeId || !photoUrl) {
-      throw new Error('Invalid input');
+      throw new Error("Invalid input");
     }
 
     // Parameterized query to prevent SQL injection
-    const [result] = await db.execute(
-      queries.UPDATE_EMPLOYEE_PHOTO,
-      [photoUrl, employeeId]
-    );
+    const [result] = await db.execute(queries.UPDATE_EMPLOYEE_PHOTO, [
+      photoUrl,
+      employeeId,
+    ]);
 
     if (result.affectedRows === 0) {
-      throw new Error('Employee not found');
+      throw new Error("Employee not found");
     }
 
-    return { message: 'Employee photo updated successfully' };
+    return { message: "Employee photo updated successfully" };
   } catch (error) {
-    console.error('Error in updateEmployeePhoto:', error.message);
+    console.error("Error in updateEmployeePhoto:", error.message);
     throw error;
   }
 };
@@ -64,44 +76,50 @@ exports.updateEmployeePhoto = async (employeeId, photoUrl) => {
 exports.addEmployee = async (employeeData) => {
   let departmentId = null;
 
-  if (employeeData.role !== 'Admin') {
-    const [departmentResult] = await db.execute(queries.GET_DEPARTMENT_ID_BY_NAME, [employeeData.department]);
+  if (employeeData.role !== "Admin") {
+    const [departmentResult] = await db.execute(
+      queries.GET_DEPARTMENT_ID_BY_NAME,
+      [employeeData.department]
+    );
     if (departmentResult.length === 0) {
-      throw new Error('Department not found');
+      throw new Error("Department not found");
     }
     departmentId = departmentResult[0].id;
   }
 
   // Check for duplicate Aadhaar or PAN number
-  const [existingEmployee] = await db.execute(queries.CHECK_DUPLICATE_EMPLOYEE, [
-    employeeData.aadhaar_number,
-    employeeData.pan_number
-  ]);
+  const [existingEmployee] = await db.execute(
+    queries.CHECK_DUPLICATE_EMPLOYEE,
+    [employeeData.aadhaar_number, employeeData.pan_number]
+  );
 
   if (existingEmployee.length > 0) {
-    throw { code: "DUPLICATE_AADHAAR_PAN", message: "Aadhaar or PAN number already exists." };
+    throw {
+      code: "DUPLICATE_AADHAAR_PAN",
+      message: "Aadhaar or PAN number already exists.",
+    };
   }
 
   const generateTemporaryPassword = () => {
-    return crypto.randomBytes(6).toString('hex');
+    return crypto.randomBytes(6).toString("hex");
   };
 
   const temporaryPassword = generateTemporaryPassword();
   const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
 
   const params = [
-    employeeData.first_name || '',
-    employeeData.last_name || '',
-    employeeData.dob || '',
-    employeeData.email || '',
-    employeeData.aadhaar_number || '',
-    employeeData.pan_number || '',
-    employeeData.gender || '',
-    employeeData.marital_status || '',
-    employeeData.spouse_name || '',
+    employeeData.first_name || "",
+    employeeData.last_name || "",
+    employeeData.dob || "",
+    employeeData.email || "",
+    employeeData.aadhaar_number || "",
+    employeeData.pan_number || "",
+    employeeData.gender || "",
+    employeeData.marital_status || "",
+    employeeData.spouse_name || "",
     employeeData.marriage_date || null,
     employeeData.address || null,
-    employeeData.phone_number || '',
+    employeeData.phone_number || "",
     employeeData.father_name || null,
     employeeData.mother_name || null,
     departmentId,
@@ -109,7 +127,7 @@ exports.addEmployee = async (employeeData) => {
     employeeData.photo_url || null,
     employeeData.salary || null,
     employeeData.role || null,
-    hashedPassword
+    hashedPassword,
   ];
 
   const [result] = await db.execute(queries.ADD_EMPLOYEE, params);
@@ -127,10 +145,13 @@ exports.editEmployee = async (employeeId, updatedData) => {
 
   // Check if department needs to be updated and get the department ID by name
   if (updatedData.department) {
-    if (updatedData.role !== 'Admin') {
-      const [departmentResult] = await db.execute(queries.GET_DEPARTMENT_ID_BY_NAME, [updatedData.department]);
+    if (updatedData.role !== "Admin") {
+      const [departmentResult] = await db.execute(
+        queries.GET_DEPARTMENT_ID_BY_NAME,
+        [updatedData.department]
+      );
       if (departmentResult.length === 0) {
-        throw new Error('Department not found');
+        throw new Error("Department not found");
       }
       updatedData.department_id = departmentResult[0].id;
       updates.push("department_id = ?");
@@ -234,7 +255,6 @@ exports.editEmployee = async (employeeId, updatedData) => {
   }
 };
 
-
 /**
  * Service to search employees based on search criteria.
  */
@@ -245,7 +265,13 @@ exports.searchEmployees = async (search, fromDate, toDate) => {
 
     if (search) {
       query = queries.SEARCH_EMPLOYEES;
-      params = [`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`];
+      params = [
+        `%${search}%`,
+        `%${search}%`,
+        `%${search}%`,
+        `%${search}%`,
+        `%${search}%`,
+      ];
     }
 
     // ✅ Fix Date Handling to Prevent UTC Shift
@@ -292,25 +318,25 @@ exports.searchEmployees = async (search, fromDate, toDate) => {
   }
 };
 
-
 /**
  * Deactivate an employee by setting status to 'Inactive'.
  */
 exports.deactivateEmployee = async (employeeId) => {
   try {
-    const [result] = await db.execute(queries.UPDATE_EMPLOYEE_STATUS, [employeeId]);
+    const [result] = await db.execute(queries.UPDATE_EMPLOYEE_STATUS, [
+      employeeId,
+    ]);
 
     if (result.affectedRows === 0) {
-      throw new Error('Employee not found or already deactivated');
+      throw new Error("Employee not found or already deactivated");
     }
 
-    return { message: 'Employee deactivated successfully' };
+    return { message: "Employee deactivated successfully" };
   } catch (error) {
-    console.error('Error in deactivateEmployee:', error.message);
+    console.error("Error in deactivateEmployee:", error.message);
     throw error;
   }
 };
-
 
 /**
  * Fetch employee details.
@@ -320,12 +346,12 @@ exports.getEmployee = async (employeeId) => {
     const [rows] = await db.execute(queries.GET_EMPLOYEE, [employeeId]);
 
     if (rows.length === 0) {
-      throw new Error('Employee not found');
+      throw new Error("Employee not found");
     }
 
     return rows[0];
   } catch (error) {
-    console.error('Error in getEmployee:', error.message);
+    console.error("Error in getEmployee:", error.message);
     throw error;
   }
 };

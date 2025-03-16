@@ -27,12 +27,25 @@ exports.startThread = async (req, res) => {
   const { sender_id, sender_role, department_id, subject, message } = req.body;
   console.log(req.body);
   try {
-    const threadId = await EmployeeQueries.startThread(sender_id, sender_role, department_id, subject, message);
-    const response = ErrorHandler.generateSuccessResponse(201, "Thread started successfully!", { threadId });
+    const threadId = await EmployeeQueries.startThread(
+      sender_id,
+      sender_role,
+      department_id,
+      subject,
+      message
+    );
+    const response = ErrorHandler.generateSuccessResponse(
+      201,
+      "Thread started successfully!",
+      { threadId }
+    );
     res.status(201).send(response);
   } catch (error) {
     console.error(error);
-    const response = ErrorHandler.generateErrorResponse(500, "Failed to start thread.");
+    const response = ErrorHandler.generateErrorResponse(
+      500,
+      "Failed to start thread."
+    );
     res.status(500).send(response);
   }
 };
@@ -51,14 +64,31 @@ exports.addMessage = async (req, res) => {
     console.log("Request Body:", req.body);
 
     if (!recipient_id) {
-      return res.status(400).json(ErrorHandler.generateErrorResponse(400, "Recipient ID is required"));
+      return res
+        .status(400)
+        .json(
+          ErrorHandler.generateErrorResponse(400, "Recipient ID is required")
+        );
     }
 
     // Step 1: Add message to database and get messageId
-    const messageId = await EmployeeQueries.addMessage(thread_id, sender_id, sender_role, message, attachment_url);
+    const messageId = await EmployeeQueries.addMessage(
+      thread_id,
+      sender_id,
+      sender_role,
+      message,
+      attachment_url
+    );
     if (!messageId) {
-      return res.status(500).json(ErrorHandler.generateErrorResponse(500, "Failed to insert message"));
+      return res
+        .status(500)
+        .json(
+          ErrorHandler.generateErrorResponse(500, "Failed to insert message")
+        );
     }
+
+    // Generate created_at timestamp
+    const created_at = new Date().toISOString();
 
     // Step 2: Fetch all admin employee IDs
     const adminIds = await EmployeeQueries.getAdminIds();
@@ -67,18 +97,45 @@ exports.addMessage = async (req, res) => {
     const allRecipients = [...new Set([recipient_id, ...adminIds])];
 
     // Step 4: Mark message unread for all recipients
-    await EmployeeQueries.markMessageUnreadForRecipients(messageId, allRecipients);
+    await EmployeeQueries.markMessageUnreadForRecipients(
+      messageId,
+      allRecipients
+    );
 
-    // Emit socket event
+    // Emit socket event with created_at
     const io = getIo();
     if (io) {
-      io.emit("receiveMessage", { thread_id, sender_id, sender_role, message, attachment_url });
+      io.emit("receiveMessage", {
+        thread_id,
+        sender_id,
+        sender_role,
+        message,
+        attachment_url,
+        created_at,
+      });
     }
 
-    res.status(200).json(ErrorHandler.generateSuccessResponse(200, "Message added successfully"));
+    // Return the newly created message object
+    res.status(200).json({
+      status: "success",
+      code: 200,
+      message: "Message added successfully",
+      data: {
+        message: {
+          id: messageId,
+          sender_id,
+          sender_role,
+          message,
+          attachment_url,
+          created_at,
+        },
+      },
+    });
   } catch (error) {
     console.error("Error adding message:", error);
-    res.status(500).json(ErrorHandler.generateErrorResponse(500, "Failed to add message"));
+    res
+      .status(500)
+      .json(ErrorHandler.generateErrorResponse(500, "Failed to add message"));
   }
 };
 
@@ -87,11 +144,18 @@ exports.getThreadMessages = async (req, res) => {
   const { thread_id } = req.params;
   try {
     const messages = await EmployeeQueries.getThreadMessages(thread_id);
-    const response = ErrorHandler.generateSuccessResponse(200, "Messages retrieved successfully.", messages);
+    const response = ErrorHandler.generateSuccessResponse(
+      200,
+      "Messages retrieved successfully.",
+      messages
+    );
     res.status(200).send(response);
   } catch (error) {
     console.error(error);
-    const response = ErrorHandler.generateErrorResponse(500, "Failed to retrieve messages.");
+    const response = ErrorHandler.generateErrorResponse(
+      500,
+      "Failed to retrieve messages."
+    );
     res.status(500).send(response);
   }
 };
@@ -102,11 +166,17 @@ exports.closeThread = async (req, res) => {
   const { feedback, note } = req.body;
   try {
     await EmployeeQueries.closeThread(thread_id, feedback, note);
-    const response = ErrorHandler.generateSuccessResponse(200, "Thread closed successfully with feedback.");
+    const response = ErrorHandler.generateSuccessResponse(
+      200,
+      "Thread closed successfully with feedback."
+    );
     res.status(200).send(response);
   } catch (error) {
     console.error(error);
-    const response = ErrorHandler.generateErrorResponse(500, "Failed to close thread.");
+    const response = ErrorHandler.generateErrorResponse(
+      500,
+      "Failed to close thread."
+    );
     res.status(500).send(response);
   }
 };
@@ -115,12 +185,19 @@ exports.closeThread = async (req, res) => {
 exports.getAllThreads = async (req, res) => {
   try {
     const threads = await EmployeeQueries.getAllThreads();
-    const response = ErrorHandler.generateSuccessResponse(200, "Threads retrieved successfully.", threads);
+    const response = ErrorHandler.generateSuccessResponse(
+      200,
+      "Threads retrieved successfully.",
+      threads
+    );
     res.status(200).send(response);
   } catch (error) {
     console.log("Failed to retrieve threads:", error);
     console.error(error);
-    const response = ErrorHandler.generateErrorResponse(500, "Failed to retrieve threads.");
+    const response = ErrorHandler.generateErrorResponse(
+      500,
+      "Failed to retrieve threads."
+    );
     res.status(500).send(response);
   }
 };
@@ -132,7 +209,13 @@ exports.getThreadsByEmployee = async (req, res) => {
     const threads = await EmployeeQueries.getThreadsByEmployee(employeeId);
     res
       .status(200)
-      .send(ErrorHandler.generateSuccessResponse(200, "Threads retrieved successfully.", threads));
+      .send(
+        ErrorHandler.generateSuccessResponse(
+          200,
+          "Threads retrieved successfully.",
+          threads
+        )
+      );
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Internal server error." });
@@ -145,11 +228,17 @@ exports.markMessagesAsRead = async (req, res) => {
   const { sender_id } = req.body;
   try {
     await EmployeeQueries.markMessagesAsRead(thread_id, sender_id);
-    const response = ErrorHandler.generateSuccessResponse(200, "Messages marked as read.");
+    const response = ErrorHandler.generateSuccessResponse(
+      200,
+      "Messages marked as read."
+    );
     res.status(200).send(response);
   } catch (error) {
     console.error(error);
-    const response = ErrorHandler.generateErrorResponse(500, "Failed to mark messages as read.");
+    const response = ErrorHandler.generateErrorResponse(
+      500,
+      "Failed to mark messages as read."
+    );
     res.status(500).send(response);
   }
 };
