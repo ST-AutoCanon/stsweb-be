@@ -168,6 +168,10 @@ GROUP BY
   WHERE e.employee_id = ?;
 `,
   GET_SIDEBAR_MENU: `SELECT label, path, icon FROM sidebar_menu WHERE FIND_IN_SET(?, roles)`,
+
+
+ 
+  /////////////////////////////////////////
   GET_EMPLOYEE_COUNT_BY_DEPARTMENT: `
   SELECT 
     d.name AS department_name, 
@@ -188,40 +192,65 @@ GROUP BY
 SELECT 
     (SELECT COUNT(*) FROM sukalpadata.employees) AS totalEmployees,
 
+    -- ✅ Present Employees (Count Each Employee Only Once)
     (SELECT COUNT(DISTINCT employee_id) 
-     FROM sukalpadata.attendance 
-     WHERE date = CURDATE()) AS present,
+     FROM sukalpadata.emp_attendence 
+     WHERE DATE(punchin_time) = CURDATE()
+        OR DATE(punchout_time) = CURDATE()) AS present,
 
+    -- ✅ Approved Leave Count (No Changes)
     (SELECT COUNT(*) 
      FROM sukalpadata.leavequeries 
      WHERE start_date = CURDATE() 
-     AND status = 'Approved') AS approved_leave,
+       AND status = 'Approved') AS approved_leave,
 
-    ((SELECT COUNT(*) FROM sukalpadata.employees) - 
-     (SELECT COUNT(DISTINCT employee_id) 
-      FROM sukalpadata.attendance 
-      WHERE date = CURDATE()) - 
-     (SELECT COUNT(*) 
-      FROM sukalpadata.leavequeries 
-      WHERE start_date = CURDATE() 
-      AND status = 'Approved')) AS absent;
+    -- ✅ Absent Employees (Total - Present - On Leave)
+    ((SELECT COUNT(*) FROM sukalpadata.employees) 
+     - (SELECT COUNT(DISTINCT employee_id) 
+        FROM sukalpadata.emp_attendence 
+        WHERE DATE(punchin_time) = CURDATE()
+           OR DATE(punchout_time) = CURDATE()) 
+     - (SELECT COUNT(*) 
+        FROM sukalpadata.leavequeries 
+        WHERE start_date = CURDATE() 
+          AND status = 'Approved')) AS absent;
 
 `,
 
-  GET_EMPLOYEE_LOGIN_DATA_COUNT: `SELECT 
-    DATE_FORMAT(ld.login_time, '%h:%i %p') AS label,
-    COUNT(ld.id) AS daily,
-    (SELECT COUNT(*) FROM login_data 
-     WHERE login_time >= NOW() - INTERVAL 7 DAY 
-     AND DATE_FORMAT(login_time, '%h:%i %p') = DATE_FORMAT(ld.login_time, '%h:%i %p')) AS weekly,
-    (SELECT COUNT(*) FROM login_data 
-     WHERE login_time >= NOW() - INTERVAL 30 DAY 
-     AND DATE_FORMAT(login_time, '%h:%i %p') = DATE_FORMAT(ld.login_time, '%h:%i %p')) AS monthly
-FROM login_data ld
-GROUP BY label, ld.login_time
-ORDER BY ld.login_time;`,
+  GET_EMPLOYEE_LOGIN_DATA_COUNT:
+    `WITH FirstPunch AS (
+    SELECT 
+        employee_id, 
+        MIN(punchin_time) AS first_punchin_time
+    FROM sukalpadata.emp_attendence
+    WHERE punchin_time >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH) 
+    GROUP BY employee_id, DATE(punchin_time)  -- ✅ Consider only the first punch-in per day per employee
+),
+HourlyData AS (
+    SELECT 
+        CONCAT(
+            LPAD(HOUR(fp.first_punchin_time), 2, '0'), ':00 - ', 
+            LPAD(HOUR(fp.first_punchin_time) + 1, 2, '0'), ':00'
+        ) AS punchin_label,
+        WEEK(fp.first_punchin_time) AS punchin_week,
+        MONTH(fp.first_punchin_time) AS punchin_month,
+        COUNT(CASE WHEN DATE(fp.first_punchin_time) = CURDATE() THEN 1 END) AS daily_count,
+        COUNT(*) AS total_count
+    FROM FirstPunch fp
+    GROUP BY punchin_label, punchin_week, punchin_month
+)
+SELECT 
+    punchin_label,
+    daily_count,
+    SUM(total_count) OVER (PARTITION BY punchin_week) AS weekly_count,
+    SUM(total_count) OVER (PARTITION BY punchin_month) AS monthly_count
+FROM HourlyData
+ORDER BY STR_TO_DATE(SUBSTRING_INDEX(punchin_label, ' ', 1), '%H');
 
-  GET_EMPLOYEE_SALARY_RANGE: `SELECT 
+`,
+
+  GET_EMPLOYEE_SALARY_RANGE:
+    `SELECT 
     CASE 
         WHEN salary < 30000 THEN '<30k'
         WHEN salary BETWEEN 30000 AND 50000 THEN '30k-50k'
@@ -234,7 +263,8 @@ FROM sukalpadata.employees
 GROUP BY salary_range
 ORDER BY FIELD(salary_range, '<30k', '30k-50k', '50k-70k', '70k+', '90k+');
 
-`,
+`
+  ,
   GET_EMPLOYEE_BY_DEPARTMENT: `
         SELECT 
             d.name AS department_name, 
@@ -248,12 +278,17 @@ ORDER BY FIELD(salary_range, '<30k', '30k-50k', '50k-70k', '70k+', '90k+');
             d.name;
     `,
 
-  GET_EMPLOYEE_PAYROLL: `SELECT
+
+
+  GET_EMPLOYEE_PAYROLL:
+    `SELECT
   SUM(CASE WHEN card_label = 'Previous Month Credit' THEN card_value ELSE 0 END) AS total_previous_month_credit,
   SUM(CASE WHEN card_label = 'Previous Month Expenses' THEN card_value ELSE 0 END) AS total_previous_month_expenses,
   SUM(CASE WHEN card_label = 'Previous Month Salary' THEN card_value ELSE 0 END) AS total_previous_month_salary
 FROM employee_payrolldata
 WHERE card_label IN ('Previous Month Credit', 'Previous Month Expenses', 'Previous Month Salary');
 
-`,
+`
+  ,
+
 };

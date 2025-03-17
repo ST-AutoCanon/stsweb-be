@@ -150,6 +150,7 @@ static async fetchSidebarMenu(role) {
   return menuItems;
 }
 
+
 static async getAttendanceStatusCount() {
   try {
       console.log("Executing SQL Query: ", queries.GET_ATTENDANCE_STATUS_COUNT);
@@ -177,16 +178,20 @@ static async getAttendanceStatusCount() {
   }
 }
 
-
-  static async fetchEmployeeLoginDataCount() {
-    try {
-      const [rows] = await db.execute(queries.GET_EMPLOYEE_LOGIN_DATA_COUNT);
+static async fetchEmployeeLoginDataCount() {
+  try {
+      console.log("Executing Query: ", queries.GET_EMPLOYEE_LOGIN_DATA_COUNT);
+      const [rows] = await db.query(queries.GET_EMPLOYEE_LOGIN_DATA_COUNT); // ✅ Use `query()` instead of `execute()`
+      console.log("Raw Query Result:", rows);
       return rows;
-    } catch (error) {
-      console.error("Error fetching login data count:", error);
+  } catch (error) {
+      console.error("Database Query Error:", error);
       throw new Error("Failed to fetch login data count");
-    }
   }
+}
+
+
+
 
   static async fetchSalaryRanges() {
     try {
@@ -232,5 +237,7 @@ static async getAttendanceStatusCount() {
     }
   }
 }
+
+
 
 module.exports = LoginService;
