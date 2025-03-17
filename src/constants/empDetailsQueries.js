@@ -1,5 +1,4 @@
 module.exports = {
-  
   GET_DEPARTMENT_ID_BY_NAME: `
     SELECT id FROM departments WHERE name = ?
   `,
@@ -12,12 +11,12 @@ module.exports = {
   CHECK_DUPLICATE_EMPLOYEE: `SELECT * FROM employees WHERE aadhaar_number = ? OR pan_number = ?`,
   SAVE_RESET_TOKEN: `
   INSERT INTO password_resets (email, token, expiry_time) 
-  VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))
+  VALUES (?, ?, ?)
   ON DUPLICATE KEY UPDATE 
     token = VALUES(token), 
     expiry_time = VALUES(expiry_time)
 `,
-GET_ALL_EMPLOYEES: `
+  GET_ALL_EMPLOYEES: `
 SELECT e.employee_id, 
        CONCAT(e.first_name, ' ', e.last_name) AS name, 
        DATE_FORMAT(e.created_at, '%Y-%m-%d') AS joining_date,
@@ -33,7 +32,7 @@ FROM employees e
 LEFT JOIN departments d ON e.department_id = d.id
 WHERE 1=1
 `,
-SEARCH_EMPLOYEES: `
+  SEARCH_EMPLOYEES: `
 SELECT e.employee_id, 
        CONCAT(e.first_name, ' ', e.last_name) AS name, 
        DATE_FORMAT(e.created_at, '%Y-%m-%d') AS joining_date, 
@@ -53,8 +52,8 @@ WHERE (e.first_name LIKE ?
    OR e.employee_id LIKE ? 
    OR d.name LIKE ?)
 `,
-  
-UPDATE_EMPLOYEE_STATUS: `UPDATE employees SET status = 'Inactive' WHERE employee_id = ?`,
+
+  UPDATE_EMPLOYEE_STATUS: `UPDATE employees SET status = 'Inactive' WHERE employee_id = ?`,
 
   VERIFY_RESET_TOKEN: `
     SELECT email 
@@ -66,8 +65,9 @@ UPDATE_EMPLOYEE_STATUS: `UPDATE employees SET status = 'Inactive' WHERE employee
     SET password = ? 
     WHERE email = ?;
   `,
-  
-  UPDATE_EMPLOYEE_PHOTO: 'UPDATE employees SET photo_url = ? WHERE employee_id = ?',
+
+  UPDATE_EMPLOYEE_PHOTO:
+    "UPDATE employees SET photo_url = ? WHERE employee_id = ?",
 
   GET_EMPLOYEE: `
   SELECT 
@@ -96,10 +96,7 @@ UPDATE_EMPLOYEE_STATUS: `UPDATE employees SET status = 'Inactive' WHERE employee
   WHERE e.employee_id = ?;
 `,
 
-
-
-GET_LEAVE_QUERIES_IN_DASHBOARD:
-`SELECT 
+  GET_LEAVE_QUERIES_IN_DASHBOARD: `SELECT 
     leave_type AS 'Leave Type', 
     start_date AS 'Start Date', 
     end_date AS 'End Date', 
@@ -111,13 +108,8 @@ FROM leavequeries
 WHERE employee_id = ? 
 ORDER BY created_at DESC 
 LIMIT 5;
-`
-,
-
-
-
-
-GET_REIMBURSEMENT_STATS :`
+`,
+  GET_REIMBURSEMENT_STATS: `
   SELECT 
       -- Current Month Data
       SUM(CASE WHEN status = 'Approved' 
@@ -154,6 +146,4 @@ GET_REIMBURSEMENT_STATS :`
   FROM reimbursement
   WHERE employee_id = ?;
 `,
-
-
 };

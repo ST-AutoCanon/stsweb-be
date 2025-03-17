@@ -3,7 +3,7 @@ const queries = require("../constants/leaveQueries");
 
 /**
  * Fetch leave queries from the database with optional filters.
- * 
+ *
  * @param {Object} filters - Filters to narrow down results.
  * @param {string} [filters.status] - Filter by leave status (e.g., Approved, Rejected).
  * @param {string} [filters.search] - Search by employee ID, reason, or employee name.
@@ -60,7 +60,7 @@ const getLeaveQueries = async (filters = {}) => {
 
 /**
  * Update the status of a leave request (Approve or Reject).
- * 
+ *
  * @param {Object} data - Data for updating the leave request.
  * @param {number} data.leaveId - Leave request ID.
  * @param {string} data.status - Status to set (Approved or Rejected).
@@ -84,7 +84,7 @@ const updateLeaveRequest = async ({ leaveId, status, comments = null }) => {
 
 /**
  * Submit a new leave request.
- * 
+ *
  * @param {Object} data - Data for submitting the leave request.
  * @param {string} data.employeeId - ID of the employee submitting the request.
  * @param {string} data.startDate - Leave start date.
@@ -93,7 +93,14 @@ const updateLeaveRequest = async ({ leaveId, status, comments = null }) => {
  * @param {string} data.leavetype - Type of leave (e.g., Sick, Vacation).
  * @returns {Promise<Object>} Details of the submitted leave request.
  */
-const submitLeaveRequest = async ({ employeeId, startDate, endDate, h_f_day, reason, leavetype }) => {
+const submitLeaveRequest = async ({
+  employeeId,
+  startDate,
+  endDate,
+  h_f_day,
+  reason,
+  leavetype,
+}) => {
   try {
     const query = queries.INSERT_LEAVE_REQUEST;
     console.log(query);
@@ -121,13 +128,17 @@ const submitLeaveRequest = async ({ employeeId, startDate, endDate, h_f_day, rea
 
 /**
  * Retrieve leave requests for a specific employee by their ID with optional date filtering.
- * 
+ *
  * @param {string} employeeId - Employee ID.
  * @param {string} [from_date] - Start date filter (inclusive).
  * @param {string} [to_date] - End date filter (inclusive).
  * @returns {Promise<Object[]>} List of leave requests for the employee.
  */
-const getLeaveRequests = async (employeeId, from_date = null, to_date = null) => {
+const getLeaveRequests = async (
+  employeeId,
+  from_date = null,
+  to_date = null
+) => {
   try {
     let query = queries.SELECT_LEAVE_REQUESTS; // Query already includes WHERE employee_id = ?
     const params = [employeeId];
@@ -152,7 +163,7 @@ const getLeaveRequests = async (employeeId, from_date = null, to_date = null) =>
 
 /**
  * Edit an existing leave request if it is still pending.
- * 
+ *
  * @param {Object} data - Data for updating the leave request.
  * @param {number} data.leaveId - Leave request ID.
  * @param {string} data.employeeId - Employee ID (to verify ownership).
@@ -162,22 +173,43 @@ const getLeaveRequests = async (employeeId, from_date = null, to_date = null) =>
  * @param {string} data.leavetype - Updated leave type.
  * @returns {Promise<Object>} Updated leave request details.
  */
-const editLeaveRequest = async ({ leaveId, employeeId, startDate, endDate, h_f_day, reason, leavetype }) => {
+const editLeaveRequest = async ({
+  leaveId,
+  employeeId,
+  startDate,
+  endDate,
+  h_f_day,
+  reason,
+  leavetype,
+}) => {
   try {
     // Check if the leave request is still pending
-    const [existingLeave] = await db.execute(queries.GET_LEAVE_BY_ID, [leaveId, employeeId]);
+    const [existingLeave] = await db.execute(queries.GET_LEAVE_BY_ID, [
+      leaveId,
+      employeeId,
+    ]);
 
     if (existingLeave.length === 0) {
       throw new Error("Leave request not found or not accessible.");
     }
 
     if (existingLeave[0].status !== "pending") {
-      throw new Error("Leave request cannot be edited after approval or rejection.");
+      throw new Error(
+        "Leave request cannot be edited after approval or rejection."
+      );
     }
 
     // Update leave request
     const query = queries.UPDATE_LEAVE_REQUEST;
-    const params = [startDate, endDate, h_f_day, reason, leavetype, leaveId, employeeId];
+    const params = [
+      startDate,
+      endDate,
+      h_f_day,
+      reason,
+      leavetype,
+      leaveId,
+      employeeId,
+    ];
 
     const [result] = await db.execute(query, params);
 
@@ -203,7 +235,7 @@ const editLeaveRequest = async ({ leaveId, employeeId, startDate, endDate, h_f_d
 
 /**
  * Cancel a leave request if it is still pending.
- * 
+ *
  * @param {number} leaveId - Leave request ID.
  * @param {string} employeeId - Employee ID (to verify ownership).
  * @returns {Promise<string>} Confirmation message.
@@ -211,7 +243,10 @@ const editLeaveRequest = async ({ leaveId, employeeId, startDate, endDate, h_f_d
 const cancelLeaveRequest = async (leaveId, employeeId) => {
   try {
     // Check if the leave request exists and is pending
-    const [existingLeave] = await db.execute(queries.GET_LEAVE_BY_ID, [leaveId, employeeId]);
+    const [existingLeave] = await db.execute(queries.GET_LEAVE_BY_ID, [
+      leaveId,
+      employeeId,
+    ]);
 
     if (existingLeave.length === 0) {
       throw new Error("Leave request not found or not accessible.");
@@ -240,7 +275,7 @@ const cancelLeaveRequest = async (leaveId, employeeId) => {
 
 /**
  * Fetch leave queries for a team lead's department.
- * 
+ *
  * @param {Object} filters - Filters to narrow down results.
  * @param {string} filters.status - Filter by leave status (e.g., Approved, Rejected).
  * @param {string} filters.search - Search by employee ID, reason, or employee name.
@@ -280,7 +315,9 @@ const constructWhereClause = (filters, employeeIds) => {
 
   // Filter by team members (employeeIds from the team)
   if (employeeIds.length > 0) {
-    whereConditions.push(`leavequeries.employee_id IN (${employeeIds.map(() => '?').join(', ')})`);
+    whereConditions.push(
+      `leavequeries.employee_id IN (${employeeIds.map(() => "?").join(", ")})`
+    );
     params.push(...employeeIds);
   }
 
@@ -290,7 +327,9 @@ const constructWhereClause = (filters, employeeIds) => {
 const getLeaveQueriesForTeamLead = async (filters = {}, teamLeadId) => {
   try {
     // Get the department of the team lead
-    const [teamLead] = await db.execute(queries.GET_EMPLOYEE_BY_ID, [teamLeadId]);
+    const [teamLead] = await db.execute(queries.GET_EMPLOYEE_BY_ID, [
+      teamLeadId,
+    ]);
 
     if (teamLead.length === 0) {
       throw new Error("Team lead not found.");
@@ -298,20 +337,27 @@ const getLeaveQueriesForTeamLead = async (filters = {}, teamLeadId) => {
 
     const departmentId = teamLead[0].department_id;
 
-    // Get all employees in the same department
-    const [teamMembers] = await db.execute(queries.GET_EMPLOYEES_BY_DEPARTMENT, [departmentId]);
+    const [teamMembers] = await db.execute(
+      queries.GET_EMPLOYEES_BY_DEPARTMENT,
+      [departmentId]
+    );
 
     if (teamMembers.length === 0) {
       throw new Error("No team members found in the same department.");
     }
 
-    const employeeIds = teamMembers.map(member => member.employee_id);
+    const employeeIds = teamMembers
+      .map((member) => member.employee_id)
+      .filter((id) => id !== teamLead[0].employee_id);
 
-    // Construct WHERE clause dynamically based on filters
-    const { whereConditions, params } = constructWhereClause(filters, employeeIds);
+    const { whereConditions, params } = constructWhereClause(
+      filters,
+      employeeIds
+    );
 
-    // If there are conditions, append them to the base query
-    const query = queries.GET_LEAVE_QUERIES_FOR_TEAM + (whereConditions.length ? ' AND ' + whereConditions.join(' AND ') : '');
+    const query =
+      queries.GET_LEAVE_QUERIES_FOR_TEAM +
+      (whereConditions.length ? " AND " + whereConditions.join(" AND ") : "");
 
     const [rows] = await db.execute(query, params);
     return rows;
