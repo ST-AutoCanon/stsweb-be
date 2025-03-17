@@ -31,14 +31,15 @@ const empLeaveQueryDashboard=require("./routes/empLeaveQueryDashboardRoutes")
 
 //payrollroutes
 
+const admindashboardReimbursementRoutes = require("./routes/adminDashReimbursementRoutes");
 
 const salaryRoutes = require("./routes/salaryRoutes");
 const payrollRoutes = require("./routes/payrollRoutes");
 const bankDetailsRoutes = require("./routes/payrollRoutes"); // Ensure correct path
-
+const salarylastmonthtotal=require("./routes/adminPayrollRoutes");
 //reimbursement 
 const reimbursementRoutes = require("./routes/reimbursementRoute");
-
+const adminmonthyearroute= require("./routes/adminSalaryStatementRoute");
 const { initializeSocket } = require("./socket");
 
 const app = express();
@@ -105,8 +106,8 @@ app.use("/api", payrollRoutes);
 app.use("/api", bankDetailsRoutes); // Make sure prefix matches your request
 
 app.use("/", workDayRoutes);
-
-
+app.use("/", admindashboardReimbursementRoutes);
+app.use("/",salarylastmonthtotal);
 
 const PORT = process.env.PORT;
 server.listen(PORT, () => {
