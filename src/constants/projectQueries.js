@@ -1,19 +1,19 @@
 module.exports = {
-    INSERT_PROJECT: `
+  INSERT_PROJECT: `
         INSERT INTO add_project 
         (company_name, project_name, project_poc, company_gst, company_pan, company_address, 
         project_category, start_date, end_date, service_mode, service_location, project_status, description, attachment_url)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    
-    INSERT_STS_OWNER: `
+
+  INSERT_STS_OWNER: `
         INSERT INTO sts_owners (project_id, sts_owner_id, sts_owner, sts_contact, employee_list, key_considerations) 
         VALUES (?, ?, ?, ?, ?, ?)`,
 
-    INSERT_MILESTONE: `
+  INSERT_MILESTONE: `
         INSERT INTO milestones (project_id, milestone_details, start_date, end_date, current_status, dependency, assigned_to) 
         VALUES (?, ?, ?, ?, ?, ?, ?)`,
 
-    INSERT_FINANCIAL_DETAILS: `
+  INSERT_FINANCIAL_DETAILS: `
         INSERT INTO financial_details 
 (project_id, milestone_id, project_amount, tds_percentage, tds_amount, 
  gst_percentage, gst_amount, total_amount, 
@@ -23,20 +23,25 @@ module.exports = {
  m_total_amount, status) 
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 
-GET_ALL_PROJECTS: `
-    SELECT p.id, p.company_name AS company, p.project_name AS project, 
-           p.start_date AS startDate, p.end_date AS endDate, 
-           p.project_status AS status, p.project_poc AS clientPOC, s.sts_owner AS stsPOC, 
-           (SELECT m.current_status 
-            FROM milestones m 
-            WHERE m.project_id = p.id 
-            ORDER BY m.id DESC 
-            LIMIT 1) AS milestone
-    FROM add_project p
-    LEFT JOIN sts_owners s ON p.id = s.project_id;
+  GET_ALL_PROJECTS: `
+  SELECT 
+    p.id, 
+    p.company_name AS company, 
+    p.project_name AS project, 
+    p.start_date AS startDate, 
+    p.end_date AS endDate, 
+    p.project_status AS status, 
+    p.project_poc AS clientPOC, 
+    s.sts_owner AS stsPOC, 
+    (SELECT COUNT(m.id) 
+     FROM milestones m 
+     WHERE m.project_id = p.id
+    ) AS milestone
+  FROM add_project p
+  LEFT JOIN sts_owners s ON p.id = s.project_id;
 `,
 
-GET_EMPLOYEE_PROJECTS: `
+  GET_EMPLOYEE_PROJECTS: `
     SELECT 
       p.id, 
       p.company_name AS company, 
@@ -46,17 +51,16 @@ GET_EMPLOYEE_PROJECTS: `
       p.project_status AS status, 
       p.project_poc AS clientPOC, 
       s.sts_owner AS stsPOC, 
-      (SELECT m.current_status 
-         FROM milestones m 
-         WHERE m.project_id = p.id 
-         ORDER BY m.id DESC 
-         LIMIT 1) AS milestone
+      (SELECT COUNT(m.id) 
+     FROM milestones m 
+     WHERE m.project_id = p.id
+    ) AS milestone
     FROM add_project p
     LEFT JOIN sts_owners s ON p.id = s.project_id
     WHERE JSON_CONTAINS(s.employee_list, ?)
 `,
 
-GET_PROJECT_BY_ID: `
+  GET_PROJECT_BY_ID: `
   SELECT 
     p.*,
     (SELECT MAX(s.sts_owner_id) FROM sts_owners s WHERE s.project_id = p.id) AS sts_owner_id,
@@ -122,7 +126,7 @@ GET_PROJECT_BY_ID: `
   WHERE p.id = ?;
 `,
 
-UPDATE_PROJECT: `
+  UPDATE_PROJECT: `
     UPDATE add_project 
     SET company_name = ?, project_name = ?, project_poc = ?, company_gst = ?, 
         company_pan = ?, company_address = ?, project_category = ?, start_date = ?, 
@@ -131,20 +135,20 @@ UPDATE_PROJECT: `
     WHERE id = ?;
 `,
 
-UPDATE_STS_OWNER: `
+  UPDATE_STS_OWNER: `
     UPDATE sts_owners 
     SET sts_owner_id = ?, sts_owner = ?, sts_contact = ?, employee_list = ?, key_considerations = ? 
     WHERE project_id = ?;
 `,
 
-UPDATE_MILESTONE: `
+  UPDATE_MILESTONE: `
     UPDATE milestones 
 SET milestone_details = ?, start_date = ?, end_date = ?, current_status = ?, 
     dependency = ?, assigned_to = ? 
 WHERE id = ?;
 `,
 
-UPDATE_FINANCIAL_DETAILS: `
+  UPDATE_FINANCIAL_DETAILS: `
     UPDATE financial_details 
     SET project_amount = ?,
         tds_percentage = ?,
@@ -165,7 +169,20 @@ UPDATE_FINANCIAL_DETAILS: `
     WHERE id = ?;
   `,
 
-GET_EMPLOYEES_WITH_DEPARTMENT:`
+  SEARCH_EMPLOYEES: `
+SELECT 
+  e.employee_id, 
+  CONCAT(e.first_name, ' ', e.last_name) AS name, 
+  d.name AS department_name
+FROM employees e
+LEFT JOIN departments d ON e.department_id = d.id
+WHERE e.status <> 'Inactive'
+  AND ( CONCAT(e.first_name, ' ', e.last_name) LIKE ? 
+   OR e.employee_id LIKE ? 
+   OR d.name LIKE ?)
+`,
+
+  GET_ALL_EMPLOYEES: `
   SELECT 
     e.employee_id,
     e.role,
@@ -175,5 +192,6 @@ GET_EMPLOYEES_WITH_DEPARTMENT:`
     d.name AS department_name
   FROM employees e
   LEFT JOIN departments d ON e.department_id = d.id
-`
+  WHERE e.status <> 'Inactive'
+`,
 };
