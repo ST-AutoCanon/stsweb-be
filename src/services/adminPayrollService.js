@@ -1,7 +1,7 @@
-import pool from "../config.js";
-import { getLastMonthTotalSalaryQuery } from "../constants/adminPayrollQueries.js";
+const pool = require("../config");
+const { getLastMonthTotalSalaryQuery } = require("../constants/adminPayrollQueries");
 
-export const getLastMonthTotalSalary = async () => {
+const getLastMonthTotalSalary = async () => {
   try {
     const now = new Date();
     const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
@@ -28,10 +28,13 @@ export const getLastMonthTotalSalary = async () => {
     // Fetch total salary from the found table
     const [result] = await pool.query(getLastMonthTotalSalaryQuery(tableName));
 
-    return result[0].total_salary || 0;
+    return result[0]?.total_salary || 0;
   } catch (error) {
     console.error("Error fetching last month's salary:", error);
     throw error;
   }
 };
 
+module.exports = {
+  getLastMonthTotalSalary,
+};
