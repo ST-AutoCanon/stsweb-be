@@ -1,13 +1,18 @@
-import { getLastMonthTotalSalary } from "../services/adminPayrollService.js";
+const { getLastMonthTotalSalary } = require("../services/adminPayrollService");
 
-export const fetchLastMonthSalary = async (req, res) => {
+const fetchLastMonthSalary = async (req, res) => {
   try {
     const totalSalary = await getLastMonthTotalSalary();
-    res.json({ total_salary: totalSalary });
+    res.status(200).json({ total_salary: totalSalary });
   } catch (error) {
+    console.error("Error fetching last month's salary:", error);
     res.status(500).json({
       error: "Failed to fetch salary data",
       details: error.message,
     });
   }
+};
+
+module.exports = {
+  fetchLastMonthSalary,
 };
