@@ -4,8 +4,7 @@ const bodyParser = require("body-parser");
 const cors = require("cors");
 require("dotenv").config();
 const path = require("path");
-const session = require('express-session');
-require("./services/punchCronService"); // Runs the cron job automaticall
+const session = require("express-session");
 
 const holidayRoutes = require("./routes/holidayRoutes");
 const loginRoutes = require("./routes/login");
@@ -17,17 +16,16 @@ const resetPasswordRoutes = require("./routes/resetPassword");
 const forgotPasswordRoutes = require("./routes/forgotPassword");
 const addDepartmentRoutes = require("./routes/addDepartment");
 const apiKeyMiddleware = require("./middleware/apiKeyMiddleware");
-const idleTimeout = require('./middleware/idleTimeout');
+const idleTimeout = require("./middleware/idleTimeout");
 
 ///employeedashboardroutes////
 const attendanceRoutes = require("./routes/attendance_Routes");
-const empSessionRoutes =require("./routes/empSessionRoute")
+const empSessionRoutes = require("./routes/empSessionRoute");
 const dashboardReimbursementRoutes = require("./routes/dashboardReimbursementRoutes");
 
-
 const workDayRoutes = require("./routes/empWorkDay");
-const workHourSummaryRoutes = require('./routes/empWorkHour');
-const empLeaveQueryDashboard=require("./routes/empLeaveQueryDashboardRoutes")
+const workHourSummaryRoutes = require("./routes/empWorkHour");
+const empLeaveQueryDashboard = require("./routes/empLeaveQueryDashboardRoutes");
 
 //payrollroutes
 
@@ -36,22 +34,22 @@ const admindashboardReimbursementRoutes = require("./routes/adminDashReimburseme
 const salaryRoutes = require("./routes/salaryRoutes");
 const payrollRoutes = require("./routes/payrollRoutes");
 const bankDetailsRoutes = require("./routes/payrollRoutes"); // Ensure correct path
-const salarylastmonthtotal=require("./routes/adminPayrollRoutes");
-//reimbursement 
+const salarylastmonthtotal = require("./routes/adminPayrollRoutes");
+//reimbursement
 const reimbursementRoutes = require("./routes/reimbursementRoute");
 const adminSalaryStatementRoutes = require("./routes/adminSalaryStatementRoute");
 const { initializeSocket } = require("./socket");
 
 const app = express();
 const server = http.createServer(app);
-const io = initializeSocket(server); 
+const io = initializeSocket(server);
 
 app.use(
   cors({
     origin: process.env.FRONTEND_URL,
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization", "x-api-key"],
-    credentials: true
+    credentials: true,
   })
 );
 
@@ -59,17 +57,19 @@ app.use(
 app.use(apiKeyMiddleware);
 
 // Initialize session before idleTimeout
-app.use(session({
-  secret: process.env.SESSION_SECRET,
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    secure: false,
-    httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000,
-    sameSite: "lax"
-  }
-}));
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      secure: false,
+      httpOnly: true,
+      maxAge: 24 * 60 * 60 * 1000,
+      sameSite: "lax",
+    },
+  })
+);
 
 // Apply idleTimeout after session is initialized
 app.use(idleTimeout);
@@ -89,16 +89,13 @@ app.use("/", forgotPasswordRoutes);
 app.use("/", addDepartmentRoutes);
 app.use("/", reimbursementRoutes);
 
-
 //Esmpdashboard Routes
 app.use("/attendance", attendanceRoutes);
 app.use("/", dashboardReimbursementRoutes);
 app.use("/", workDayRoutes);
 app.use("/", empSessionRoutes);
-app.use('/api', workHourSummaryRoutes);
-app.use("/",empLeaveQueryDashboard)
-
-
+app.use("/api", workHourSummaryRoutes);
+app.use("/", empLeaveQueryDashboard);
 
 app.use("/salary", salaryRoutes); // This means all salary routes are prefixed with "/salary"
 app.use("/api", payrollRoutes);
@@ -107,8 +104,8 @@ app.use("/api", bankDetailsRoutes); // Make sure prefix matches your request
 
 app.use("/", workDayRoutes);
 app.use("/api", adminSalaryStatementRoutes);
-app.use("/",salarylastmonthtotal);
-app.use("/",admindashboardReimbursementRoutes );
+app.use("/", salarylastmonthtotal);
+app.use("/", admindashboardReimbursementRoutes);
 const PORT = process.env.PORT;
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
