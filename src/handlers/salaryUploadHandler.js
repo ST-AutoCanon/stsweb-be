@@ -48,6 +48,18 @@ const formatColumnName = (name) => {
     .replace(/[^a-zA-Z0-9_]/g, ""); // Remove special characters
 };
 
+const generateTableName = (fileName) => {
+  const dateMatch = fileName.match(/(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[_-](\d{4})/i);
+  
+  if (!dateMatch) {
+    throw new Error("❌ Filename must contain month and year (e.g., salary_mar_2025.xlsx)");
+  }
+
+  const month = dateMatch[1].toLowerCase();
+  const year = dateMatch[2];
+
+  return `salary_sts_${month}_${year}`;
+};
 // Upload and Save Salary Data (Replace Existing Data)
 const uploadSalaryData = async (req, res) => {
   try {
@@ -57,7 +69,7 @@ const uploadSalaryData = async (req, res) => {
 
     // Extract filename without extension and format it
     const fileName = req.file.originalname.split(".")[0].replace(/\s+/g, "_").toLowerCase();
-    const tableName = `salary_${fileName}`; // Prefix to avoid conflicts
+    const tableName = generateTableName(fileName);
 
     const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
     const sheetName = workbook.SheetNames[0];
