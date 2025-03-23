@@ -249,28 +249,36 @@ exports.updateProject = async (req, res) => {
     console.log("Request Body", req.body);
     console.log("Uploaded Files:", req.files);
 
-    // Get attachments: if files are uploaded via multer, use them;
-    // otherwise, fallback to req.body.attachment_url (if any)
-    let attachmentsArr = [];
-    if (req.files && req.files.length > 0) {
-      attachmentsArr = req.files.map((file) => file.filename);
-    } else if (req.body.attachment_url) {
-      // If attachment_url is passed as a JSON string or an array, ensure it’s an array
-      attachmentsArr =
-        typeof req.body.attachment_url === "string"
-          ? JSON.parse(req.body.attachment_url)
-          : req.body.attachment_url;
-    }
-    const attachmentsJson = JSON.stringify(attachmentsArr);
-
+    // Get the existing project so we can fallback on its attachments if needed
     const existingProject = await projectService.getProjectById(id);
     if (!existingProject) {
       return res.status(404).json({ message: "Project not found" });
     }
 
+    // Determine attachments:
+    let attachmentsArr = [];
+    if (req.files && req.files.length > 0) {
+      attachmentsArr = req.files.map((file) => file.filename);
+    } else if (req.body.attachment_url) {
+      attachmentsArr =
+        typeof req.body.attachment_url === "string"
+          ? JSON.parse(req.body.attachment_url)
+          : req.body.attachment_url;
+    } else {
+      // Fallback to previously stored attachments if update form does not send them
+      attachmentsArr = existingProject.attachment_url || [];
+    }
+    const attachmentsJson = JSON.stringify(attachmentsArr);
+
     // Convert JSON fields
-    const projectCategoryJson = JSON.stringify(project_category);
-    const employeeListJson = JSON.stringify(employee_list || []);
+    const projectCategoryJson =
+      typeof project_category === "string"
+        ? project_category
+        : JSON.stringify(project_category || []);
+    const employeeListJson =
+      typeof employee_list === "string"
+        ? employee_list
+        : JSON.stringify(employee_list || []);
 
     // Format dates for project
     const formattedStartDate = start_date
@@ -280,7 +288,7 @@ exports.updateProject = async (req, res) => {
       ? new Date(end_date).toISOString().split("T")[0]
       : null;
 
-    // Update project details (note the attachmentsJson being passed)
+    // Update project details (pass attachmentsJson)
     await projectService.updateProject(id, [
       company_name,
       project_name,
@@ -310,8 +318,14 @@ exports.updateProject = async (req, res) => {
     ]);
 
     // Update milestones
-    if (Array.isArray(milestones)) {
-      for (const milestone of milestones) {
+    let parsedMilestones = [];
+    if (milestones) {
+      parsedMilestones =
+        typeof milestones === "string" ? JSON.parse(milestones) : milestones;
+    }
+
+    if (Array.isArray(parsedMilestones)) {
+      for (const milestone of parsedMilestones) {
         const formattedMilestoneStart = milestone.start_date
           ? new Date(milestone.start_date).toISOString().split("T")[0]
           : null;
@@ -320,12 +334,12 @@ exports.updateProject = async (req, res) => {
           : null;
 
         if (milestone.id) {
-          // Update existing milestone
+          // Update existing milestone (including the status)
           await projectService.updateMilestone(milestone.id, [
             milestone.details,
             formattedMilestoneStart,
             formattedMilestoneEnd,
-            milestone.status,
+            milestone.status, // this should be "Completed" if sent that way
             milestone.dependency,
             milestone.assigned_to,
             milestone.id,
@@ -348,10 +362,20 @@ exports.updateProject = async (req, res) => {
 
     // Update financial details
     try {
-      if (Array.isArray(financialDetails) && financialDetails.length > 0) {
+      // Extract financialDetails from req.body and parse if it's a string
+      let { financialDetails = [] } = req.body;
+      const parsedFinancialDetails =
+        typeof financialDetails === "string"
+          ? JSON.parse(financialDetails)
+          : financialDetails;
+
+      if (
+        Array.isArray(parsedFinancialDetails) &&
+        parsedFinancialDetails.length > 0
+      ) {
         // Synchronize financialDetails with milestones based on a common field
         if (Array.isArray(milestones)) {
-          financialDetails.forEach((finance) => {
+          parsedFinancialDetails.forEach((finance) => {
             if (!finance.milestone_id) {
               const matchedMilestone = milestones.find(
                 (m) => m.details === finance.milestone_details
@@ -368,7 +392,7 @@ exports.updateProject = async (req, res) => {
           });
         }
 
-        for (const financial of financialDetails) {
+        for (const financial of parsedFinancialDetails) {
           if (!financial.milestone_id) {
             console.error(
               "Missing milestone_id for financial detail",
@@ -393,7 +417,7 @@ exports.updateProject = async (req, res) => {
           const m_gst_amount = Number(financial.m_gst_amount) || 0;
           const m_total_amount = Number(financial.m_total_amount) || 0;
 
-          // Convert completed_date if provided (format as MySQL datetime string) or null
+          // Format completed_date if provided, else set to null
           const formattedCompletedDate = financial.completed_date
             ? new Date(financial.completed_date)
                 .toISOString()
@@ -401,7 +425,7 @@ exports.updateProject = async (req, res) => {
                 .replace("T", " ")
             : null;
 
-          const updateParams = [
+          let updateParams = [
             project_amount,
             tds_percentage,
             tds_amount,
@@ -418,9 +442,18 @@ exports.updateProject = async (req, res) => {
             financial.status || "Pending",
             formattedCompletedDate,
             financial.milestone_id,
-            financial.id, // WHERE clause
+            financial.id, // Unique financial detail ID for WHERE clause
           ];
-          console.log("Update Financial Details Params:", updateParams);
+
+          // Sanitize parameters: replace undefined with null
+          updateParams = updateParams.map((param) =>
+            param === undefined ? null : param
+          );
+
+          console.log(
+            "Sanitized Update Financial Details Params:",
+            updateParams
+          );
           await projectService.updateFinancialDetails(updateParams);
         }
       } else {

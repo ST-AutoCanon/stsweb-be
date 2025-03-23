@@ -98,7 +98,7 @@ ORDER BY
   FROM 
     employees 
   WHERE 
-    role = 'Team Lead' AND department_id = ?
+    role = 'Manager' AND department_id = ?
   `,
 
   FETCH_THREADS: `
@@ -149,11 +149,26 @@ ORDER BY
       SELECT id FROM employee_queries WHERE thread_id = ?
   ) AND recipient_id = ?
   AND is_read = FALSE;
-  `,
+`,
+
+  MARK_MESSAGES_AS_READ_ADMIN: `
+  UPDATE message_read_status
+  SET is_read = TRUE, read_at = NOW()
+  WHERE message_id IN (
+      SELECT id FROM employee_queries WHERE thread_id = ?
+  ) AND is_read = FALSE;
+`,
 
   UNREAD_STATUS: `
   INSERT INTO message_read_status (message_id, recipient_id, is_read) VALUES ?
   `,
 
   GET_ADMIN: `SELECT employee_id FROM employees WHERE role = 'Admin'`,
+  GET_HR: `SELECT employee_id FROM employees WHERE role = 'HR'`,
+
+  UPDATE_LATEST_MESSAGE: `
+    UPDATE threads
+    SET latest_message = ?, updated_at = NOW()
+    WHERE id = ?
+  `,
 };
