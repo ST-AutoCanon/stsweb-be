@@ -7,15 +7,12 @@ const fs = require("fs");
 
 // Middleware for logging requests
 router.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
   next();
 });
 
 // Route to fetch an attachment as a blob
 router.get("/attachments/:filename", (req, res) => {
   const { filename } = req.params;
-
-  console.log(`Fetching file: ${filename}`);
 
   // Prevent directory traversal attacks
   if (filename.includes("..") || filename.includes("/")) {
@@ -26,8 +23,6 @@ router.get("/attachments/:filename", (req, res) => {
   const filePath = path.join(__dirname, "..", "uploads", filename);
 
   if (fs.existsSync(filePath)) {
-    console.log(`File found: ${filename}`);
-
     const mimeType =
       {
         ".jpg": "image/jpeg",
@@ -48,22 +43,23 @@ router.get("/attachments/:filename", (req, res) => {
 });
 
 // Route to start a new thread
-router.post("/threads", (req, res, next) => {
-  console.log(`Starting new thread by: ${req.body.sender_id || "Unknown"}`);
-  next();
-}, employeeQueriesHandler.startThread);
+router.post(
+  "/threads",
+  (req, res, next) => {
+    next();
+  },
+  employeeQueriesHandler.startThread
+);
 
 // Route to add a message with file upload
 router.post(
   "/threads/:thread_id/messages",
   (req, res, next) => {
-    console.log(`Adding message to thread ${req.params.thread_id}`);
     next();
   },
-  employeeQueriesHandler.upload.single("attachment"), // Use upload from handler
+  employeeQueriesHandler.upload.single("attachment"),
   (req, res, next) => {
     if (req.file) {
-      console.log(`File uploaded: ${req.file.filename}`);
     }
     next();
   },
@@ -71,29 +67,44 @@ router.post(
 );
 
 // Other routes with logging
-router.get("/threads/:thread_id/messages", (req, res, next) => {
-  console.log(`Fetching messages for thread ${req.params.thread_id}`);
-  next();
-}, employeeQueriesHandler.getThreadMessages);
+router.get(
+  "/threads/:thread_id/messages",
+  (req, res, next) => {
+    next();
+  },
+  employeeQueriesHandler.getThreadMessages
+);
 
-router.put("/threads/:thread_id/close", (req, res, next) => {
-  console.log(`Closing thread ${req.params.thread_id}`);
-  next();
-}, employeeQueriesHandler.closeThread);
+router.put(
+  "/threads/:thread_id/close",
+  (req, res, next) => {
+    next();
+  },
+  employeeQueriesHandler.closeThread
+);
 
-router.get("/threads", (req, res, next) => {
-  console.log(`Fetching all threads`);
-  next();
-}, employeeQueriesHandler.getAllThreads);
+router.get(
+  "/threads",
+  (req, res, next) => {
+    next();
+  },
+  employeeQueriesHandler.getAllThreads
+);
 
-router.get("/threads/employee/:employeeId", (req, res, next) => {
-  console.log(`Fetching threads for employee ${req.params.employeeId}`);
-  next();
-}, employeeQueriesHandler.getThreadsByEmployee);
+router.get(
+  "/threads/employee/:employeeId",
+  (req, res, next) => {
+    next();
+  },
+  employeeQueriesHandler.getThreadsByEmployee
+);
 
-router.put("/threads/:thread_id/messages/read", (req, res, next) => {
-  console.log(`Marking messages as read for thread ${req.params.thread_id}`);
-  next();
-}, employeeQueriesHandler.markMessagesAsRead);
+router.put(
+  "/threads/:thread_id/messages/read",
+  (req, res, next) => {
+    next();
+  },
+  employeeQueriesHandler.markMessagesAsRead
+);
 
 module.exports = router;
