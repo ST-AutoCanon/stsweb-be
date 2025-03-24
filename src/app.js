@@ -26,7 +26,7 @@ const dashboardReimbursementRoutes = require("./routes/dashboardReimbursementRou
 const workDayRoutes = require("./routes/empWorkDay");
 const workHourSummaryRoutes = require("./routes/empWorkHour");
 const empLeaveQueryDashboard = require("./routes/empLeaveQueryDashboardRoutes");
-
+require("./services/punchCronService");
 //payrollroutes
 
 const admindashboardReimbursementRoutes = require("./routes/adminDashReimbursementRoutes");

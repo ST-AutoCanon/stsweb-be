@@ -1,3 +1,4 @@
+
 const LeaveQueriesService = require("../services/leaveQueriesService");
 
 const getLeaveQueriesHandler = async (req, res) => {
@@ -11,7 +12,11 @@ const getLeaveQueriesHandler = async (req, res) => {
     const leaveQueries = await LeaveQueriesService.getLeaveQueriesForDashboard(employeeId);
     
     if (!leaveQueries || leaveQueries.length === 0) {
-      return res.status(404).json({ status: "error", message: "No leave queries found for the given employee ID" });
+      return res.status(200).json({
+        status: "success",
+        message: "No leave queries found for the given employee ID.",
+        leaveQueries: [], // Returning an empty array instead of an error
+      });
     }
     
     res.status(200).json({
