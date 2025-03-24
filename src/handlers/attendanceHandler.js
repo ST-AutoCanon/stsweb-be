@@ -119,16 +119,27 @@ getLatestPunchOut: async (req, res) => {
   }
 }
 
-,getLatestPunchRecord : async (req, res) => {
+,
+
+getLatestPunchRecord: async (req, res) => {
   try {
     const { employeeId } = req.params;
+    
+    if (!employeeId) {
+      return res.status(400).json({ success: false, message: "Employee ID is required" });
+    }
+
     const latestPunch = await attendanceService.fetchLatestPunchRecord(employeeId);
 
     if (!latestPunch) {
-      return res.status(404).json({ message: "No punch record found" });
+      return res.status(200).json({
+        success: true,
+        message: "No punch record found.",
+        data: null, // Explicitly returning null instead of throwing an error
+      });
     }
 
-    res.json({ success: true, data: latestPunch });
+    res.status(200).json({ success: true, data: latestPunch });
   } catch (error) {
     console.error("Error fetching latest punch record:", error);
     res.status(500).json({ success: false, message: "Server error" });
