@@ -5,7 +5,6 @@ const path = require("path");
 const fs = require("fs");
 const { getIo } = require("../socket");
 
-// Configure Multer storage (moved from routes)
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadPath = path.join(__dirname, "..", "uploads");
@@ -20,19 +19,19 @@ const storage = multer.diskStorage({
 });
 
 const upload = multer({ storage });
-exports.upload = upload; // Export the upload middleware
+exports.upload = upload;
 
-// Handler for starting a new thread (query)
 exports.startThread = async (req, res) => {
-  const { sender_id, sender_role, department_id, subject, message } = req.body;
-  console.log(req.body);
+  const { sender_id, sender_role, department_id, subject, message, role } =
+    req.body;
   try {
     const threadId = await EmployeeQueries.startThread(
       sender_id,
       sender_role,
       department_id,
       subject,
-      message
+      message,
+      role
     );
     const response = ErrorHandler.generateSuccessResponse(
       201,
@@ -50,7 +49,6 @@ exports.startThread = async (req, res) => {
   }
 };
 
-// Handler for adding a message with an attachment
 exports.addMessage = async (req, res) => {
   try {
     const { thread_id } = req.params;
@@ -60,9 +58,6 @@ exports.addMessage = async (req, res) => {
       ? `${req.protocol}://${req.get("host")}/attachments/${req.file.filename}`
       : null;
 
-    console.log("Request Params:", req.params);
-    console.log("Request Body:", req.body);
-
     if (!recipient_id) {
       return res
         .status(400)
@@ -71,14 +66,15 @@ exports.addMessage = async (req, res) => {
         );
     }
 
-    // Step 1: Add message to database and get messageId
     const messageId = await EmployeeQueries.addMessage(
       thread_id,
       sender_id,
       sender_role,
       message,
+      recipient_id,
       attachment_url
     );
+
     if (!messageId) {
       return res
         .status(500)
@@ -87,49 +83,26 @@ exports.addMessage = async (req, res) => {
         );
     }
 
-    // Generate created_at timestamp
     const created_at = new Date().toISOString();
 
-    // Step 2: Fetch all admin employee IDs
-    const adminIds = await EmployeeQueries.getAdminIds();
+    const newMessage = {
+      id: messageId,
+      thread_id,
+      sender_id,
+      sender_role,
+      message,
+      attachment_url,
+      created_at,
+    };
 
-    // Step 3: Merge selected recipient(s) + admins (avoid duplicates)
-    const allRecipients = [...new Set([recipient_id, ...adminIds])];
-
-    // Step 4: Mark message unread for all recipients
-    await EmployeeQueries.markMessageUnreadForRecipients(
-      messageId,
-      allRecipients
-    );
-
-    // Emit socket event with created_at
     const io = getIo();
-    if (io) {
-      io.emit("receiveMessage", {
-        thread_id,
-        sender_id,
-        sender_role,
-        message,
-        attachment_url,
-        created_at,
-      });
-    }
+    io.emit("receiveMessage", newMessage);
 
-    // Return the newly created message object
     res.status(200).json({
       status: "success",
       code: 200,
       message: "Message added successfully",
-      data: {
-        message: {
-          id: messageId,
-          sender_id,
-          sender_role,
-          message,
-          attachment_url,
-          created_at,
-        },
-      },
+      data: { message: newMessage },
     });
   } catch (error) {
     console.error("Error adding message:", error);
@@ -139,7 +112,6 @@ exports.addMessage = async (req, res) => {
   }
 };
 
-// Handler to retrieve all messages in a thread
 exports.getThreadMessages = async (req, res) => {
   const { thread_id } = req.params;
   try {
@@ -160,7 +132,6 @@ exports.getThreadMessages = async (req, res) => {
   }
 };
 
-// Handler for closing a thread with feedback
 exports.closeThread = async (req, res) => {
   const { thread_id } = req.params;
   const { feedback, note } = req.body;
@@ -181,7 +152,6 @@ exports.closeThread = async (req, res) => {
   }
 };
 
-// Handler to get all threads for admin review
 exports.getAllThreads = async (req, res) => {
   try {
     const threads = await EmployeeQueries.getAllThreads();
@@ -192,7 +162,6 @@ exports.getAllThreads = async (req, res) => {
     );
     res.status(200).send(response);
   } catch (error) {
-    console.log("Failed to retrieve threads:", error);
     console.error(error);
     const response = ErrorHandler.generateErrorResponse(
       500,
@@ -202,7 +171,6 @@ exports.getAllThreads = async (req, res) => {
   }
 };
 
-// Handler to get threads by employee
 exports.getThreadsByEmployee = async (req, res) => {
   const { employeeId } = req.params;
   try {
@@ -222,12 +190,11 @@ exports.getThreadsByEmployee = async (req, res) => {
   }
 };
 
-// Handler to mark messages as read
 exports.markMessagesAsRead = async (req, res) => {
   const { thread_id } = req.params;
-  const { sender_id } = req.body;
+  const { sender_id, user_role } = req.body;
   try {
-    await EmployeeQueries.markMessagesAsRead(thread_id, sender_id);
+    await EmployeeQueries.markMessagesAsRead(thread_id, sender_id, user_role);
     const response = ErrorHandler.generateSuccessResponse(
       200,
       "Messages marked as read."
