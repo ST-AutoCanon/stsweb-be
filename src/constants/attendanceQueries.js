@@ -130,8 +130,8 @@ leave_days AS (
         FROM leavequeries
         WHERE status = 'approved'
         AND employee_id = ?
-        AND (MONTH(start_date) = MONTH(NOW()) OR MONTH(end_date) = MONTH(NOW()))
-        AND (YEAR(start_date) = YEAR(NOW()) OR YEAR(end_date) = YEAR(NOW()))
+      AND start_date <= LAST_DAY(NOW())  
+        AND end_date >= DATE_FORMAT(NOW(), '%Y-%m-01')
 
         UNION ALL
 
@@ -139,7 +139,9 @@ leave_days AS (
         FROM expanded_leaves
         WHERE leave_date < end_date
     )
-    SELECT DISTINCT leave_date FROM expanded_leaves
+    SELECT DISTINCT leave_date
+        FROM expanded_leaves
+WHERE leave_date IN (SELECT work_date FROM working_days)
 ),
 present_days AS (
     SELECT DISTINCT DATE(punchin_time) AS punch_date FROM emp_attendence
