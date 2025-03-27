@@ -81,9 +81,12 @@ const updateLeaveRequest = async ({ leaveId, status, comments = null }) => {
     throw new Error("Failed to update leave request.");
   }
 };
-
 /**
  * Submit a new leave request.
+ *
+ * Note: Validations (e.g., required fields, date range, advance notice) are assumed to be performed before calling this method.
+ * This function now also performs overlapping validation for all leave types (Casual, Sick, Vacation, Other)
+ * and considers both full-day and half-day requests.
  *
  * @param {Object} data - Data for submitting the leave request.
  * @param {string} data.employeeId - ID of the employee submitting the request.
@@ -91,6 +94,7 @@ const updateLeaveRequest = async ({ leaveId, status, comments = null }) => {
  * @param {string} data.endDate - Leave end date.
  * @param {string} data.reason - Reason for leave.
  * @param {string} data.leavetype - Type of leave (e.g., Sick, Vacation).
+ * @param {string} data.h_f_day - "Full Day" or "Half Day".
  * @returns {Promise<Object>} Details of the submitted leave request.
  */
 const submitLeaveRequest = async ({
@@ -102,6 +106,41 @@ const submitLeaveRequest = async ({
   leavetype,
 }) => {
   try {
+    // Overlapping Validation:
+    // Retrieve existing leave requests for this employee
+    const existingLeaves = await getLeaveRequests(employeeId);
+    const newStart = new Date(startDate);
+    const newEnd = new Date(endDate);
+    const newDayStr = newStart.toISOString().split("T")[0];
+
+    const hasOverlap = existingLeaves.some((leave) => {
+      const existingStart = new Date(leave.start_date);
+      const existingEnd = new Date(leave.end_date);
+      const existingStartStr = existingStart.toISOString().split("T")[0];
+      const existingEndStr = existingEnd.toISOString().split("T")[0];
+
+      // For single-day or half-day requests:
+      if (
+        newDayStr === newEnd.toISOString().split("T")[0] ||
+        h_f_day === "Half Day"
+      ) {
+        return existingStartStr === newDayStr || existingEndStr === newDayStr;
+      } else {
+        // For multi-day full-day requests: standard range overlap check
+        return (
+          (newStart >= existingStart && newStart <= existingEnd) ||
+          (newEnd >= existingStart && newEnd <= existingEnd) ||
+          (existingStart >= newStart && existingEnd <= newEnd)
+        );
+      }
+    });
+
+    if (hasOverlap) {
+      throw new Error(
+        "You already have a leave request on the selected date(s)."
+      );
+    }
+
     const query = queries.INSERT_LEAVE_REQUEST;
     console.log(query);
     const params = [employeeId, startDate, endDate, h_f_day, reason, leavetype];
@@ -164,6 +203,10 @@ const getLeaveRequests = async (
 /**
  * Edit an existing leave request if it is still pending.
  *
+ * Note: Validations (e.g., required fields, date range, advance notice) should be performed before calling this method.
+ * This function now also performs overlapping validation for all leave types (including Sick and Other)
+ * and considers both full-day and half-day requests (excluding the current leave).
+ *
  * @param {Object} data - Data for updating the leave request.
  * @param {number} data.leaveId - Leave request ID.
  * @param {string} data.employeeId - Employee ID (to verify ownership).
@@ -171,6 +214,7 @@ const getLeaveRequests = async (
  * @param {string} data.endDate - New leave end date.
  * @param {string} data.reason - Updated reason for leave.
  * @param {string} data.leavetype - Updated leave type.
+ * @param {string} data.h_f_day - "Full Day" or "Half Day".
  * @returns {Promise<Object>} Updated leave request details.
  */
 const editLeaveRequest = async ({
@@ -197,6 +241,38 @@ const editLeaveRequest = async ({
       throw new Error(
         "Leave request cannot be edited after approval or rejection."
       );
+    }
+
+    // Overlapping Validation (exclude the current leave request)
+    const existingLeaves = await getLeaveRequests(employeeId);
+    const newStart = new Date(startDate);
+    const newEnd = new Date(endDate);
+    const newDayStr = newStart.toISOString().split("T")[0];
+
+    const hasOverlap = existingLeaves.some((leave) => {
+      // Skip the current leave request being edited
+      if (leave.id == leaveId) return false;
+      const existingStart = new Date(leave.start_date);
+      const existingEnd = new Date(leave.end_date);
+      const existingStartStr = existingStart.toISOString().split("T")[0];
+      const existingEndStr = existingEnd.toISOString().split("T")[0];
+
+      if (
+        newDayStr === newEnd.toISOString().split("T")[0] ||
+        h_f_day === "Half Day"
+      ) {
+        return existingStartStr === newDayStr || existingEndStr === newDayStr;
+      } else {
+        return (
+          (newStart >= existingStart && newStart <= existingEnd) ||
+          (newEnd >= existingStart && newEnd <= existingEnd) ||
+          (existingStart >= newStart && existingEnd <= newEnd)
+        );
+      }
+    });
+
+    if (hasOverlap) {
+      throw new Error("The new dates conflict with an existing leave request.");
     }
 
     // Update leave request
