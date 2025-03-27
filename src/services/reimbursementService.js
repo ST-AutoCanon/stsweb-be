@@ -71,6 +71,31 @@ const mapAttachmentsToReimbursements = (
   return reimbursements;
 };
 
+// New service function to update payment status and paid_date
+exports.updatePaymentStatus = async (id, payment_status, paid_date) => {
+  try {
+    console.log("Service: Updating payment status...");
+    console.log("Reimbursement ID:", id);
+    console.log("New Payment Status:", payment_status);
+    console.log("Paid Date:", paid_date);
+
+    // Assumes you have defined UPDATE_PAYMENT_STATUS in your queries constants.
+    const result = await db.query(queries.UPDATE_PAYMENT_STATUS, [
+      payment_status,
+      paid_date,
+      id,
+    ]);
+
+    console.log("Database update result:", result);
+
+    // Return an object with updated information
+    return { id, payment_status, paid_date };
+  } catch (error) {
+    console.error("Error in updatePaymentStatus service:", error);
+    throw error;
+  }
+};
+
 exports.getAttachmentsByReimbursementIds = async (reimbursementIds) => {
   if (!reimbursementIds.length) return [];
   const [attachments] = await db.query(
@@ -149,24 +174,23 @@ exports.createReimbursement = async (reimbursementData) => {
   try {
     console.log("Received Data in Service Layer:", reimbursementData);
 
-    const {
-      employeeId,
-      claim_type,
-      date, // For single-date claims
-      from_date,
-      to_date,
-    } = reimbursementData;
+    // Validate employeeId
+    const employeeId = reimbursementData.employeeId;
+    if (!employeeId || employeeId === "undefined") {
+      throw new Error("Employee ID is invalid or missing.");
+    }
+
+    const { claim_type, date, from_date, to_date } = reimbursementData;
 
     let existingClaim;
-
     if (date) {
-      // **Check if a claim with the same type & date already exists**
+      // Check if a claim with the same type & date already exists
       [existingClaim] = await db.query(
         queries.CHECK_EXISTING_REIMBURSEMENT_SINGLE_DATE,
         [employeeId, claim_type, date]
       );
     } else if (from_date && to_date) {
-      // **Check if a claim of the same type exists within the date range**
+      // Check if a claim of the same type exists within the date range
       [existingClaim] = await db.query(
         queries.CHECK_EXISTING_REIMBURSEMENT_DATE_RANGE,
         [employeeId, claim_type, from_date, to_date, from_date, to_date]
@@ -177,13 +201,19 @@ exports.createReimbursement = async (reimbursementData) => {
       const error = new Error(
         "A reimbursement claim of this type has already been submitted."
       );
-      error.statusCode = 400; // Set custom status code
+      error.statusCode = 400; // Custom status code
       throw error;
     }
 
+    // Process department_id: parse and validate
+    let department_id = parseInt(reimbursementData.department_id, 10);
+    if (isNaN(department_id)) {
+      department_id = null;
+    }
+
     const reimbursementArray = [
-      employeeId,
-      reimbursementData.department_id,
+      employeeId, // Use the validated employeeId here
+      department_id,
       claim_type,
       reimbursementData.transport_type || null,
       from_date || null,
@@ -254,7 +284,8 @@ exports.updateReimbursementStatus = async (
   approver_comments,
   approver_id,
   approver_name,
-  approver_designation
+  approver_designation,
+  project // New parameter
 ) => {
   if (!["approved", "rejected"].includes(status)) {
     throw new Error("Invalid status. Allowed values: 'approved', 'rejected'");
@@ -266,13 +297,16 @@ exports.updateReimbursementStatus = async (
   console.log("Approver ID:", approver_id);
   console.log("Approver Name:", approver_name);
   console.log("Approver Designation:", approver_designation);
+  console.log("Project:", project);
 
+  // Update query now includes the project field. Make sure your query (UPDATE_REIMBURSEMENT_STATUS) is updated accordingly.
   const result = await db.query(queries.UPDATE_REIMBURSEMENT_STATUS, [
     status,
     approver_comments,
     approver_id,
     approver_name,
     approver_designation,
+    project, // Include project here
     new Date(),
     id,
   ]);
@@ -286,6 +320,7 @@ exports.updateReimbursementStatus = async (
     approver_id,
     approver_name,
     approver_designation,
+    project, // Return project in the response as well
     approved_date: new Date(),
   };
 };
@@ -299,6 +334,7 @@ exports.getAttachments = async (reimbursementId) => {
   return rows;
 };
 
+// In updateReimbursement:
 exports.updateReimbursement = async (reimbursementId, updateData) => {
   try {
     console.log("Received updateData in service:", updateData);
@@ -328,8 +364,14 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
       service_provider,
     } = updateData;
 
+    // Process department_id to ensure it's either an integer or null
+    let processedDepartmentId = parseInt(department_id, 10);
+    if (isNaN(processedDepartmentId)) {
+      processedDepartmentId = null;
+    }
+
     const [result] = await db.query(queries.UPDATE_REIMBURSEMENT, [
-      department_id,
+      processedDepartmentId,
       claim_type,
       transport_type,
       fromDate,
@@ -415,4 +457,18 @@ exports.getTeamReimbursements = async (
   });
 
   return filteredReimbursements;
+};
+
+exports.getAllProjects = async () => {
+  try {
+    const [projects] = await db.query(queries.GET_ALL_PROJECTS);
+
+    if (!projects.length) return [];
+
+    // Extract only project names
+    return projects.map((project) => project.project_name);
+  } catch (error) {
+    console.error("Error fetching projects:", error);
+    throw new Error("Database query failed.");
+  }
 };
