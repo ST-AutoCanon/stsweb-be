@@ -108,6 +108,8 @@ exports.addEmployee = async (employeeData) => {
   const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
 
   const params = [
+    employeeData.domain || "",
+    employeeData.employee_type || "",
     employeeData.first_name || "",
     employeeData.last_name || "",
     employeeData.dob || "",
@@ -162,6 +164,14 @@ exports.editEmployee = async (employeeId, updatedData) => {
     }
   }
 
+  if (updatedData.domain) {
+    updates.push("domain = ?");
+    params.push(updatedData.domain);
+  }
+  if (updatedData.employee_type) {
+    updates.push("employee_type = ?");
+    params.push(updatedData.employee_type);
+  }
   if (updatedData.first_name) {
     updates.push("first_name = ?");
     params.push(updatedData.first_name);
