@@ -38,11 +38,9 @@ const salarylastmonthtotal = require("./routes/adminPayrollRoutes");
 //reimbursement
 const reimbursementRoutes = require("./routes/reimbursementRoute");
 const adminSalaryStatementRoutes = require("./routes/adminSalaryStatementRoute");
-const { initializeSocket } = require("./socket");
 
 const app = express();
 const server = http.createServer(app);
-const io = initializeSocket(server);
 
 app.use(
   cors({

@@ -71,6 +71,18 @@ router.get(
   reimbursementHandler.getReimbursementsByEmployee
 );
 
+// Route to update reimbursement status (approval/rejection)
+router.put(
+  "/reimbursement/status/:id",
+  reimbursementHandler.updateReimbursementStatus
+);
+
+// New route: Update payment status (only for admin, finance manager, team lead)
+router.put(
+  "/reimbursement/payment-status/:id",
+  reimbursementHandler.updatePaymentStatus
+);
+
 // Updated route with multiple file uploads
 router.post(
   "/reimbursement",
@@ -94,6 +106,9 @@ router.get(
   "/team/:teamLeadId/reimbursements",
   reimbursementHandler.getTeamReimbursements
 );
+
+router.get("/projectdrop", reimbursementHandler.getAllProjects);
+
 router.get(
   "/reimbursement/:reimbursementId/attachments",
   reimbursementHandler.getAttachmentsByReimbursementId

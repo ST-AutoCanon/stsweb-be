@@ -119,6 +119,72 @@ exports.getReimbursementsByEmployee = async (req, res) => {
     res.status(500).json({ message: "Failed to fetch reimbursements" });
   }
 };
+exports.updatePaymentStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    let { payment_status, user_role } = req.body; // Expect user_role from the frontend
+
+    console.log("Received request to update payment status:");
+    console.log("Reimbursement ID:", id);
+    console.log("User Role:", user_role);
+    console.log("Payment Status:", payment_status);
+
+    // Convert "payable" -> "paid" for internal storage
+    if (payment_status === "payable") {
+      payment_status = "paid";
+    }
+
+    // Validate provided payment_status
+    if (!payment_status || !["pending", "paid"].includes(payment_status)) {
+      console.log("Invalid payment status received:", payment_status);
+      return res.status(400).json({
+        error: "Invalid payment status. Allowed values: 'pending' or 'paid'.",
+      });
+    }
+
+    // Restrict update for employees
+    if (user_role === "employee") {
+      console.log("Unauthorized access attempt by employee.");
+      return res
+        .status(403)
+        .json({ error: "You are not authorized to update payment status." });
+    }
+
+    // Ensure that payment status is only updated if the reimbursement is approved.
+    const [rows] = await db.query(
+      "SELECT status FROM reimbursement WHERE id = ?",
+      [id]
+    );
+
+    console.log("Reimbursement status from DB:", rows);
+
+    if (!rows.length || rows[0].status !== "approved") {
+      console.log("Reimbursement status is not approved or does not exist.");
+      return res.status(400).json({
+        error:
+          "Payment status can only be updated for reimbursement with approved status.",
+      });
+    }
+
+    // Set paid_date only if the status is "paid"
+    const paid_date = payment_status === "paid" ? new Date() : null;
+
+    // Call service to update payment_status and paid_date
+    console.log("Updating payment status in the database...");
+    const updated = await reimbursementService.updatePaymentStatus(
+      id,
+      payment_status,
+      paid_date
+    );
+
+    console.log("Database update response:", updated);
+
+    res.json({ message: "Payment status updated", data: updated });
+  } catch (error) {
+    console.error("Error updating payment status:", error);
+    res.status(500).json({ error: "Error updating payment status" });
+  }
+};
 
 exports.getAllReimbursements = async (req, res) => {
   try {
@@ -144,9 +210,22 @@ exports.createReimbursement = async (req, res) => {
     console.log("Request Body:", req.body);
     console.log("Uploaded Files:", req.files);
 
+    // Instead of reading employeeId from req.body,
+    // use it from the authenticated user if available:
+    const employeeId = req.user ? req.user.employeeId : req.body.employeeId;
+
+    if (!employeeId || employeeId === "undefined") {
+      return res
+        .status(400)
+        .json({ error: "Employee ID is invalid or missing." });
+    }
+
+    const { role } = req.body; // role from request or from req.user if available
+
     const reimbursementData = {
-      employeeId: req.body.employeeId,
-      department_id: req.body.department_id,
+      employeeId, // Validated above
+      // For Admin, set department_id to null; for employees, use the provided value
+      department_id: role === "Admin" ? null : req.body.department_id,
       claim_type: req.body.claim_type,
       transport_type: req.body.transport_type,
       transport_amount: req.body.transport_amount,
@@ -175,6 +254,18 @@ exports.createReimbursement = async (req, res) => {
     const newReimbursement = await reimbursementService.createReimbursement(
       reimbursementData
     );
+    console.log("line 257");
+    if (role === "Admin") {
+      console.log("line 259");
+      await reimbursementService.updateReimbursementStatus(
+        newReimbursement.id,
+        "approved",
+        "Auto-approved by Admin",
+        employeeId,
+        "Admin",
+        "Administrator"
+      );
+    }
 
     res.status(201).json({
       message: "Reimbursement request submitted successfully",
@@ -182,12 +273,9 @@ exports.createReimbursement = async (req, res) => {
     });
   } catch (error) {
     console.error("Error creating reimbursement:", error);
-
-    // Send specific error message if it's a known issue
     if (error.statusCode === 400) {
       return res.status(400).json({ error: error.message });
     }
-
     res.status(500).json({ error: "Error creating reimbursement" });
   }
 };
@@ -195,6 +283,7 @@ exports.createReimbursement = async (req, res) => {
 exports.updateReimbursement = async (req, res) => {
   try {
     const { id } = req.params;
+    const { role } = req.body; // Extract role from request
 
     console.log("Update Body:", req.body);
     console.log("Uploaded Files:", req.files);
@@ -202,7 +291,12 @@ exports.updateReimbursement = async (req, res) => {
     // Convert string fields to numbers where necessary
     const updateData = {
       employeeId: req.body.employeeId,
-      department_id: parseInt(req.body.department_id, 10) || null, // Convert to number if needed
+      department_id:
+        role === "Admin"
+          ? null
+          : req.body.department_id !== undefined
+          ? parseInt(req.body.department_id, 10)
+          : null,
       claim_type: req.body.claim_type,
       comments: req.body.comments !== "undefined" ? req.body.comments : "",
       fromDate: req.body.fromDate || null,
@@ -241,7 +335,8 @@ exports.updateReimbursement = async (req, res) => {
 exports.updateReimbursementStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, approver_comments, approver_id } = req.body;
+    // Destructure project from the request body along with other fields
+    const { status, approver_comments, approver_id, project } = req.body;
 
     if (!status || !["approved", "rejected"].includes(status)) {
       return res.status(400).json({
@@ -266,14 +361,15 @@ exports.updateReimbursementStatus = async (req, res) => {
     console.log("Extracted Approver Name:", approver_name);
     console.log("Extracted Approver Designation:", approver_designation);
 
-    // Pass correct values to update function
+    // Pass the project along with other values to the service function
     const updatedStatus = await reimbursementService.updateReimbursementStatus(
       id,
       status,
       approver_comments,
       approver_id,
       approver_name,
-      approver_designation
+      approver_designation,
+      project
     );
 
     console.log("Reimbursement Update Response:", updatedStatus);
@@ -414,6 +510,16 @@ exports.getTeamReimbursements = async (req, res) => {
     res.status(200).json(teamReimbursements);
   } catch (error) {
     console.error("Error fetching team reimbursements:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+exports.getAllProjects = async (req, res) => {
+  try {
+    const projects = await reimbursementService.getAllProjects();
+    res.status(200).json(projects);
+  } catch (error) {
+    console.error("Error fetching projects:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 };
