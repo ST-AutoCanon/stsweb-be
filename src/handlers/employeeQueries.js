@@ -3,7 +3,6 @@ const ErrorHandler = require("../utils/errorHandler");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
-const { getIo } = require("../socket");
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -95,9 +94,7 @@ exports.addMessage = async (req, res) => {
       created_at,
     };
 
-    const io = getIo();
-    io.emit("receiveMessage", newMessage);
-
+    // WebSocket emission removed since websockets are no longer used.
     res.status(200).json({
       status: "success",
       code: 200,
