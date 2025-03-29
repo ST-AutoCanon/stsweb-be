@@ -1,7 +1,15 @@
 module.exports = (req, res, next) => {
   const idleLimit = 5 * 60 * 1000;
 
-  if (!req.session || !req.session.lastActive) {
+  if (req.path === "/login") {
+    return next();
+  }
+
+  if (!req.session) {
+    return next();
+  }
+
+  if (!req.session.lastActive) {
     req.session.lastActive = Date.now();
     return next();
   }
@@ -19,11 +27,15 @@ module.exports = (req, res, next) => {
           message: "Internal Server Error during logout.",
         });
       }
-      return res.status(401).json({
-        status: "error",
-        code: 401,
-        message: "Session expired due to inactivity.",
-      });
+
+      if (req.path !== "/login") {
+        return res.status(401).json({
+          status: "error",
+          code: 401,
+          message: "Session expired due to inactivity.",
+        });
+      }
+      next();
     });
   } else {
     req.session.lastActive = now;
