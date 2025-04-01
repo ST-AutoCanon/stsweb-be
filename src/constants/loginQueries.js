@@ -217,37 +217,38 @@ SELECT
 
 `,
 
-  GET_EMPLOYEE_LOGIN_DATA_COUNT:
-    `WITH FirstPunch AS (
-    SELECT 
-        employee_id, 
-        MIN(punchin_time) AS first_punchin_time
-    FROM sukalpadata.emp_attendence
-    WHERE punchin_time >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH) 
-    GROUP BY employee_id, DATE(punchin_time)  -- ✅ Consider only the first punch-in per day per employee
+GET_EMPLOYEE_LOGIN_DATA_COUNT:
+`WITH FirstPunch AS (
+SELECT 
+    employee_id, 
+    MIN(punchin_time) AS first_punchin_time
+FROM emp_attendence
+WHERE punchin_time >= DATE_SUB(CURDATE(), INTERVAL 1 MONTH) 
+GROUP BY employee_id, DATE(punchin_time)  
 ),
 HourlyData AS (
-    SELECT 
-        CONCAT(
-            LPAD(HOUR(fp.first_punchin_time), 2, '0'), ':00 - ', 
-            LPAD(HOUR(fp.first_punchin_time) + 1, 2, '0'), ':00'
-        ) AS punchin_label,
-        WEEK(fp.first_punchin_time) AS punchin_week,
-        MONTH(fp.first_punchin_time) AS punchin_month,
-        COUNT(CASE WHEN DATE(fp.first_punchin_time) = CURDATE() THEN 1 END) AS daily_count,
-        COUNT(*) AS total_count
-    FROM FirstPunch fp
-    GROUP BY punchin_label, punchin_week, punchin_month
+SELECT 
+    CONCAT(
+        LPAD(HOUR(fp.first_punchin_time), 2, '0'), ':00 - ', 
+        LPAD(HOUR(fp.first_punchin_time) + 1, 2, '0'), ':00'
+    ) AS punchin_label,
+    WEEK(fp.first_punchin_time, 3) AS punchin_week_in_month, -- ✅ Fix weekly calculation
+    MONTH(fp.first_punchin_time) AS punchin_month,
+    COUNT(CASE WHEN DATE(fp.first_punchin_time) = CURDATE() THEN 1 END) AS daily_count,
+    COUNT(*) AS total_count
+FROM FirstPunch fp
+GROUP BY punchin_label, punchin_week_in_month, punchin_month
 )
 SELECT 
-    punchin_label,
-    daily_count,
-    SUM(total_count) OVER (PARTITION BY punchin_week) AS weekly_count,
-    SUM(total_count) OVER (PARTITION BY punchin_month) AS monthly_count
+punchin_label,
+daily_count,
+SUM(total_count) OVER (PARTITION BY punchin_week_in_month, punchin_month) AS weekly_count, -- ✅ Partition by month and week
+SUM(total_count) OVER (PARTITION BY punchin_month) AS monthly_count
 FROM HourlyData
 ORDER BY STR_TO_DATE(SUBSTRING_INDEX(punchin_label, ' ', 1), '%H');
 
 `,
+
 
   GET_EMPLOYEE_SALARY_RANGE:
     `SELECT 
