@@ -120,4 +120,5 @@ module.exports = {
   `,
 
   GET_ALL_PROJECTS: `SELECT project_name FROM add_project;`,
+  DELETE_ATTACHMENTS_BY_REIMBURSEMENT_ID: `DELETE FROM reimbursement_attachments WHERE reimbursement_id = ?`,
 };
