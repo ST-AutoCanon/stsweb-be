@@ -142,122 +142,48 @@ exports.addEmployee = async (employeeData) => {
  * Edit employee details with safety checks for SQL injection.
  */
 exports.editEmployee = async (employeeId, updatedData) => {
-  const params = [];
-  const updates = [];
+  let departmentId = null;
 
-  // Check if department needs to be updated and get the department ID by name
-  if (updatedData.department) {
-    if (updatedData.role !== "Admin") {
-      const [departmentResult] = await db.execute(
-        queries.GET_DEPARTMENT_ID_BY_NAME,
-        [updatedData.department]
-      );
-      if (departmentResult.length === 0) {
-        throw new Error("Department not found");
-      }
-      updatedData.department_id = departmentResult[0].id;
-      updates.push("department_id = ?");
-      params.push(updatedData.department_id);
-    } else {
-      // If Admin, remove the department_id to avoid updating it
-      delete updatedData.department_id;
+  // If a department is provided (for non-admin), fetch its ID.
+  if (updatedData.department && updatedData.department.trim() !== "") {
+    const [departmentResult] = await db.execute(
+      queries.GET_DEPARTMENT_ID_BY_NAME,
+      [updatedData.department]
+    );
+    if (departmentResult.length === 0) {
+      throw new Error("Department not found");
     }
+    departmentId = departmentResult[0].id;
   }
 
-  if (updatedData.domain) {
-    updates.push("domain = ?");
-    params.push(updatedData.domain);
-  }
-  if (updatedData.employee_type) {
-    updates.push("employee_type = ?");
-    params.push(updatedData.employee_type);
-  }
-  if (updatedData.first_name) {
-    updates.push("first_name = ?");
-    params.push(updatedData.first_name);
-  }
-  if (updatedData.last_name) {
-    updates.push("last_name = ?");
-    params.push(updatedData.last_name);
-  }
-  if (updatedData.email) {
-    updates.push("email = ?");
-    params.push(updatedData.email);
-  }
-  if (updatedData.phone_number) {
-    updates.push("phone_number = ?");
-    params.push(updatedData.phone_number);
-  }
-  if (updatedData.dob) {
-    updates.push("dob = ?");
-    params.push(updatedData.dob);
-  }
-  if (updatedData.address) {
-    updates.push("address = ?");
-    params.push(updatedData.address);
-  }
-  if (updatedData.aadhaar_number) {
-    updates.push("aadhaar_number = ?");
-    params.push(updatedData.aadhaar_number);
-  }
-  if (updatedData.pan_number) {
-    updates.push("pan_number = ?");
-    params.push(updatedData.pan_number);
-  }
-  if (updatedData.position) {
-    updates.push("position = ?");
-    params.push(updatedData.position);
-  }
-  if (updatedData.photo_url) {
-    updates.push("photo_url = ?");
-    params.push(updatedData.photo_url);
-  }
-  if (updatedData.salary) {
-    updates.push("salary = ?");
-    params.push(updatedData.salary);
-  }
-  if (updatedData.role) {
-    updates.push("role = ?");
-    params.push(updatedData.role);
-  }
-  if (updatedData.father_name) {
-    updates.push("father_name = ?");
-    params.push(updatedData.father_name);
-  }
-  if (updatedData.mother_name) {
-    updates.push("mother_name = ?");
-    params.push(updatedData.mother_name);
-  }
-  if (updatedData.gender) {
-    updates.push("gender = ?");
-    params.push(updatedData.gender);
-  }
-  if (updatedData.marital_status) {
-    updates.push("marital_status = ?");
-    params.push(updatedData.marital_status);
-  }
-  if (updatedData.spouse_name) {
-    updates.push("spouse_name = ?");
-    params.push(updatedData.spouse_name);
-  }
-  if (updatedData.marriage_date) {
-    updates.push("marriage_date = ?");
-    params.push(updatedData.marriage_date);
-  }
-
-  if (updates.length === 0) {
-    throw new Error("No fields provided to update.");
-  }
-
-  params.push(employeeId);
-
-  const sqlQuery = `
-    UPDATE employees
-    SET ${updates.join(", ")}
-    WHERE employee_id = ?`;
+  // Build the params array in the order expected by the EDIT_EMPLOYEE query.
+  const params = [
+    updatedData.domain || "",
+    updatedData.employee_type || "",
+    updatedData.first_name || "",
+    updatedData.last_name || "",
+    updatedData.dob || "",
+    updatedData.email || "",
+    updatedData.aadhaar_number || "",
+    updatedData.pan_number || "",
+    updatedData.gender || "",
+    updatedData.marital_status || "",
+    updatedData.spouse_name || "",
+    updatedData.marriage_date || null,
+    updatedData.address || "",
+    updatedData.phone_number || "",
+    updatedData.father_name || "",
+    updatedData.mother_name || "",
+    departmentId, // department_id (or null if role is Admin or not provided)
+    updatedData.position || "",
+    updatedData.photo_url || "",
+    updatedData.salary || "",
+    updatedData.role || "",
+    employeeId, // WHERE clause parameter
+  ];
 
   try {
-    const [result] = await db.execute(sqlQuery, params);
+    const [result] = await db.execute(queries.EDIT_EMPLOYEE, params);
     return result;
   } catch (error) {
     console.error("Failed to update employee:", error);
