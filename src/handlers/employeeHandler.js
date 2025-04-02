@@ -83,7 +83,6 @@ exports.bulkAddEmployees = async (req, res) => {
 exports.addEmployee = async (req, res) => {
   try {
     const employeeData = req.body;
-    console.log(employeeData);
 
     if (req.file) {
       employeeData.photo_url = `photos/${req.file.filename}`;
@@ -100,7 +99,6 @@ exports.addEmployee = async (req, res) => {
       )
     );
   } catch (error) {
-    console.log(error);
     if (error.code === "ER_DUP_ENTRY") {
       return res
         .status(400)
@@ -137,8 +135,6 @@ exports.addEmployee = async (req, res) => {
 exports.searchEmployees = async (req, res) => {
   try {
     const { search, fromDate, toDate } = req.query;
-
-    console.log(fromDate, toDate);
 
     const employees = await employeeService.searchEmployees(
       search,
@@ -228,7 +224,6 @@ exports.deactivateEmployee = async (req, res) => {
         )
       );
   } catch (error) {
-    console.log(error);
     return res
       .status(400)
       .json(

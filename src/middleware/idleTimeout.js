@@ -28,7 +28,7 @@ module.exports = (req, res, next) => {
         });
       }
 
-      if (req.path !== "/login") {
+      if (req.path !== "/") {
         return res.status(401).json({
           status: "error",
           code: 401,
