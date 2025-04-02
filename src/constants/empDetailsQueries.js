@@ -8,6 +8,32 @@ module.exports = {
       address, phone_number, father_name, mother_name, department_id, position, photo_url, salary, role, password
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
+
+  EDIT_EMPLOYEE: `
+  UPDATE employees 
+  SET domain = ?,
+      employee_type = ?,
+      first_name = ?,
+      last_name = ?,
+      dob = ?,
+      email = ?,
+      aadhaar_number = ?,
+      pan_number = ?,
+      gender = ?,
+      marital_status = ?,
+      spouse_name = ?,
+      marriage_date = ?,
+      address = ?,
+      phone_number = ?,
+      father_name = ?,
+      mother_name = ?,
+      department_id = ?,
+      position = ?,
+      photo_url = ?,
+      salary = ?,
+      role = ?
+  WHERE employee_id = ?;
+`,
   CHECK_DUPLICATE_EMPLOYEE: `SELECT * FROM employees WHERE aadhaar_number = ? OR pan_number = ?`,
   SAVE_RESET_TOKEN: `
   INSERT INTO password_resets (email, token, expiry_time) 
@@ -72,9 +98,11 @@ WHERE (e.first_name LIKE ?
   GET_EMPLOYEE: `
   SELECT 
       e.employee_id, 
+      e.domain,
+      e.employee_type,
       e.first_name, 
       e.last_name, 
-      d.name AS department,  -- Fetching the department name from the department table
+      d.name AS department,
       e.position, 
       e.email, 
       e.phone_number, 
