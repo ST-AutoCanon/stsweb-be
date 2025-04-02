@@ -1,5 +1,6 @@
 const db = require("../config");
 const queries = require("../constants/reimbursementQueries");
+const path = require("path");
 
 exports.getReimbursementsByEmployee = async (
   employeeId,
@@ -334,7 +335,8 @@ exports.getAttachments = async (reimbursementId) => {
   return rows;
 };
 
-// In updateReimbursement:
+// In your reimbursementService.js
+
 exports.updateReimbursement = async (reimbursementId, updateData) => {
   try {
     console.log("Received updateData in service:", updateData);
@@ -347,7 +349,7 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
       department_id,
       claim_type,
       transport_type,
-      fromDate, // Ensure naming consistency
+      fromDate,
       toDate,
       date,
       travel_from,
@@ -362,6 +364,7 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
       meal_type,
       stationary,
       service_provider,
+      attachments, // new attachments array from updateData
     } = updateData;
 
     // Process department_id to ensure it's either an integer or null
@@ -370,6 +373,7 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
       processedDepartmentId = null;
     }
 
+    // Update the main reimbursement record
     const [result] = await db.query(queries.UPDATE_REIMBURSEMENT, [
       processedDepartmentId,
       claim_type,
@@ -394,6 +398,28 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
 
     if (result.affectedRows === 0) {
       throw new Error("No reimbursement found or unauthorized update.");
+    }
+
+    // If new attachments are provided, replace old ones with new ones
+    if (attachments && attachments.length > 0) {
+      // Optionally, delete old attachments from the database
+      await db.query(queries.DELETE_ATTACHMENTS_BY_REIMBURSEMENT_ID, [
+        reimbursementId,
+      ]);
+
+      // Optionally, delete old files from disk
+      // (Loop through the old attachments, remove the files if needed)
+
+      // Prepare new attachment values
+      // Here, we're assuming each attachment is a file path.
+      // Adjust as needed if you have additional fields such as file name, year, or month.
+      const attachmentValues = attachments.map((filePath) => {
+        const file_name = path.basename(filePath);
+        return [reimbursementId, file_name, filePath];
+      });
+
+      // Insert new attachments in bulk
+      await db.query(queries.SAVE_ATTACHMENTS, [attachmentValues]);
     }
 
     return { success: true, message: "Reimbursement updated successfully." };
@@ -434,9 +460,11 @@ exports.getTeamReimbursements = async (
 
   // Fetch attachments for these filtered reimbursements
   const reimbursementIds = filteredReimbursements.map((r) => r.id);
+  const safeIds = reimbursementIds.length ? reimbursementIds : [-1];
+
   const [attachments] = await db.query(
     queries.GET_ATTACHMENTS_BY_REIMBURSEMENT_IDS,
-    [reimbursementIds]
+    [safeIds]
   );
 
   // Map attachments to reimbursements
