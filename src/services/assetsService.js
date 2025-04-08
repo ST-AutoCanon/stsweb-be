@@ -28,7 +28,7 @@ const addAsset = async (assetData) => {
             "Table": "FUR-TBL",
             "Chair": "FUR-CHR",
             "Drawers": "FUR-DWR",
-            "Electrical": "EQP-Ele",
+            "Electrical": "EQP-ELE",
             "Non-Electrical": "EQP-NONELE",
             "Others": "OTHR",
             "cupboard":"FUR-CUPB"
