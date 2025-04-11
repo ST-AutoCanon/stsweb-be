@@ -16,10 +16,27 @@ const getLastAssetId = async (prefix) => {
         throw new Error("Failed to generate asset ID");
     }
 };
+const getLastAssetCode = async () => {
+  const [rows] = await db.execute(`
+    SELECT asset_code FROM assets 
+    WHERE asset_code LIKE 'STS-AST-%' 
+    ORDER BY CAST(SUBSTRING(asset_code, 9) AS UNSIGNED) DESC 
+    LIMIT 1
+  `);
+
+  if (rows.length === 0) return 'STS-AST-0001';
+
+  const lastCode = rows[0].asset_code; // e.g., STS-AST-0007
+  const lastNum = parseInt(lastCode.split('-')[2], 10); // "0007" → 7
+  const nextNum = lastNum + 1;
+  return `STS-AST-${String(nextNum).padStart(4, '0')}`; // → STS-AST-0008
+};
+
 
 const addAsset = async (assetData) => {
     try {
         const { asset_name, configuration, valuation_date, assigned_to, category, sub_category, status, document_path } = assetData;
+        const asset_code = await getLastAssetCode();
 
         const categoryPrefixes = {
             "Laptop": "SYS-LPT",
@@ -44,6 +61,7 @@ const addAsset = async (assetData) => {
 
         const values = [
             asset_id,
+            asset_code,
             asset_name || null,
             configuration || null,
             valuation_date || null,
