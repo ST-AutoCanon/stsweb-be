@@ -190,28 +190,28 @@ GROUP BY
   GET_ATTENDANCE_STATUS_COUNT: `
   
 SELECT 
-    (SELECT COUNT(*) FROM sukalpadata.employees) AS totalEmployees,
+    (SELECT COUNT(*) FROM employees) AS totalEmployees,
 
     -- ✅ Present Employees (Count Each Employee Only Once)
     (SELECT COUNT(DISTINCT employee_id) 
-     FROM sukalpadata.emp_attendence 
+     FROM emp_attendence 
      WHERE DATE(punchin_time) = CURDATE()
         OR DATE(punchout_time) = CURDATE()) AS present,
 
     -- ✅ Approved Leave Count (No Changes)
     (SELECT COUNT(*) 
-     FROM sukalpadata.leavequeries 
+     FROM leavequeries 
      WHERE start_date = CURDATE() 
        AND status = 'Approved') AS approved_leave,
 
     -- ✅ Absent Employees (Total - Present - On Leave)
-    ((SELECT COUNT(*) FROM sukalpadata.employees) 
+    ((SELECT COUNT(*) FROM employees) 
      - (SELECT COUNT(DISTINCT employee_id) 
-        FROM sukalpadata.emp_attendence 
+        FROM emp_attendence 
         WHERE DATE(punchin_time) = CURDATE()
            OR DATE(punchout_time) = CURDATE()) 
      - (SELECT COUNT(*) 
-        FROM sukalpadata.leavequeries 
+        FROM leavequeries 
         WHERE start_date = CURDATE() 
           AND status = 'Approved')) AS absent;
 
@@ -260,7 +260,7 @@ ORDER BY STR_TO_DATE(SUBSTRING_INDEX(punchin_label, ' ', 1), '%H');
         ELSE '90k+'
     END AS salary_range,
     COUNT(*) AS count
-FROM sukalpadata.employees
+FROM employees
 GROUP BY salary_range
 ORDER BY FIELD(salary_range, '<30k', '30k-50k', '50k-70k', '70k+', '90k+');
 
