@@ -53,7 +53,8 @@ const {
     updateReturnDateHandler, 
     assignAsset, 
     getAssetCountsHandler, 
-    searchEmployeesHandler 
+    searchEmployeesHandler,
+    getAssignedAssetsByEmployee, 
 } = require('../handlers/assetsHandler');
 
 const router = express.Router();
@@ -84,6 +85,10 @@ router.put('/assets/return-date', updateReturnDateHandler);
 router.get('/assets/counts', getAssetCountsHandler);
 router.get('/counts', getAssetCountsHandler);
 router.get('/search-employees', searchEmployeesHandler);
+
+router.get("/assigned-assets/:employeeId", getAssignedAssetsByEmployee);
+
+
 
 // 🔽 DOWNLOAD route added below
 router.get('/download/:filename', (req, res) => {

@@ -19,7 +19,7 @@ const UPDATE_ASSIGNED_TO = `
   SET assigned_to = JSON_ARRAY_APPEND(
     IFNULL(assigned_to, JSON_ARRAY()),
     '$',
-    JSON_OBJECT('name', ?, 'startDate', ?, 'returnDate', ?, 'comments', ?, 'status', ?)
+    JSON_OBJECT('name', ?,'employeeId', ?, 'startDate', ?, 'returnDate', ?, 'comments', ?, 'status', ?)
   )
   WHERE asset_id = ?
 `;
@@ -62,7 +62,25 @@ const SEARCH_EMPLOYEES_BY_NAME = `
   WHERE CONCAT(first_name, ' ', last_name) LIKE CONCAT(?, '%')
   LIMIT 10;
 `;
+const GET_ASSIGNED_ASSETS_BY_EMPLOYEE = `
+  SELECT 
+    a.asset_id,
+    a.asset_name,
+    jt.employee_id,
+    jt.status
+  FROM assets a
+  JOIN JSON_TABLE(
+    CAST(a.assigned_to AS JSON),
+    '$[*]' COLUMNS (
+      employee_id VARCHAR(20) PATH '$.employeeId',
+      status VARCHAR(20) PATH '$.status'
+    )
+  ) AS jt
+  WHERE JSON_VALID(a.assigned_to)
+    AND jt.employee_id = ?;
+`;
 
 
 
-module.exports = { INSERT_ASSET, GET_ASSETS, GET_LAST_ASSET_ID, GET_ALL_ASSETS,UPDATE_ASSIGNED_TO,GET_ASSIGN_DATA,UPDATE_RETURN_DATE,GET_ASSET_COUNTS,SEARCH_EMPLOYEES_BY_NAME };
+
+module.exports = { INSERT_ASSET, GET_ASSETS, GET_LAST_ASSET_ID, GET_ALL_ASSETS,UPDATE_ASSIGNED_TO,GET_ASSIGN_DATA,UPDATE_RETURN_DATE,GET_ASSET_COUNTS,SEARCH_EMPLOYEES_BY_NAME,GET_ASSIGNED_ASSETS_BY_EMPLOYEE };
