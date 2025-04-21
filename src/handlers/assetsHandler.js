@@ -2,7 +2,8 @@
 const { searchEmployeesByName,addAsset, getAssets ,getAssignmentData} = require("../services/assetsService"); // Ensure this import exists
 const { saveAssignedAsset } = require("../services/assetsService");
 const { updateAssignedTo } = require("../services/assetsService");
-const { updateReturnDate,getAssetCounts} = require("../services/assetsService");
+const { updateReturnDate,getAssetCounts,fetchAssignedAssetsByEmployee} = require("../services/assetsService");
+const assetService = require('../services/assetsService'); // ✅ This is necessary
 
 
 const addAssetHandler = async (req, res) => {
@@ -65,7 +66,7 @@ const getAssetsHandler = async (req, res) => {
 };
 const assignAsset = async (req, res) => {
     try {
-      const { assetId, assignedTo, startDate, returnDate, comments, status } = req.body;
+      const { assetId, assignedTo,employeeId, startDate, returnDate, comments, status } = req.body;
   
       if (!assetId || !assignedTo || !startDate || !status) {
         return res.status(400).json({ error: "Missing required fields" });
@@ -73,7 +74,9 @@ const assignAsset = async (req, res) => {
   
       const assignedData = {
         name: assignedTo,
+        employeeId,
         startDate,
+        
         returnDate: returnDate || null, // Accept null if not provided
         comments: comments || "",
         status,
@@ -175,4 +178,17 @@ const searchEmployeesHandler = async (req, res) => {
 };
 
 
-module.exports = {searchEmployeesHandler, addAssetHandler, getAssetsHandler,assignAsset,getAssetAssignmentHandler,updateReturnDateHandler, getAssetCountsHandler  };
+
+const getAssignedAssetsByEmployee = async (req, res) => {
+    const { employeeId } = req.params;
+  
+    try {
+      const assignedAssets = await assetService.fetchAssignedAssetsByEmployee(employeeId);
+      res.status(200).json({ success: true, data: assignedAssets });
+    } catch (error) {
+      console.error("Error fetching assigned assets:", error);
+      res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  };
+
+module.exports = {searchEmployeesHandler, addAssetHandler, getAssetsHandler,assignAsset,getAssetAssignmentHandler,updateReturnDateHandler, getAssetCountsHandler,getAssignedAssetsByEmployee  };
