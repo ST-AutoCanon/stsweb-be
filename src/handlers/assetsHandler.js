@@ -43,7 +43,8 @@ if (!validStatuses.includes(status)) {
         console.log("📤 Processed Asset Data:", assetData);
 
         const result = await addAsset(assetData);
-        res.status(201).json({ message: "Asset added successfully", asset_id: result.asset_id });
+        res.status(201).json({ message: "Asset added successfully", asset_id: result.asset_id,  asset_code: result.asset_code // include this if needed in frontend
+ });
 
     } catch (error) {
         console.error("❌ Database Error:", error);
