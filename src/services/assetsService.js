@@ -1,7 +1,7 @@
 
 
 const db = require("../config"); 
-const { SEARCH_EMPLOYEES_BY_NAME,INSERT_ASSET, GET_ASSETS, GET_LAST_ASSET_ID, GET_ALL_ASSETS,UPDATE_ASSIGNED_TO ,GET_ASSIGN_DATA,UPDATE_RETURN_DATE,GET_ASSET_COUNTS} = require("../constants/assetsQueries");
+const { GET_ASSIGNED_ASSETS_BY_EMPLOYEE,SEARCH_EMPLOYEES_BY_NAME,INSERT_ASSET, GET_ASSETS, GET_LAST_ASSET_ID, GET_ALL_ASSETS,UPDATE_ASSIGNED_TO ,GET_ASSIGN_DATA,UPDATE_RETURN_DATE,GET_ASSET_COUNTS} = require("../constants/assetsQueries");
 
 const getLastAssetId = async (prefix) => {
     try {
@@ -109,9 +109,13 @@ const updateAssignedTo = async (assetId, assignedTo) => {
       }
   
       // Step 2: Check if same person already assigned
+      // const existingIndex = assignedArray.findIndex(
+      //   (entry) => entry.name === assignedTo.name
+      // );
       const existingIndex = assignedArray.findIndex(
-        (entry) => entry.name === assignedTo.name
+        (entry) => entry.name === assignedTo.name && entry.employeeId === assignedTo.employeeId
       );
+      
   
       if (existingIndex !== -1) {
         // Step 3a: Update returnDate and other fields if needed
@@ -218,6 +222,11 @@ const searchEmployeesByName = async (searchTerm) => {
   };
 
 
+  const fetchAssignedAssetsByEmployee = async (employeeId) => {
+    const [result] = await db.execute(GET_ASSIGNED_ASSETS_BY_EMPLOYEE, [employeeId]);
+    return result;
+  };
+
 // ✅ Ensure functions are properly exported
-module.exports = {searchEmployeesByName, addAsset, getAssets, updateAssignedTo ,getAssignmentData ,updateReturnDate,    getAssetCounts
+module.exports = {searchEmployeesByName, addAsset, getAssets, updateAssignedTo ,getAssignmentData ,updateReturnDate,    getAssetCounts,fetchAssignedAssetsByEmployee
 };
