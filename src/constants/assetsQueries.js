@@ -1,7 +1,7 @@
 
 const INSERT_ASSET = `
-    INSERT INTO assets (asset_id, asset_name, configuration, valuation_date, assigned_to, category, sub_category,status, document_path)
-    VALUES (?, ?, ?, ?, ?, ?, ?,?, ?);
+    INSERT INTO assets (asset_id,asset_code, asset_name, configuration, valuation_date, assigned_to, category, sub_category,status, document_path)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?,?, ?);
 `;
 
 const GET_ASSETS = `
