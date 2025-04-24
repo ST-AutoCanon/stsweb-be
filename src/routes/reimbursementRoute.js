@@ -6,18 +6,43 @@ const path = require("path");
 const fs = require("fs");
 const { createReimbursement } = require("../services/reimbursementService");
 
-// Configure multer storage dynamically
+// ── FORBIDDEN EXTENSIONS & FILTER ─────────────────────────────────────────────
+const forbiddenExts = new Set([
+  ".xlsx",
+  ".xls",
+  ".xlsm",
+  ".csv",
+  ".zip",
+  ".docx",
+  ".xlsb",
+  ".xltx",
+  ".xltm",
+]);
+
+function fileFilter(req, file, cb) {
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (forbiddenExts.has(ext)) {
+    return cb(
+      new multer.MulterError(
+        "LIMIT_UNEXPECTED_FILE",
+        `Files of type "${ext}" are not allowed.`
+      ),
+      false
+    );
+  }
+  cb(null, true);
+}
+
+// ── DYNAMIC STORAGE ────────────────────────────────────────────────────────────
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const { employeeId } = req.body;
-
     if (!employeeId) {
       return cb(new Error("Employee ID is required"), null);
     }
-
     const now = new Date();
     const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, "0"); // Ensure two-digit format
+    const month = String(now.getMonth() + 1).padStart(2, "0");
     const basePath = path.join(
       __dirname,
       "..",
@@ -26,12 +51,10 @@ const storage = multer.diskStorage({
       `${month}`,
       `${employeeId}`
     );
-
     if (!fs.existsSync(basePath)) {
       fs.mkdirSync(basePath, { recursive: true });
       console.log(`Directory created: ${basePath}`);
     }
-
     cb(null, basePath);
   },
   filename: (req, file, cb) => {
@@ -50,19 +73,22 @@ const storage = multer.diskStorage({
     let counter = 1;
     let filename = `${date}_01${path.extname(file.originalname)}`;
 
-    // Ensure unique filenames (YYYY-MM-DD_01, YYYY-MM-DD_02, ...)
     while (fs.existsSync(path.join(uploadDir, filename))) {
       counter++;
       filename = `${date}_${String(counter).padStart(2, "0")}${path.extname(
         file.originalname
       )}`;
     }
-
     cb(null, filename);
   },
 });
 
-const upload = multer({ storage });
+// ── MULTER INSTANCE ───────────────────────────────────────────────────────────
+const upload = multer({
+  storage,
+  fileFilter,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB limit
+});
 
 router.get("/reimbursements", reimbursementHandler.getAllReimbursements);
 // Routes for reimbursements
