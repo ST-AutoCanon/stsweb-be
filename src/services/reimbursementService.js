@@ -1,7 +1,37 @@
 const db = require("../config");
 const queries = require("../constants/reimbursementQueries");
 const path = require("path");
+exports.processUploadedFiles = async (files, reimbursementId) => {
+  try {
+    for (const file of files) {
+      const ext = path.extname(file.originalname).toLowerCase();
 
+      if (ext === ".pdf") {
+        const imagePaths = await convertPdfToImages(
+          file.path,
+          path.dirname(file.path)
+        );
+
+        for (const imgPath of imagePaths) {
+          await saveAttachmentToDB({
+            reimbursementId,
+            filePath: imgPath,
+            fileType: "image/png",
+          });
+        }
+      } else {
+        await saveAttachmentToDB({
+          reimbursementId,
+          filePath: file.path,
+          fileType: file.mimetype,
+        });
+      }
+    }
+  } catch (error) {
+    console.error("Error processing uploaded files:", error);
+    throw error;
+  }
+};
 exports.getReimbursementsByEmployee = async (
   employeeId,
   fromDate = null,
@@ -106,135 +136,100 @@ exports.getAttachmentsByReimbursementIds = async (reimbursementIds) => {
   return attachments;
 };
 
-exports.getAllReimbursements = async (fromDate = null, toDate = null) => {
+exports.getAllReimbursements = async (
+  submittedFrom = null,
+  submittedFromForBetween = null,
+  submittedTo = null
+) => {
   try {
+    // Log the incoming parameters
+    console.log("getAllReimbursements params:", {
+      submittedFrom,
+      submittedFromForBetween,
+      submittedTo,
+    });
+
+    // 1) Fetch all reimbursements filtered by created_at
     const [reimbursements] = await db.query(queries.GET_ALL_REIMBURSEMENTS, [
-      fromDate,
-      fromDate,
-      toDate, // Single-date claims
-      fromDate,
-      fromDate,
-      toDate, // From date overlaps
-      fromDate,
-      fromDate,
-      toDate, // To date overlaps
-      fromDate,
-      toDate,
-      fromDate, // Full range inside a claim period
+      submittedFrom, // for `? IS NULL`
+      submittedFromForBetween, // start of BETWEEN
+      submittedTo, // end of BETWEEN
     ]);
 
-    if (!reimbursements.length) return [];
+    if (!reimbursements.length) {
+      return [];
+    }
 
-    // Fetch attachments for all reimbursements
+    // 2) Fetch attachments for these reimbursements
     const reimbursementIds = reimbursements.map((r) => r.id);
-    if (reimbursementIds.length === 0) return reimbursements;
-
     const [attachments] = await db.query(
       queries.GET_ATTACHMENTS_BY_REIMBURSEMENT_IDS,
       [reimbursementIds]
     );
 
-    // Map attachments to reimbursements
+    // 3) Map attachments onto reimbursements
     const attachmentMap = {};
-    attachments.forEach((attachment) => {
-      if (!attachmentMap[attachment.reimbursement_id]) {
-        attachmentMap[attachment.reimbursement_id] = [];
-      }
-      attachmentMap[attachment.reimbursement_id].push({
-        filename: attachment.file_name,
-        url: `/reimbursement/${attachment.year}/${attachment.month}/${attachment.employee_id}/${attachment.file_name}`,
+    attachments.forEach((att) => {
+      const key = att.reimbursement_id;
+      if (!attachmentMap[key]) attachmentMap[key] = [];
+      attachmentMap[key].push({
+        filename: att.file_name,
+        url: `/reimbursement/${att.year}/${att.month}/${att.employee_id}/${att.file_name}`,
       });
     });
-
-    // Attach the files to each claim
-    reimbursements.forEach((reimbursement) => {
-      reimbursement.attachments = attachmentMap[reimbursement.id] || [];
+    reimbursements.forEach((r) => {
+      r.attachments = attachmentMap[r.id] || [];
     });
 
-    // Group reimbursements by employee_id
-    const groupedReimbursements = {};
-    reimbursements.forEach((reimbursement) => {
-      if (!groupedReimbursements[reimbursement.employee_id]) {
-        groupedReimbursements[reimbursement.employee_id] = [];
-      }
-      groupedReimbursements[reimbursement.employee_id].push(reimbursement);
-    });
+    // 4) Group by employee_id
+    const grouped = reimbursements.reduce((acc, r) => {
+      const eid = r.employee_id;
+      if (!acc[eid]) acc[eid] = [];
+      acc[eid].push(r);
+      return acc;
+    }, {});
 
-    // Convert to array format for response
-    return Object.keys(groupedReimbursements).map((employee_id) => ({
+    // Return array of { employee_id, claims }
+    return Object.entries(grouped).map(([employee_id, claims]) => ({
       employee_id,
-      claims: groupedReimbursements[employee_id],
+      claims,
     }));
-  } catch (error) {
-    console.error("Error fetching all reimbursements:", error);
+  } catch (err) {
+    console.error("Error in getAllReimbursements service:", err);
     throw new Error("Database query failed.");
   }
 };
-
 exports.createReimbursement = async (reimbursementData) => {
   try {
-    console.log("Received Data in Service Layer:", reimbursementData);
+    // … validation and existingClaim checks …
 
-    // Validate employeeId
-    const employeeId = reimbursementData.employeeId;
-    if (!employeeId || employeeId === "undefined") {
-      throw new Error("Employee ID is invalid or missing.");
-    }
-
-    const { claim_type, date, from_date, to_date } = reimbursementData;
-
-    let existingClaim;
-    if (date) {
-      // Check if a claim with the same type & date already exists
-      [existingClaim] = await db.query(
-        queries.CHECK_EXISTING_REIMBURSEMENT_SINGLE_DATE,
-        [employeeId, claim_type, date]
-      );
-    } else if (from_date && to_date) {
-      // Check if a claim of the same type exists within the date range
-      [existingClaim] = await db.query(
-        queries.CHECK_EXISTING_REIMBURSEMENT_DATE_RANGE,
-        [employeeId, claim_type, from_date, to_date, from_date, to_date]
-      );
-    }
-
-    if (existingClaim.length > 0) {
-      const error = new Error(
-        "A reimbursement claim of this type has already been submitted."
-      );
-      error.statusCode = 400; // Custom status code
-      throw error;
-    }
-
-    // Process department_id: parse and validate
     let department_id = parseInt(reimbursementData.department_id, 10);
-    if (isNaN(department_id)) {
-      department_id = null;
-    }
+    if (isNaN(department_id)) department_id = null;
 
     const reimbursementArray = [
-      employeeId, // Use the validated employeeId here
+      reimbursementData.employeeId,
       department_id,
-      claim_type,
+      reimbursementData.claim_type,
       reimbursementData.transport_type || null,
-      from_date || null,
-      to_date || null,
-      date || null,
+      reimbursementData.from_date || null,
+      reimbursementData.to_date || null,
+      reimbursementData.date || null,
       reimbursementData.travel_from || null,
       reimbursementData.travel_to || null,
-      reimbursementData.purpose || null,
+      reimbursementData.meals_objective || null, // correct slot
+      reimbursementData.purpose || null, // correct slot
       reimbursementData.purchasing_item || null,
       reimbursementData.accommodation_fees || null,
       reimbursementData.no_of_days !== undefined
         ? reimbursementData.no_of_days
-        : 0, // Default to 0
-      reimbursementData.transport_amount !== undefined &&
+        : 0,
+      reimbursementData.transport_amount &&
       reimbursementData.transport_amount !== "undefined"
         ? reimbursementData.transport_amount
-        : 0, // Convert 'undefined' to 0
-      reimbursementData.da !== undefined && reimbursementData.da !== "undefined"
+        : 0,
+      reimbursementData.da && reimbursementData.da !== "undefined"
         ? reimbursementData.da
-        : 0, // Convert 'undefined' to 0
+        : 0,
       reimbursementData.total_amount !== undefined
         ? reimbursementData.total_amount
         : 0,
@@ -243,26 +238,39 @@ exports.createReimbursement = async (reimbursementData) => {
       reimbursementData.service_provider || null,
     ];
 
+    // Check for duplicates before insert
+    const [existingClaims] = await db.query(queries.CHECK_EXISTING_CLAIM, [
+      reimbursementData.employeeId,
+      reimbursementData.claim_type,
+      reimbursementData.date || null,
+      reimbursementData.from_date || null,
+      reimbursementData.to_date || null,
+    ]);
+
+    if (existingClaims.length > 0) {
+      throw {
+        statusCode: 400,
+        message:
+          "A reimbursement with the same claim type and date already exists.",
+      };
+    }
+
     const [result] = await db.query(
       queries.CREATE_REIMBURSEMENT,
       reimbursementArray
     );
     const reimbursementId = result.insertId;
 
-    if (
-      reimbursementData.attachments &&
-      reimbursementData.attachments.length > 0
-    ) {
-      const attachmentValues = reimbursementData.attachments.map((file) => [
+    if (reimbursementData.attachments?.length) {
+      const attachmentValues = reimbursementData.attachments.map((f) => [
         reimbursementId,
-        file.file_name,
-        file.file_path,
+        f.file_name,
+        f.file_path,
       ]);
-
       await db.query(queries.SAVE_ATTACHMENTS, [attachmentValues]);
     }
 
-    return { id: reimbursementId, ...reimbursementArray };
+    return { id: reimbursementId, ...reimbursementData };
   } catch (error) {
     console.error("Error during reimbursement creation:", error);
     throw error;
@@ -354,6 +362,7 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
       date,
       travel_from,
       travel_to,
+      meals_objective,
       purpose,
       purchasing_item,
       accommodation_fees,
@@ -383,6 +392,7 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
       date,
       travel_from,
       travel_to,
+      meals_objective,
       purpose,
       purchasing_item,
       accommodation_fees,
@@ -407,17 +417,12 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
         reimbursementId,
       ]);
 
-      // Optionally, delete old files from disk
-      // (Loop through the old attachments, remove the files if needed)
-
-      // Prepare new attachment values
-      // Here, we're assuming each attachment is a file path.
-      // Adjust as needed if you have additional fields such as file name, year, or month.
-      const attachmentValues = attachments.map((filePath) => {
-        const file_name = path.basename(filePath);
-        return [reimbursementId, file_name, filePath];
+      // Prepare new attachment values using the file_path from each object
+      const attachmentValues = attachments.map(({ file_name, file_path }) => {
+        // if you want to re-derive filename instead:
+        // const file_name = path.basename(file_path);
+        return [reimbursementId, file_name, file_path];
       });
-
       // Insert new attachments in bulk
       await db.query(queries.SAVE_ATTACHMENTS, [attachmentValues]);
     }
@@ -431,18 +436,15 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
 
 exports.getTeamReimbursements = async (
   departmentId,
-  effectiveFromDate,
-  effectiveToDate,
+  submittedFrom,
+  submittedTo,
   teamLeadId
 ) => {
   const params = [
     departmentId,
-    effectiveFromDate,
-    effectiveFromDate,
-    effectiveToDate,
-    effectiveFromDate,
-    effectiveToDate,
-    effectiveFromDate,
+    submittedFrom || null,
+    submittedFrom || null,
+    submittedTo || null,
   ];
 
   // Fetch reimbursements

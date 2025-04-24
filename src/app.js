@@ -38,24 +38,23 @@ const salarylastmonthtotal = require("./routes/adminPayrollRoutes");
 const reimbursementRoutes = require("./routes/reimbursementRoute");
 const adminSalaryStatementRoutes = require("./routes/adminSalaryStatementRoute");
 
-
-
 //assets
-const assetsRoutes = require('./routes/assetsRoutes');
-const validateApiKey = require('./middleware/apiKeyMiddleware');
-const assetsRoutesforreturn = require('./routes/assetsRoutes'); // Ensure this is correctly imported
+const assetsRoutes = require("./routes/assetsRoutes");
+const validateApiKey = require("./middleware/apiKeyMiddleware");
+const assetsRoutesforreturn = require("./routes/assetsRoutes"); // Ensure this is correctly imported
 
 const app = express();
 const server = http.createServer(app);
 
 //assets
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
 app.use(
   cors({
     origin: process.env.FRONTEND_URL,
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization", "x-api-key"],
+    exposedHeaders: ["Content-Disposition"], // ← Expose the filename header
     credentials: true,
   })
 );
@@ -114,13 +113,11 @@ app.use("/api", adminSalaryStatementRoutes);
 app.use("/", salarylastmonthtotal);
 app.use("/", admindashboardReimbursementRoutes);
 
-
 //assets
-app.use('/assets', assetsRoutes); // Attach routes
+app.use("/assets", assetsRoutes); // Attach routes
 app.use("/api/assets", assetsRoutes); // Register asset routes
-app.use('/api', assetsRoutesforreturn); // Ensure this is correctly mounted
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
+app.use("/api", assetsRoutesforreturn); // Ensure this is correctly mounted
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 const PORT = process.env.PORT;
 server.listen(PORT, () => {

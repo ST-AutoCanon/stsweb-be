@@ -7,16 +7,11 @@ const bcrypt = require("bcrypt");
 
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
-/**
- * Generate a password reset token, store it, and send a reset link to the employee.
- */
-const sendResetEmail = async (employeeEmail) => {
-  // Generate a unique reset token
+const sendResetEmail = async (employeeEmail, employeeName) => {
   const resetToken = uuidv4();
-  // Create the reset link
+
   const resetLink = `${process.env.FRONTEND_URL}/ResetPassword?token=${resetToken}`;
-  // Set the token expiry to 3 days
-  const tokenExpiry = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+  const tokenExpiry = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000); // 3 days
 
   // Save the reset token and its expiry into the database
   await db.execute(queries.SAVE_RESET_TOKEN, [
@@ -25,23 +20,58 @@ const sendResetEmail = async (employeeEmail) => {
     tokenExpiry,
   ]);
 
-  // Prepare the email message with a blue clickable link and updated expiry info
   const msg = {
     to: employeeEmail,
     from: process.env.SENDGRID_SENDER_EMAIL,
-    subject: "Password Reset Link - Welcome to Our Company",
-    text: `Welcome to the company! Please reset your password using the link below:\n${resetLink}\n\nThis link is valid for 3 days.`,
-    html: `<p>Welcome to the company!</p>
-           <p>Please reset your password using the link below:</p>
-           <a href="${resetLink}" style="color: blue; text-decoration: underline;">Reset Password</a>
-           <p>This link is valid for 3 days.</p>`,
+    subject: "Welcome to SUKALPA TECH SOLUTIONS – Set Up Your Account",
+    text: `Dear ${employeeName},
+
+Welcome to SUKALPA TECH SOLUTIONS! We're excited to have you join our team and look forward to achieving great things together.
+
+🔐 Reset Your Password
+To activate your account, please reset your password using the link below:
+${resetLink}
+
+Note: This link will be valid for 3 days. If it expires, you can request a new one from the login page.
+
+"Coming together is a beginning. Keeping together is progress. Working together is success."
+
+Thank you, and once again, welcome to the team!
+
+Warm regards,
+SUKALPA TECH SOLUTIONS
+https://sukalpatechsolutions.com
+info@sukalpatech.com`,
+
+    html: `
+    <p>Dear ${employeeName},</p>
+    <p>Welcome to <strong>SUKALPA TECH SOLUTIONS</strong>! We're excited to have you join our team and look forward to achieving great things together.</p>
+
+    <h3>🔐 Reset Your Password</h3>
+    <p>To activate your account, please reset your password using the link below:</p>
+    <p><a href="${resetLink}" style="color: blue; text-decoration: underline; font-weight: bold;">👉 Reset Your Password</a></p>
+
+    <p><strong>Note:</strong> This link will be valid for 3 days. If it expires, you can request a new one from the login page.</p>
+
+    <blockquote style="font-style: italic; color: gray;">
+      "Coming together is a beginning. Keeping together is progress. Working together is success."
+    </blockquote>
+
+    <p>Thank you, and once again, welcome to the team!</p>
+    <p>Warm regards,</p>
+    <p><strong>SUKALPA TECH SOLUTIONS</strong></p>
+    <p><a href="https://sukalpatechsolutions.com">https://sukalpatechsolutions.com</a> | <a href="mailto:info@sukalpatech.com">info@sukalpatech.com</a></p>
+    `,
   };
 
   try {
     await sgMail.send(msg);
   } catch (error) {
+    console.error("Email sending failed:", error);
     throw new Error(
-      `Error sending email: ${error.response.body.errors[0].message}`
+      `Error sending email: ${
+        error.response?.body?.errors?.[0]?.message || error.message
+      }`
     );
   }
 };
@@ -133,7 +163,10 @@ exports.addEmployee = async (employeeData) => {
   ];
 
   const [result] = await db.execute(queries.ADD_EMPLOYEE, params);
-  await sendResetEmail(employeeData.email);
+  await sendResetEmail(
+    employeeData.email,
+    `${employeeData.first_name} ${employeeData.last_name}`
+  );
 
   return result;
 };
