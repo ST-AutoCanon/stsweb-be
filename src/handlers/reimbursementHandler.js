@@ -1,10 +1,69 @@
 const reimbursementService = require("../services/reimbursementService");
+const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const { generateDocx } = require("../services/docxService");
 const { convertDocxToPdf } = require("../services/pdfService");
 const db = require("../config");
 const queries = require("../constants/reimbursementQueries");
+
+// forbidden extensions
+const forbiddenExts = new Set([
+  ".xlsx",
+  ".xls",
+  ".xlsm",
+  ".csv",
+  ".zip",
+  ".docx",
+  ".xlsb",
+  ".xltx",
+  ".xltm",
+]);
+
+// multer storage
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, path.join(__dirname, "..", "uploads"));
+  },
+  filename: (req, file, cb) => {
+    cb(null, `${Date.now()}-${file.originalname}`);
+  },
+});
+
+// multer fileFilter
+function fileFilter(req, file, cb) {
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (forbiddenExts.has(ext)) {
+    return cb(
+      new multer.MulterError(
+        "LIMIT_UNEXPECTED_FILE",
+        `Files of type "${ext}" are not allowed.`
+      ),
+      false
+    );
+  }
+  cb(null, true);
+}
+
+// multer instance
+const upload = multer({
+  storage,
+  fileFilter,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+});
+
+// fallback validation
+function validateAttachments(files) {
+  for (const file of files) {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (forbiddenExts.has(ext)) {
+      return `Attachment "${file.originalname}" of type "${ext}" is not allowed.`;
+    }
+  }
+  return null;
+}
+
+// ── CONTROLLER METHODS ────────────────────────────────────────────────────────
 
 exports.generateReimbursementPDF = async (req, res) => {
   try {
@@ -14,90 +73,72 @@ exports.generateReimbursementPDF = async (req, res) => {
     // Fetch claim details
     const claimResult = await db.query(queries.GET_CLAIM_DETAILS, [claimId]);
     if (!claimResult.length) {
-      console.error("❌ Claim not found for Claim ID:", claimId);
       return res.status(404).json({ error: "Claim not found" });
     }
 
-    let claim = claimResult && claimResult.length ? claimResult[0] : null;
-
-    // Ensure claim is an object, not an array
-    if (Array.isArray(claim)) {
-      claim = claim[0]; // Extract first object inside the array
-    }
-
+    let claim = Array.isArray(claimResult[0])
+      ? claimResult[0][0]
+      : claimResult[0];
     if (!claim || !claim.employee_id) {
-      console.error(
-        "❌ Claim extraction failed or Employee ID is missing!",
-        claim
-      );
       return res.status(404).json({ error: "Claim not found" });
     }
 
-    console.log("✅ Claim after extraction:", claim);
-    console.log("🔍 Searching Employee ID:", claim.employee_id);
-
+    // Fetch employee
     const employeeResult = await db.query(queries.GET_EMPLOYEE_DETAILS, [
       claim.employee_id,
     ]);
-
-    console.log("🟡 Raw Employee Result:", employeeResult);
-
-    // ✅ Fix: Ensure we extract the first row correctly
-    const employee =
-      employeeResult[0] && Array.isArray(employeeResult[0])
-        ? employeeResult[0][0]
-        : null;
-
-    console.log("✅ Extracted Employee:", employee);
-
+    const employee = Array.isArray(employeeResult[0])
+      ? employeeResult[0][0]
+      : employeeResult[0];
     if (!employee || !employee.name) {
-      console.error("❌ Employee details extraction failed:", employee);
       return res.status(404).json({ error: "Employee details not found" });
     }
 
-    // Fetch attachments
     const rawAttachments = await db.query(queries.GET_ATTACHMENTS, [claimId]);
-
-    // Flatten the array to get only objects
     const attachments = rawAttachments.flat();
 
-    console.log("✅ Flattened Attachments:", attachments);
+    // Filter out any attachments without a file_path
+    const attachmentsWithFiles = attachments.filter((att) => att.file_path);
+    if (attachmentsWithFiles.length !== attachments.length) {
+      console.warn(
+        `Filtered out ${
+          attachments.length - attachmentsWithFiles.length
+        } attachments without file_path`
+      );
+    }
 
-    attachments.forEach((att, index) => {
-      console.log(`Attachment ${index + 1}:`, att);
-
-      if (!att || !att.file_path) {
-        console.error(
-          `⚠️ Attachment ${index + 1} is missing a file path:`,
-          att
-        );
-        return; // Skip this iteration
-      }
-
+    // Verify that each remaining file actually exists
+    attachmentsWithFiles.forEach((att) => {
       if (!fs.existsSync(att.file_path)) {
-        console.error(`⚠️ File does not exist: ${att.file_path}`);
-      } else {
-        console.log(`✅ Valid attachment found: ${att.file_path}`);
+        console.warn(`File not found on disk: ${att.file_path}`);
       }
     });
 
-    // Generate DOCX file
-    const docxPath = await generateDocx(claim, employee, attachments);
+    // Generate DOCX using only valid attachments
+    const docxPath = await generateDocx(claim, employee, attachmentsWithFiles);
 
-    // Convert to PDF & merge attachments
-    const pdfPath = await convertDocxToPdf(docxPath, claim, attachments);
+    console.log("Attachments about to be merged:");
+    attachmentsWithFiles.forEach((att, idx) =>
+      console.log(`  [${idx}] ${att.file_path}`)
+    );
 
-    // Send final PDF for download
-    res.download(pdfPath, `Reimbursement_${claimId}.pdf`, (err) => {
-      if (err) {
-        console.error("❌ Download error:", err);
-      }
-      // Clean up files after sending
+    // Convert to PDF using only valid attachments
+    const pdfPath = await convertDocxToPdf(
+      docxPath,
+      claim,
+      attachmentsWithFiles
+    );
+
+    // Create a safe file name
+    const fileName = `${employee.name.replace(/\s+/g, "_")}.pdf`;
+
+    res.download(pdfPath, fileName, (err) => {
+      if (err) console.error("Download error:", err);
       fs.unlinkSync(docxPath);
       fs.unlinkSync(pdfPath);
     });
   } catch (error) {
-    console.error("❌ Error generating reimbursement PDF:", error);
+    console.error("Error generating reimbursement PDF:", error);
     res.status(500).json({ error: "Failed to generate document" });
   }
 };
@@ -106,7 +147,6 @@ exports.getReimbursementsByEmployee = async (req, res) => {
   try {
     const employeeId = req.params.employeeId;
     const { fromDate, toDate } = req.query;
-
     const reimbursements =
       await reimbursementService.getReimbursementsByEmployee(
         employeeId,
@@ -119,65 +159,37 @@ exports.getReimbursementsByEmployee = async (req, res) => {
     res.status(500).json({ message: "Failed to fetch reimbursements" });
   }
 };
+
 exports.updatePaymentStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    let { payment_status, user_role } = req.body; // Expect user_role from the frontend
+    let { payment_status, user_role } = req.body;
 
-    console.log("Received request to update payment status:");
-    console.log("Reimbursement ID:", id);
-    console.log("User Role:", user_role);
-    console.log("Payment Status:", payment_status);
-
-    // Convert "payable" -> "paid" for internal storage
-    if (payment_status === "payable") {
-      payment_status = "paid";
+    if (payment_status === "payable") payment_status = "paid";
+    if (!["pending", "paid"].includes(payment_status)) {
+      return res.status(400).json({ error: "Invalid payment status." });
     }
-
-    // Validate provided payment_status
-    if (!payment_status || !["pending", "paid"].includes(payment_status)) {
-      console.log("Invalid payment status received:", payment_status);
-      return res.status(400).json({
-        error: "Invalid payment status. Allowed values: 'pending' or 'paid'.",
-      });
-    }
-
-    // Restrict update for employees
     if (user_role === "employee") {
-      console.log("Unauthorized access attempt by employee.");
-      return res
-        .status(403)
-        .json({ error: "You are not authorized to update payment status." });
+      return res.status(403).json({ error: "Not authorized." });
     }
 
-    // Ensure that payment status is only updated if the reimbursement is approved.
     const [rows] = await db.query(
       "SELECT status FROM reimbursement WHERE id = ?",
       [id]
     );
-
-    console.log("Reimbursement status from DB:", rows);
-
     if (!rows.length || rows[0].status !== "approved") {
-      console.log("Reimbursement status is not approved or does not exist.");
       return res.status(400).json({
         error:
-          "Payment status can only be updated for reimbursement with approved status.",
+          "Payment status can only be updated for approved reimbursements.",
       });
     }
 
-    // Set paid_date only if the status is "paid"
     const paid_date = payment_status === "paid" ? new Date() : null;
-
-    // Call service to update payment_status and paid_date
-    console.log("Updating payment status in the database...");
     const updated = await reimbursementService.updatePaymentStatus(
       id,
       payment_status,
       paid_date
     );
-
-    console.log("Database update response:", updated);
 
     res.json({ message: "Payment status updated", data: updated });
   } catch (error) {
@@ -188,15 +200,15 @@ exports.updatePaymentStatus = async (req, res) => {
 
 exports.getAllReimbursements = async (req, res) => {
   try {
-    let { fromDate, toDate } = req.query;
-
-    // Ensure dates are properly formatted or set to null
-    fromDate = fromDate && fromDate !== "null" ? fromDate : null;
-    toDate = toDate && toDate !== "null" ? toDate : null;
+    let { submittedFrom, submittedTo } = req.query;
+    submittedFrom =
+      submittedFrom && submittedFrom !== "null" ? submittedFrom : null;
+    submittedTo = submittedTo && submittedTo !== "null" ? submittedTo : null;
 
     const reimbursements = await reimbursementService.getAllReimbursements(
-      fromDate,
-      toDate
+      submittedFrom,
+      submittedFrom,
+      submittedTo
     );
     res.status(200).json(reimbursements);
   } catch (error) {
@@ -210,21 +222,23 @@ exports.createReimbursement = async (req, res) => {
     console.log("Request Body:", req.body);
     console.log("Uploaded Files:", req.files);
 
-    // Instead of reading employeeId from req.body,
-    // use it from the authenticated user if available:
-    const employeeId = req.user ? req.user.employeeId : req.body.employeeId;
-
-    if (!employeeId || employeeId === "undefined") {
-      return res
-        .status(400)
-        .json({ error: "Employee ID is invalid or missing." });
+    // Fallback validation
+    if (req.files && req.files.length) {
+      const errMsg = validateAttachments(req.files);
+      if (errMsg) {
+        req.files.forEach((f) => fs.unlinkSync(f.path));
+        return res.status(400).json({ error: errMsg });
+      }
     }
 
-    const { role } = req.body; // role from request or from req.user if available
+    const employeeId = req.user?.employeeId || req.body.employeeId;
+    const role = req.user?.role || req.body.role;
+    if (!employeeId || employeeId === "undefined") {
+      return res.status(400).json({ error: "Employee ID missing." });
+    }
 
     const reimbursementData = {
-      employeeId, // Validated above
-      // For Admin, set department_id to null; for employees, use the provided value
+      employeeId,
       department_id: role === "Admin" ? null : req.body.department_id,
       claim_type: req.body.claim_type,
       transport_type: req.body.transport_type,
@@ -236,6 +250,7 @@ exports.createReimbursement = async (req, res) => {
       travel_from: req.body.travel_from,
       travel_to: req.body.travel_to,
       purpose: req.body.purpose,
+      meals_objective: req.body.meals_objective,
       purchasing_item: req.body.purchasing_item,
       accommodation_fees: req.body.accommodation_fees,
       no_of_days: req.body.no_of_days,
@@ -254,9 +269,8 @@ exports.createReimbursement = async (req, res) => {
     const newReimbursement = await reimbursementService.createReimbursement(
       reimbursementData
     );
-    console.log("line 257");
+
     if (role === "Admin") {
-      console.log("line 259");
       await reimbursementService.updateReimbursementStatus(
         newReimbursement.id,
         "approved",
@@ -273,22 +287,29 @@ exports.createReimbursement = async (req, res) => {
     });
   } catch (error) {
     console.error("Error creating reimbursement:", error);
-    if (error.statusCode === 400) {
-      return res.status(400).json({ error: error.message });
-    }
-    res.status(500).json({ error: "Error creating reimbursement" });
+    res
+      .status(error.statusCode || 500)
+      .json({ error: error.message || "Error creating reimbursement" });
   }
 };
 
+// Note: in your routes, use upload.array("attachments", 5) before this handler
 exports.updateReimbursement = async (req, res) => {
   try {
-    const { id } = req.params;
-    const { role } = req.body; // Extract role from request
-
     console.log("Update Body:", req.body);
     console.log("Uploaded Files:", req.files);
 
-    // Convert string fields to numbers where necessary
+    // Fallback validation
+    if (req.files && req.files.length) {
+      const errMsg = validateAttachments(req.files);
+      if (errMsg) {
+        req.files.forEach((f) => fs.unlinkSync(f.path));
+        return res.status(400).json({ error: errMsg });
+      }
+    }
+
+    const { id } = req.params;
+    const role = req.user?.role || req.body.role;
     const updateData = {
       employeeId: req.body.employeeId,
       department_id:
@@ -304,6 +325,7 @@ exports.updateReimbursement = async (req, res) => {
       date: req.body.date || null,
       travel_from: req.body.travel_from || null,
       travel_to: req.body.travel_to || null,
+      meals_objective: req.body.meals_objective || null,
       purpose: req.body.purpose || null,
       da: parseFloat(req.body.da) || 0,
       transport_amount: parseFloat(req.body.transport_amount) || 0,
@@ -314,17 +336,18 @@ exports.updateReimbursement = async (req, res) => {
       meal_type: req.body.meal_type || null,
       stationary: req.body.stationary || null,
       service_provider: req.body.service_provider || null,
-      attachments: req.files ? req.files.map((file) => file.path) : [], // Store file paths
+      attachments: req.files
+        ? req.files.map((file) => ({
+            file_name: file.filename,
+            file_path: file.path,
+          }))
+        : [],
     };
 
-    console.log("Final Update Data:", updateData);
-
-    // Pass the data to the service function
     const updatedReimbursement = await reimbursementService.updateReimbursement(
       id,
       updateData
     );
-
     res.json({ message: "Reimbursement updated", data: updatedReimbursement });
   } catch (error) {
     console.error("Error updating reimbursement:", error);
@@ -335,33 +358,17 @@ exports.updateReimbursement = async (req, res) => {
 exports.updateReimbursementStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    // Destructure project from the request body along with other fields
     const { status, approver_comments, approver_id, project } = req.body;
-
-    if (!status || !["approved", "rejected"].includes(status)) {
-      return res.status(400).json({
-        error: "Invalid status. Allowed values: 'approved', 'rejected'",
-      });
+    if (!["approved", "rejected"].includes(status)) {
+      return res.status(400).json({ error: "Invalid status." });
     }
 
-    console.log("Received Request to Update Reimbursement Status");
-    console.log("Request Body:", req.body);
-
-    // Fetch approver details
     const approverDetails = await reimbursementService.getApproverDetails(
       approver_id
     );
-
-    console.log("Approver Details Retrieved (Raw):", approverDetails);
-
-    // Extract actual data correctly
     const { name: approver_name, role: approver_designation } =
       approverDetails[0] || {};
 
-    console.log("Extracted Approver Name:", approver_name);
-    console.log("Extracted Approver Designation:", approver_designation);
-
-    // Pass the project along with other values to the service function
     const updatedStatus = await reimbursementService.updateReimbursementStatus(
       id,
       status,
@@ -371,8 +378,6 @@ exports.updateReimbursementStatus = async (req, res) => {
       approver_designation,
       project
     );
-
-    console.log("Reimbursement Update Response:", updatedStatus);
 
     res.json({ message: `Reimbursement ${status}`, data: updatedStatus });
   } catch (error) {
@@ -392,7 +397,6 @@ exports.deleteReimbursement = async (req, res) => {
   }
 };
 
-// Handle reimbursement file uploads
 exports.uploadReimbursementAttachment = async (req, res) => {
   try {
     if (!req.file) {
@@ -408,15 +412,12 @@ exports.uploadReimbursementAttachment = async (req, res) => {
   }
 };
 
-// Fetch reimbursement attachments securely
 exports.getAttachments = async (req, res) => {
   try {
     const { year, month, employeeId, filename } = req.params;
-
-    // Validate filename input to prevent security issues
     if (
       [year, month, employeeId, filename].some(
-        (param) => param.includes("..") || param.includes("/")
+        (p) => p.includes("..") || p.includes("/")
       )
     ) {
       return res.status(400).json({ error: "Invalid filename" });
@@ -431,7 +432,6 @@ exports.getAttachments = async (req, res) => {
       employeeId,
       filename
     );
-
     if (fs.existsSync(filePath)) {
       const mimeType =
         {
@@ -443,7 +443,6 @@ exports.getAttachments = async (req, res) => {
 
       res.setHeader("Content-Type", mimeType);
       res.setHeader("Content-Disposition", `inline; filename=${filename}`);
-
       fs.createReadStream(filePath).pipe(res);
     } else {
       res.status(404).json({ error: "File not found" });
@@ -457,30 +456,20 @@ exports.getAttachments = async (req, res) => {
 exports.getAttachmentsByReimbursementId = async (req, res) => {
   try {
     const { reimbursementId } = req.params;
-
     if (!reimbursementId) {
-      console.error("Missing reimbursement ID in request.");
       return res.status(400).json({ message: "Reimbursement ID is required" });
     }
 
-    // Fetch attachments from the service
     const attachments =
       await reimbursementService.getAttachmentsByReimbursementIds([
         reimbursementId,
       ]);
-
-    if (!attachments || attachments.length === 0) {
-      console.warn(
-        `No attachments found for reimbursement ID ${reimbursementId}`
-      );
-      return res
-        .status(404)
-        .json({ message: "No attachments found for this reimbursement." });
+    if (!attachments.length) {
+      return res.status(404).json({ message: "No attachments found." });
     }
-
     res.json({ attachments });
   } catch (error) {
-    console.error(" Error fetching attachments:", error);
+    console.error("Error fetching attachments:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 };
@@ -488,23 +477,22 @@ exports.getAttachmentsByReimbursementId = async (req, res) => {
 exports.getTeamReimbursements = async (req, res) => {
   try {
     const { teamLeadId } = req.params;
-    const { departmentId, fromDate, toDate } = req.query;
+    const { departmentId, submittedFrom, submittedTo } = req.query;
     if (!departmentId || !teamLeadId) {
       return res
         .status(400)
         .json({ error: "Department ID and Team Lead ID are required" });
     }
 
-    // Convert empty date filters to null
-    const effectiveFromDate =
-      fromDate && fromDate.trim() !== "" ? fromDate : null;
-    const effectiveToDate = toDate && toDate.trim() !== "" ? toDate : null;
+    const start =
+      submittedFrom && submittedFrom !== "null" ? submittedFrom : null;
+    const end = submittedTo && submittedTo !== "null" ? submittedTo : null;
 
-    // Pass teamLeadId to your service function
     const teamReimbursements = await reimbursementService.getTeamReimbursements(
       departmentId,
-      effectiveFromDate,
-      effectiveToDate,
+      start,
+      start,
+      end,
       teamLeadId
     );
     res.status(200).json(teamReimbursements);
@@ -523,3 +511,6 @@ exports.getAllProjects = async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 };
+
+// Export multer upload for use in your routes
+exports.upload = upload;

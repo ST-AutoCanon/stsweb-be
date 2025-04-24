@@ -1,38 +1,34 @@
 module.exports = {
   GET_ALL_REIMBURSEMENTS: `
   SELECT r.*,
+         CONCAT(e.first_name, ' ', e.last_name) AS employee_name,
          CONCAT(r.from_date, ' - ', r.to_date) AS tdate,
          IF(r.from_date IS NOT NULL AND r.to_date IS NOT NULL, 
             CONCAT(r.from_date, ' - ', r.to_date), 
             r.date) AS date_range,
          r.payment_status,
-         r.paid_date  -- Ensure this is selected
+         r.paid_date
   FROM reimbursement r
-  WHERE 
-      (? IS NULL OR r.date BETWEEN ? AND ?)
-      OR (? IS NULL OR r.from_date BETWEEN ? AND ?)
-      OR (? IS NULL OR r.to_date BETWEEN ? AND ?)
-      OR (? IS NULL OR (r.from_date <= ? AND r.to_date >= ?))
-  ORDER BY r.date DESC;
+  JOIN employees e ON r.employee_id = e.employee_id
+  WHERE (? IS NULL OR (r.created_at >= ? AND r.created_at < DATE_ADD(?, INTERVAL 1 DAY)))
+  ORDER BY r.created_at DESC
 `,
 
   GET_TEAM_REIMBURSEMENTS: `
-    SELECT r.*,
-       CONCAT(r.from_date, ' - ', r.to_date) AS tdate,
-       IF(r.from_date IS NOT NULL AND r.to_date IS NOT NULL, 
-          CONCAT(r.from_date, ' - ', r.to_date), 
-          r.date) AS date_range,
-       r.paid_date
-    FROM reimbursement r
-    WHERE r.employee_id IN (
-        SELECT employee_id FROM employees WHERE department_id = ?
-    )
-    AND (
-        (? IS NULL OR r.date BETWEEN ? AND ?)
-        OR 
-        (? IS NULL OR (r.from_date <= ? AND r.to_date >= ?))
-    )
-    ORDER BY r.date DESC
+  SELECT r.*,
+         CONCAT(e.first_name, ' ', e.last_name) AS employee_name,
+         CONCAT(r.from_date, ' - ', r.to_date) AS tdate,
+         IF(r.from_date IS NOT NULL AND r.to_date IS NOT NULL, 
+            CONCAT(r.from_date, ' - ', r.to_date), 
+            r.date) AS date_range,
+         r.paid_date
+  FROM reimbursement r
+  JOIN employees e ON r.employee_id = e.employee_id
+  WHERE r.employee_id IN (
+      SELECT employee_id FROM employees WHERE department_id = ?
+  )
+  AND (? IS NULL OR (r.created_at >= ? AND r.created_at < DATE_ADD(?, INTERVAL 1 DAY)))
+  ORDER BY r.created_at DESC
 `,
 
   GET_EMPLOYEE_DETAILS: `
@@ -42,9 +38,9 @@ module.exports = {
   CREATE_REIMBURSEMENT: `
       INSERT INTO reimbursement (
           employee_id, department_id, claim_type, transport_type,  from_date, to_date, date, 
-          travel_from, travel_to, purpose, purchasing_item, accommodation_fees, no_of_days, transport_amount, da,  total_amount, 
+          travel_from, travel_to, meals_objective, purpose,  purchasing_item, accommodation_fees, no_of_days, transport_amount, da,  total_amount, 
           meal_type, stationary, service_provider
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0), ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0), ?, ?, ?, ?, ?, ?)
   `,
   CHECK_EXISTING_REIMBURSEMENT_SINGLE_DATE: `
     SELECT * FROM reimbursement 
@@ -66,10 +62,20 @@ module.exports = {
 
   SAVE_ATTACHMENTS: `INSERT INTO reimbursement_attachments (reimbursement_id, file_name, file_path) VALUES ?`,
 
+  CHECK_EXISTING_CLAIM: `
+  SELECT * FROM reimbursement
+  WHERE employee_id = ?
+    AND claim_type = ?
+    AND (
+      (date IS NOT NULL AND date = ?) OR
+      (from_date IS NOT NULL AND to_date IS NOT NULL AND NOT (to_date < ? OR from_date > ?))
+    )
+`,
+
   UPDATE_REIMBURSEMENT: `
       UPDATE reimbursement 
       SET department_id=?, claim_type=?, transport_type=?, from_date=?, to_date=?, date=?, 
-          travel_from=?, travel_to=?, purpose=?, purchasing_item=?, accommodation_fees=?, no_of_days=?, transport_amount=?, da=?, total_amount=?, 
+          travel_from=?, travel_to=?,   meals_objective=?, purpose=?,  purchasing_item=?, accommodation_fees=?, no_of_days=?, transport_amount=?, da=?, total_amount=?, 
           meal_type=?, stationary=?, service_provider=?
       WHERE id=?
   `,
