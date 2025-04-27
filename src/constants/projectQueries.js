@@ -1,8 +1,8 @@
 module.exports = {
   INSERT_PROJECT: `
         INSERT INTO add_project 
-        (company_name, project_name, project_poc, company_gst, company_pan, company_address, 
-        project_category, start_date, end_date, service_mode, service_location, project_status, description, attachment_url)
+        (country, state, company_name, project_name, project_poc_name, project_poc_contact, company_gst, company_pan, company_address, 
+        project_category, start_date, end_date, service_mode, service_location, project_status, payment_type, description, attachment_url)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 
   INSERT_STS_OWNER: `
@@ -14,24 +14,43 @@ module.exports = {
         VALUES (?, ?, ?, ?, ?, ?, ?)`,
 
   INSERT_FINANCIAL_DETAILS: `
-        INSERT INTO financial_details 
-(project_id, milestone_id, project_amount, tds_percentage, tds_amount, 
- gst_percentage, gst_amount, total_amount, 
- m_actual_percentage, m_actual_amount, 
- m_tds_percentage, m_tds_amount, 
- m_gst_percentage, m_gst_amount, 
- m_total_amount, status) 
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        INSERT INTO financial_details (
+    project_id,
+    milestone_id,
+    project_amount,
+    tds_percentage,
+    tds_amount,
+    gst_percentage,
+    gst_amount,
+    total_amount,
+    monthly_fixed_amount,
+    service_description,
+    month_year,
+    m_actual_percentage,
+    m_actual_amount,
+    m_tds_percentage,
+    m_tds_amount,
+    m_gst_percentage,
+    m_gst_amount,
+    m_total_amount,
+    status,
+    completed_date
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 
   GET_ALL_PROJECTS: `
   SELECT 
     p.id, 
-    p.company_name AS company, 
+    p.company_name AS company,
+    p.company_address AS address,
+    p.company_gst AS gst,
+    p.service_location AS service, 
     p.project_name AS project, 
     p.start_date AS startDate, 
     p.end_date AS endDate, 
     p.project_status AS status, 
-    p.project_poc AS clientPOC, 
+    p.project_poc_name AS clientPOC,
+    p.project_poc_contact AS clientNumber, 
+    p.state,
     s.sts_owner AS stsPOC, 
     (SELECT COUNT(m.id) 
      FROM milestones m 
@@ -49,7 +68,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       p.start_date AS startDate, 
       p.end_date AS endDate, 
       p.project_status AS status, 
-      p.project_poc AS clientPOC, 
+      p.project_poc_name AS clientPOC,
+      p.project_poc_contact AS clientNumber, 
       s.sts_owner AS stsPOC, 
       (SELECT COUNT(m.id) 
      FROM milestones m 
@@ -75,6 +95,9 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     (SELECT MAX(f.gst_percentage) FROM financial_details f WHERE f.project_id = p.id) AS gst_percentage,
     (SELECT MAX(f.gst_amount) FROM financial_details f WHERE f.project_id = p.id) AS gst_amount,
     (SELECT MAX(f.total_amount) FROM financial_details f WHERE f.project_id = p.id) AS total_amount,
+    (SELECT MAX(f.monthly_fixed_amount) FROM financial_details f WHERE f.project_id = p.id) AS monthly_fixed_amount,
+    (SELECT MAX(f.service_description) FROM financial_details f WHERE f.project_id = p.id) AS service_description,
+    (SELECT MAX(f.month_year) FROM financial_details f WHERE f.project_id = p.id) AS month_year,
     -- Aggregate milestones into JSON array (including their unique id):
     COALESCE((
       SELECT JSON_ARRAYAGG(
@@ -108,6 +131,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           'gst_percentage', f.gst_percentage,
           'gst_amount', f.gst_amount,
           'total_amount', f.total_amount,
+          'monthly_fixed_amount', f.monthly_fixed_amount,
+          'service_description', f.service_description,
           'm_actual_percentage', f.m_actual_percentage,
           'm_actual_amount', f.m_actual_amount,
           'm_tds_percentage', f.m_tds_percentage,
@@ -128,9 +153,9 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 
   UPDATE_PROJECT: `
     UPDATE add_project 
-    SET company_name = ?, project_name = ?, project_poc = ?, company_gst = ?, 
+    SET country = ?, state = ?, company_name = ?, project_name = ?, project_poc_name = ?, project_poc_contact = ?, company_gst = ?, 
         company_pan = ?, company_address = ?, project_category = ?, start_date = ?, 
-        end_date = ?, service_mode = ?, service_location = ?, project_status = ?, 
+        end_date = ?, service_mode = ?, service_location = ?, project_status = ?, payment_type = ?,
         description = ?, attachment_url = ?
     WHERE id = ?;
 `,
@@ -156,6 +181,9 @@ WHERE id = ?;
         gst_percentage = ?,
         gst_amount = ?,
         total_amount = ?,
+        monthly_fixed_amount = ?,
+        service_description = ?,
+        month_year = ?,
         m_actual_percentage = ?,
         m_actual_amount = ?,
         m_tds_percentage = ?,
@@ -193,5 +221,26 @@ WHERE e.status <> 'Inactive'
   FROM employees e
   LEFT JOIN departments d ON e.department_id = d.id
   WHERE e.status <> 'Inactive'
+`,
+
+  UPDATE_FINANCIAL_DETAILS_FOR_INVOICE: `
+ INSERT INTO financial_details
+  (project_id, milestone_id, m_actual_amount, m_tds_percentage, m_tds_amount,
+   m_gst_percentage, m_gst_amount, m_total_amount, status, completed_date)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+  m_actual_amount = VALUES(m_actual_amount),
+  m_tds_percentage = VALUES(m_tds_percentage),
+  m_tds_amount = VALUES(m_tds_amount),
+  m_gst_percentage = VALUES(m_gst_percentage),
+  m_gst_amount = VALUES(m_gst_amount),
+  m_total_amount = VALUES(m_total_amount),
+  status = VALUES(status),
+  completed_date = VALUES(completed_date);
+`,
+
+  GET_FINANCIAL_BY_MILESTONE_AND_MONTH_YEAR: `
+  SELECT * FROM financial_details 
+  WHERE milestone_id = ? AND month_year = ?
 `,
 };
