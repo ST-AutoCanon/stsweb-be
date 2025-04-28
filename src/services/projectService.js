@@ -96,6 +96,7 @@ const updateMilestone = async (id, milestoneData) => {
 };
 
 const updateFinancialDetails = async (params) => {
+  console.log("⏩ updateFinancialDetails params:", params);
   await db.execute(queries.UPDATE_FINANCIAL_DETAILS, params);
 };
 
@@ -117,6 +118,68 @@ const searchEmployees = async (search) => {
   }
 };
 
+const updateFinancialDetailsForInvoice = async (data) => {
+  const {
+    project_id,
+    milestone_id,
+    m_actual_amount,
+    m_tds_percentage,
+    m_tds_amount,
+    m_gst_percentage,
+    m_gst_amount,
+    m_total_amount,
+  } = data;
+
+  const status = "Received";
+  const completed_date = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+
+  // 1: Build in the exact same order as your SQL's VALUES(?,…)
+  const params = [
+    project_id,
+    milestone_id,
+    m_actual_amount,
+    m_tds_percentage,
+    m_tds_amount,
+    m_gst_percentage,
+    m_gst_amount,
+    m_total_amount,
+    status,
+    completed_date,
+  ];
+
+  // 2: Convert "" or "null" → actual null
+  const cleanParams = params.map((v) => (v === "" || v === "null" ? null : v));
+
+  // 3: Catch any remaining undefined
+  cleanParams.forEach((v, i) => {
+    if (v === undefined) {
+      console.error(`⚠️ cleanParams[${i}] is undefined!`);
+    }
+  });
+
+  try {
+    const [result] = await db.execute(
+      queries.UPDATE_FINANCIAL_DETAILS_FOR_INVOICE,
+      cleanParams
+    );
+    console.log("Update result:", result);
+  } catch (err) {
+    console.error("Error updating financial details:", err);
+    throw err;
+  }
+};
+
+const getFinancialDetailByMilestoneAndMonthYear = async (
+  milestoneId,
+  monthYear
+) => {
+  const [rows] = await db.execute(
+    queries.GET_FINANCIAL_BY_MILESTONE_AND_MONTH_YEAR,
+    [milestoneId, monthYear]
+  );
+  return rows.length > 0 ? rows[0] : null;
+};
+
 module.exports = {
   addProject,
   addSTSOwner,
@@ -130,4 +193,6 @@ module.exports = {
   updateMilestone,
   updateFinancialDetails,
   searchEmployees,
+  updateFinancialDetailsForInvoice,
+  getFinancialDetailByMilestoneAndMonthYear,
 };
