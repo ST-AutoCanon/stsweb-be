@@ -23,10 +23,14 @@ const idleTimeout = require("./middleware/idleTimeout");
 const attendanceRoutes = require("./routes/attendance_Routes");
 const empSessionRoutes = require("./routes/empSessionRoute");
 const dashboardReimbursementRoutes = require("./routes/dashboardReimbursementRoutes");
-
 const workDayRoutes = require("./routes/empWorkDay");
 const workHourSummaryRoutes = require("./routes/empWorkHour");
 const empLeaveQueryDashboard = require("./routes/empLeaveQueryDashboardRoutes");
+const regFaceRoutes = require("./routes/reg_faceRoutes");
+const faceRoutes = require('./routes/faceRoutes');
+const faceDataRoutes = require('./routes/faceDataRoutes');
+const checkFaceRoute = require('./routes/checkFaceRoute');
+
 //payrollroutes
 
 const admindashboardReimbursementRoutes = require("./routes/adminDashReimbursementRoutes");
@@ -80,7 +84,6 @@ app.use(
 
 // Apply idleTimeout after session is initialized
 app.use(idleTimeout);
-
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
@@ -104,16 +107,22 @@ app.use("/", workDayRoutes);
 app.use("/", empSessionRoutes);
 app.use("/api", workHourSummaryRoutes);
 app.use("/", empLeaveQueryDashboard);
-
 app.use("/salary", salaryRoutes); // This means all salary routes are prefixed with "/salary"
 app.use("/api", payrollRoutes);
-
 app.use("/api", bankDetailsRoutes); // Make sure prefix matches your request
-
 app.use("/", workDayRoutes);
 app.use("/api", adminSalaryStatementRoutes);
 app.use("/", salarylastmonthtotal);
 app.use("/", admindashboardReimbursementRoutes);
+app.use("/api", regFaceRoutes);
+app.use('/api/face', faceRoutes);
+
+app.use('/',faceDataRoutes);
+app.use(checkFaceRoute);
+app.get("/", (req, res) => {
+  res.send("Employee Face Recognition API");
+});
+
 
 //assets
 app.use("/assets", assetsRoutes); // Attach routes
