@@ -47,10 +47,17 @@ const adminSalaryStatementRoutes = require("./routes/adminSalaryStatementRoute")
 const assetsRoutes = require("./routes/assetsRoutes");
 const validateApiKey = require("./middleware/apiKeyMiddleware");
 const assetsRoutesforreturn = require("./routes/assetsRoutes"); // Ensure this is correctly imported
+//attendancetracker
+const adminAttendanceRoutes = require('./routes/adminAttendancetrackerRoute');
+const adminAttendancetrackerRoute = require('./routes/adminAttendancetrackerRoute');
+
+
+//vendors
+const vendorRoutes = require('./routes/vendorRoutes'); // ✅ Import vendor routes
 
 const app = express();
 const server = http.createServer(app);
-
+require("./cronJob");
 //assets
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
@@ -130,6 +137,20 @@ app.use("/api/assets", assetsRoutes); // Register asset routes
 app.use("/api", assetsRoutesforreturn); // Ensure this is correctly mounted
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
+
+
+//attendancetracker
+app.use('/api/attendance', adminAttendanceRoutes);
+app.use('/admin/attendance', adminAttendanceRoutes);
+app.use('/admin-attendance', adminAttendanceRoutes);
+
+
+// vendor Route definitions
+app.use('/', vendorRoutes); // ✅ Prefix all vendor routes with /vendors
+
+
+//
+app.use("/api", payrollRoutes);
 const PORT = process.env.PORT;
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);

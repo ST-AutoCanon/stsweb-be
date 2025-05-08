@@ -65,6 +65,7 @@ const SEARCH_EMPLOYEES_BY_NAME = `
 const GET_ASSIGNED_ASSETS_BY_EMPLOYEE = `
   SELECT 
     a.asset_id,
+    a.asset_code,
     a.asset_name,
     jt.employee_id,
     jt.status
