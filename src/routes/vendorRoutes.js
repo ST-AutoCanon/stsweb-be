@@ -1,18 +1,4 @@
-// const express = require('express');
-// const {
-//   addVendorHandler,
-//   getAllVendorsHandler,
-// } = require('../handlers/vendorHandler');
 
-// const router = express.Router();
-
-// // Add a new vendor
-// router.post('/add', addVendorHandler);
-
-// // Get all vendors
-// router.get('/list', getAllVendorsHandler);
-
-// module.exports = router;
 const express = require('express');
 const multer = require('multer');
 const { addVendorHandler, getAllVendorsHandler } = require('../handlers/vendorHandler'); // Adjust path
