@@ -1,5 +1,31 @@
 const payrollService = require("../services/payrollService");
-const { getEmployeeBankDetails } = require("../services/payrollService");
+const { getEmployeeBankDetails,getEmployeeDetails } = require("../services/payrollService");
+
+
+
+// payrollHandler.js
+const fetchEmployeeDetails = async (req, res) => {
+    try {
+      const { employee_id } = req.params; 
+      const employeeData = await getEmployeeDetails(employee_id);
+  
+      if (!employeeData) {
+        return res.status(404).json({ message: "Employee not found" });
+      }
+  
+      res.status(200).json(employeeData);
+    } catch (error) {
+      console.error("Error fetching employee details:", error);
+      res.status(500).json({
+        error: "Failed to fetch employee details",
+        details: error.message,
+      });
+    }
+  };
+  
+  // Make sure you export it here
+  
+  
 
 const getSalarySlipHandler = async (req, res) => {
     try {
@@ -41,4 +67,5 @@ const handleGetEmployeeBankDetails = async (req, res) => {
     }
 };
 
-module.exports = { getSalarySlipHandler,handleGetEmployeeBankDetails };
+module.exports = { getSalarySlipHandler,handleGetEmployeeBankDetails, fetchEmployeeDetails, 
+};
