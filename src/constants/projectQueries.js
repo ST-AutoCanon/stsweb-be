@@ -214,7 +214,8 @@ WHERE e.status <> 'Inactive'
   SELECT 
     e.employee_id,
     e.role,
-    e.phone_number, 
+    e.phone_number,
+    e.photo_url,
     CONCAT(e.first_name, ' ', e.last_name) AS name, 
     e.department_id, 
     d.name AS department_name
