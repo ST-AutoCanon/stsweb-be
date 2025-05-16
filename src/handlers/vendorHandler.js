@@ -32,11 +32,15 @@ const addVendorHandler = async (req, res) => {
       contact3_email,
       bank_name,
       branch,
+            branch_address, 
+
       account_number,
       ifsc_code,
       nature_of_business,
       product_category,
       years_of_experience,
+                  msme_status         // <-- NEW FIELD
+
     } = req.body;
 
     // Extract file paths from req.files
@@ -76,6 +80,8 @@ const addVendorHandler = async (req, res) => {
       contact3_email || null,
       bank_name || null,
       branch || null,
+            branch_address || null,          // <-- NEW FIELD
+
       account_number || null,
       ifsc_code || null,
       nature_of_business || null,
@@ -85,7 +91,9 @@ const addVendorHandler = async (req, res) => {
       pan_card || null,
       cancelled_cheque || null,
       msme_certificate || null,
+            msme_status || null,            // <-- NEW FIELD
       incorporation_certificate || null,
+
     ];
 
     const result = await vendorService.insertVendor(vendorData);
