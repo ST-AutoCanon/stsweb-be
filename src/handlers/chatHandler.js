@@ -13,34 +13,53 @@ const upload = multer({ storage });
 
 module.exports = {
   createRoom: async (req, res) => {
-    const { name, isGroup, members } = req.body;
-    const creatorId = req.user.id; // assume req.user populated
-    const roomId = await chatService.createRoom(
-      name,
-      isGroup,
-      creatorId,
-      members
-    );
-    res.json({ roomId });
+    try {
+      const { name, isGroup, members } = req.body;
+      const creatorId = req.user.id; // assume req.user populated
+      const roomId = await chatService.createRoom(
+        name,
+        isGroup,
+        creatorId,
+        members
+      );
+      res.json({ roomId });
+    } catch (err) {
+      console.error("createRoom error:", err);
+      res.status(500).json({ error: "Could not create room" });
+    }
   },
 
   listRooms: async (req, res) => {
-    const rooms = await chatService.getUserRooms(req.user.id);
-    res.json(rooms);
+    try {
+      const rooms = await chatService.getUserRooms(req.user.id);
+      res.json(rooms);
+    } catch (err) {
+      console.error("listRooms error:", err);
+      res.status(500).json({ error: "Could not fetch rooms" });
+    }
   },
 
   getMessages: async (req, res) => {
-    const { roomId } = req.params;
-    const msgs = await chatService.getMessages(roomId);
-    res.json(msgs);
+    try {
+      const { roomId } = req.params;
+      const msgs = await chatService.getMessages(roomId);
+      res.json(msgs);
+    } catch (err) {
+      console.error("getMessages error:", err);
+      res.status(500).json({ error: "Could not fetch messages" });
+    }
   },
 
   uploadFile: [
     upload.single("file"),
     (req, res) => {
-      // return file URL for client to send as message
-      const url = `/uploads/${req.file.filename}`;
-      res.json({ url });
+      try {
+        const url = `/uploads/${req.file.filename}`;
+        res.json({ url });
+      } catch (err) {
+        console.error("uploadFile error:", err);
+        res.status(500).json({ error: "File upload failed" });
+      }
     },
   ],
 
@@ -50,7 +69,7 @@ module.exports = {
       const members = await chatService.getRoomMembers(roomId);
       res.json(members);
     } catch (err) {
-      console.error("Failed to list members:", err);
+      console.error("listMembers error:", err);
       res.status(500).json({ error: "Could not fetch members" });
     }
   },
@@ -62,7 +81,7 @@ module.exports = {
       await chatService.addMemberToRoom(roomId, employeeId);
       res.status(204).end();
     } catch (err) {
-      console.error("addMember error", err);
+      console.error("addMember error:", err);
       res.status(500).json({ error: "Could not add member" });
     }
   },
@@ -73,27 +92,26 @@ module.exports = {
       await chatService.removeMemberFromRoom(roomId, employeeId);
       res.status(204).end();
     } catch (err) {
-      console.error("removeMember error", err);
+      console.error("removeMember error:", err);
       res.status(500).json({ error: "Could not remove member" });
     }
   },
 
-  // near your removeMember handler
   deleteRoom: async (req, res) => {
     try {
       const { roomId } = req.params;
       await chatService.deleteRoom(roomId);
       res.status(204).end();
     } catch (err) {
-      console.error("deleteRoom error", err);
+      console.error("deleteRoom error:", err);
       res.status(500).json({ error: "Could not delete room" });
     }
   },
 
   deleteMessage: async (req, res) => {
-    const { roomId, messageId } = req.params;
-    const userId = req.user.id; // from simpleAuth
     try {
+      const { roomId, messageId } = req.params;
+      const userId = req.user.id; // from simpleAuth
       await chatService.deleteMessage(messageId, roomId, userId);
       res.sendStatus(204);
     } catch (err) {
