@@ -54,12 +54,21 @@ async function saveMessage(
   type = "text",
   fileUrl = null
 ) {
-  // normalize any undefined to '' or null
   const text = content ?? "";
   const msgType = type ?? "text";
   const fUrl = fileUrl ?? null;
 
-  await db.execute(Q.SAVE_MESSAGE, [roomId, senderId, text, msgType, fUrl]);
+  const [res] = await db.execute(Q.SAVE_MESSAGE, [
+    roomId,
+    senderId,
+    text,
+    msgType,
+    fUrl,
+  ]);
+  const newId = res.insertId;
+
+  const [rows] = await db.execute(Q.GET_MESSAGE_BY_ID, [newId]);
+  return rows[0];
 }
 
 async function getMessages(roomId) {
