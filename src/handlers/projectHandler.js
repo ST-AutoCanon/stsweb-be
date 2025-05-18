@@ -123,6 +123,13 @@ exports.createProject = async (req, res) => {
           continue; // Skip this financial entry if no matching milestone is found
         }
 
+        const completedDate = financial.completed_date
+          ? new Date(financial.completed_date)
+              .toISOString()
+              .slice(0, 19)
+              .replace("T", " ")
+          : null;
+
         await projectService.addFinancialDetails([
           projectId,
           milestoneId,
@@ -143,6 +150,7 @@ exports.createProject = async (req, res) => {
           financial.m_gst_amount || 0,
           financial.m_total_amount || 0,
           financial.status || "Pending",
+          completedDate,
         ]);
       }
     }

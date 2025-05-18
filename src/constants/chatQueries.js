@@ -51,6 +51,24 @@ module.exports = {
       (room_id, sender_id, message_text, type, file_url)
     VALUES (?, ?, ?, ?, ?)
   `,
+
+  GET_MESSAGE_BY_ID: `
+  SELECT
+    m.message_id    AS id,
+    m.room_id       AS roomId,
+    m.sender_id     AS senderId,
+    CONCAT(e.first_name, ' ', e.last_name) AS senderName,
+    e.photo_url     AS photoUrl,
+    m.message_text  AS content,
+    m.type          AS type,
+    m.file_url      AS fileUrl,
+    m.created_at    AS sentAt
+  FROM messages m
+  JOIN employees e
+    ON e.employee_id = m.sender_id
+  WHERE m.message_id = ?
+`,
+
   GET_MESSAGES: `
     SELECT
       m.message_id    AS id,

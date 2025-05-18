@@ -49,7 +49,6 @@ const vendorRoutes = require("./routes/vendorRoutes"); // ✅ Import vendor rout
 
 const app = express();
 const server = http.createServer(app);
-require("./cronJob");
 //assets
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 const assetsRoutesforreturn = require("./routes/assetsRoutes");
@@ -146,7 +145,6 @@ const io = new Server(server, {
   cors: { origin: process.env.FRONTEND_URL || "*" },
 });
 
-// Socket-auth handshake
 io.use((socket, next) => {
   const userId = socket.handshake.query.userId;
   if (!userId) return next(new Error("Auth error"));
@@ -154,29 +152,29 @@ io.use((socket, next) => {
   next();
 });
 
-// Socket events
 io.on("connection", (socket) => {
-  // auto-join existing rooms
   chatService
     .getUserRooms(socket.userId)
     .then((rooms) => rooms.forEach((r) => socket.join(r.id.toString())))
     .catch(console.error);
 
   socket.on("send_message", async ({ roomId, content, type, fileUrl }) => {
-    await chatService.saveMessage(
+    const saved = await chatService.saveMessage(
       roomId,
       socket.userId,
       content,
       type,
       fileUrl
     );
+
     io.to(roomId.toString()).emit("new_message", {
-      roomId,
-      senderId: socket.userId,
-      content,
-      type,
-      fileUrl,
-      sentAt: new Date(),
+      roomId: saved.roomId,
+      id: saved.id,
+      senderId: saved.senderId,
+      content: saved.content,
+      type: saved.type,
+      fileUrl: saved.fileUrl,
+      sentAt: saved.sentAt,
     });
   });
 

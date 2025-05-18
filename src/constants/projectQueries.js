@@ -3,7 +3,7 @@ module.exports = {
         INSERT INTO add_project 
         (country, state, company_name, project_name, project_poc_name, project_poc_contact, company_gst, company_pan, company_address, 
         project_category, start_date, end_date, service_mode, service_location, project_status, payment_type, description, attachment_url)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 
   INSERT_STS_OWNER: `
         INSERT INTO sts_owners (project_id, sts_owner_id, sts_owner, sts_contact, employee_list, key_considerations) 
