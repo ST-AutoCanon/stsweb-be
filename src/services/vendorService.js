@@ -21,8 +21,18 @@ const getAllVendors = async () => {
     throw new Error("Error fetching vendors");
   }
 };
+const updateVendorById = async (vendorData, vendor_id) => {
+  try {
+    const [result] = await db.query(queries.UPDATE_VENDOR_BY_ID, [...vendorData, vendor_id]);
+    return result;
+  } catch (error) {
+    console.error("Error updating vendor:", error);
+    throw new Error("Error updating vendor");
+  }
+};
 
 module.exports = {
   insertVendor,
   getAllVendors,
+  updateVendorById,
 };
