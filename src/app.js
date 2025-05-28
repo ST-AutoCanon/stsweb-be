@@ -43,9 +43,16 @@ const validateApiKey = require("./middleware/apiKeyMiddleware");
 //attendancetracker
 const adminAttendanceRoutes = require("./routes/adminAttendancetrackerRoute");
 const adminAttendancetrackerRoute = require("./routes/adminAttendancetrackerRoute");
+const face_admin_page = require('./routes/face_adminpageRoutes');
+const employeeloginRoutes = require('./routes/employeeloginRoutes');
 
 //vendors
 const vendorRoutes = require("./routes/vendorRoutes"); // ✅ Import vendor routes
+
+//generatepaysliproutes
+const oldEmployeeRoutes = require('./routes/oldEmployeeDetailsRoute');
+const oldEmployeeDetailsRoutes = require('./routes/oldEmployeeDetailsRoute');
+
 
 const app = express();
 const server = http.createServer(app);
@@ -135,9 +142,15 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/api/attendance", adminAttendanceRoutes);
 app.use("/admin/attendance", adminAttendanceRoutes);
 app.use("/admin-attendance", adminAttendanceRoutes);
-
+app.use('/face-punch', face_admin_page);
+app.use('/api/employeelogin', employeeloginRoutes);
 // vendor Route definitions
 app.use("/", vendorRoutes); // ✅ Prefix all vendor routes with /vendors
+
+//generatepayslip at adminside
+app.use("/", oldEmployeeRoutes);
+app.use("/", oldEmployeeDetailsRoutes);
+
 
 //
 app.use("/api", payrollRoutes);
