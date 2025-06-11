@@ -48,8 +48,8 @@ module.exports = {
   // — Messages —
   SAVE_MESSAGE: `
     INSERT INTO messages
-      (room_id, sender_id, message_text, type, file_url)
-    VALUES (?, ?, ?, ?, ?)
+     (room_id, sender_id, message_text, type, file_url, latitude, longitude, address)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `,
 
   GET_MESSAGE_BY_ID: `
@@ -62,7 +62,10 @@ module.exports = {
     m.message_text  AS content,
     m.type          AS type,
     m.file_url      AS fileUrl,
-    m.created_at    AS sentAt
+    m.created_at    AS sentAt,
+    m.latitude      AS latitude,
+    m.longitude     AS longitude,
+    m.address       AS address
   FROM messages m
   JOIN employees e
     ON e.employee_id = m.sender_id
@@ -78,7 +81,10 @@ module.exports = {
       m.message_text  AS content,
       m.type          AS type,
       m.file_url      AS file_url,
-      m.created_at    AS sent_at
+      m.created_at    AS sent_at,
+     m.latitude      AS latitude,
+     m.longitude     AS longitude,
+     m.address       AS address
     FROM messages m
     JOIN employees e
       ON e.employee_id = m.sender_id
@@ -125,5 +131,63 @@ module.exports = {
      WHERE message_id = ?
        AND room_id    = ?
        AND sender_id  = ?
+  `,
+
+  MARK_MESSAGES_READ: `
+    INSERT IGNORE INTO message_reads (message_id, reader_id)
+    SELECT
+      m.message_id, ?
+    FROM messages m
+    WHERE
+      m.room_id    = ?
+      AND m.sender_id <> ?
+      AND NOT EXISTS (
+        SELECT 1
+        FROM message_reads mr
+        WHERE mr.message_id = m.message_id
+          AND mr.reader_id  = ?
+      )
+  `,
+
+  GET_MESSAGES_WITH_READ_STATUS: `
+    SELECT
+      m.message_id    AS id,
+      m.room_id       AS roomId,
+      m.sender_id     AS senderId,
+      CONCAT(e.first_name, ' ', e.last_name) AS senderName,
+      e.photo_url     AS photoUrl,
+      m.message_text  AS content,
+      m.type          AS type,
+      m.file_url      AS fileUrl,
+      m.created_at    AS sentAt,
+      m.latitude      AS latitude,
+      m.longitude     AS longitude,
+      m.address       AS address,
+      mr.read_at      AS readAt
+    FROM messages m
+    JOIN employees e
+      ON e.employee_id = m.sender_id
+    LEFT JOIN message_reads mr
+      ON mr.message_id = m.message_id
+      AND mr.reader_id  = ?
+    WHERE m.room_id = ?
+    ORDER BY m.created_at ASC
+  `,
+
+  GET_UNREAD_COUNTS_FOR_USER: `
+    SELECT
+      m.room_id,
+      COUNT(*) AS unreadCount
+    FROM messages m
+    LEFT JOIN message_reads mr
+      ON mr.message_id = m.message_id
+      AND mr.reader_id = ?
+    JOIN room_members rm
+      ON rm.room_id    = m.room_id
+      AND rm.employee_id = ?
+    WHERE
+      m.sender_id <> ?
+      AND mr.reader_id IS NULL
+    GROUP BY m.room_id
   `,
 };
