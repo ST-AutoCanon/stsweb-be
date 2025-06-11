@@ -2,7 +2,6 @@ const chatService = require("../services/chatService");
 const multer = require("multer");
 const path = require("path");
 
-// file upload config
 const storage = multer.diskStorage({
   destination: "uploads/",
   filename: (req, file, cb) => {
@@ -15,7 +14,7 @@ module.exports = {
   createRoom: async (req, res) => {
     try {
       const { name, isGroup, members } = req.body;
-      const creatorId = req.user.id; // assume req.user populated
+      const creatorId = req.user.id;
       const roomId = await chatService.createRoom(
         name,
         isGroup,
@@ -31,7 +30,7 @@ module.exports = {
 
   listRooms: async (req, res) => {
     try {
-      const rooms = await chatService.getUserRooms(req.user.id);
+      const rooms = await chatService.getRoomsWithUnreadCounts(req.user.id);
       res.json(rooms);
     } catch (err) {
       console.error("listRooms error:", err);
@@ -42,11 +41,31 @@ module.exports = {
   getMessages: async (req, res) => {
     try {
       const { roomId } = req.params;
-      const msgs = await chatService.getMessages(roomId);
-      res.json(msgs);
+      await chatService.markMessagesRead(roomId, req.user.id);
+      const msgs = await chatService.getMessagesWithRead(roomId, req.user.id);
+      // each row now has .latitude, .longitude, but getMessagesWithRead needs to select `address` too!
+      const shaped = msgs.map((m) => ({
+        ...m,
+        location:
+          m.latitude != null
+            ? { lat: m.latitude, lng: m.longitude, address: m.address }
+            : null,
+      }));
+      res.json(shaped);
     } catch (err) {
       console.error("getMessages error:", err);
       res.status(500).json({ error: "Could not fetch messages" });
+    }
+  },
+
+  markRead: async (req, res) => {
+    try {
+      const { roomId } = req.params;
+      await chatService.markMessagesRead(roomId, req.user.id);
+      res.status(204).end();
+    } catch (err) {
+      console.error("markRead error:", err);
+      res.status(500).json({ error: "Could not mark messages read" });
     }
   },
 

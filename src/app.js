@@ -43,16 +43,15 @@ const validateApiKey = require("./middleware/apiKeyMiddleware");
 //attendancetracker
 const adminAttendanceRoutes = require("./routes/adminAttendancetrackerRoute");
 const adminAttendancetrackerRoute = require("./routes/adminAttendancetrackerRoute");
-const face_admin_page = require('./routes/face_adminpageRoutes');
-const employeeloginRoutes = require('./routes/employeeloginRoutes');
+const face_admin_page = require("./routes/face_adminpageRoutes");
+const employeeloginRoutes = require("./routes/employeeloginRoutes");
 
 //vendors
 const vendorRoutes = require("./routes/vendorRoutes"); // ✅ Import vendor routes
 
 //generatepaysliproutes
-const oldEmployeeRoutes = require('./routes/oldEmployeeDetailsRoute');
-const oldEmployeeDetailsRoutes = require('./routes/oldEmployeeDetailsRoute');
-
+const oldEmployeeRoutes = require("./routes/oldEmployeeDetailsRoute");
+const oldEmployeeDetailsRoutes = require("./routes/oldEmployeeDetailsRoute");
 
 const app = express();
 const server = http.createServer(app);
@@ -142,15 +141,14 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/api/attendance", adminAttendanceRoutes);
 app.use("/admin/attendance", adminAttendanceRoutes);
 app.use("/admin-attendance", adminAttendanceRoutes);
-app.use('/face-punch', face_admin_page);
-app.use('/api/employeelogin', employeeloginRoutes);
+app.use("/face-punch", face_admin_page);
+app.use("/api/employeelogin", employeeloginRoutes);
 // vendor Route definitions
 app.use("/", vendorRoutes); // ✅ Prefix all vendor routes with /vendors
 
 //generatepayslip at adminside
 app.use("/", oldEmployeeRoutes);
 app.use("/", oldEmployeeDetailsRoutes);
-
 
 //
 app.use("/api", payrollRoutes);
@@ -171,25 +169,43 @@ io.on("connection", (socket) => {
     .then((rooms) => rooms.forEach((r) => socket.join(r.id.toString())))
     .catch(console.error);
 
-  socket.on("send_message", async ({ roomId, content, type, fileUrl }) => {
-    const saved = await chatService.saveMessage(
-      roomId,
-      socket.userId,
-      content,
-      type,
-      fileUrl
-    );
+  socket.on(
+    "send_message",
+    async ({ roomId, content, type, fileUrl, location }) => {
+      if (!location?.lat || !location?.lng) {
+        socket.emit("error", "Location required");
+        return;
+      }
 
-    io.to(roomId.toString()).emit("new_message", {
-      roomId: saved.roomId,
-      id: saved.id,
-      senderId: saved.senderId,
-      content: saved.content,
-      type: saved.type,
-      fileUrl: saved.fileUrl,
-      sentAt: saved.sentAt,
-    });
-  });
+      const { lat, lng, address } = location;
+
+      const saved = await chatService.saveMessage(
+        roomId,
+        socket.userId,
+        content,
+        type,
+        fileUrl,
+        lat,
+        lng,
+        address
+      );
+
+      io.to(roomId.toString()).emit("new_message", {
+        roomId: saved.roomId,
+        id: saved.id,
+        senderId: saved.senderId,
+        content: saved.content,
+        type: saved.type,
+        fileUrl: saved.fileUrl,
+        sentAt: saved.sentAt,
+        location: {
+          lat: saved.latitude,
+          lng: saved.longitude,
+          address: saved.address,
+        },
+      });
+    }
+  );
 
   socket.on("create_room", async ({ name, isGroup, members }) => {
     const roomId = await chatService.createRoom(

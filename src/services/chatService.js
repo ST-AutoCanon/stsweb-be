@@ -52,7 +52,10 @@ async function saveMessage(
   senderId,
   content,
   type = "text",
-  fileUrl = null
+  fileUrl = null,
+  latitude,
+  longitude,
+  address
 ) {
   const text = content ?? "";
   const msgType = type ?? "text";
@@ -64,9 +67,11 @@ async function saveMessage(
     text,
     msgType,
     fUrl,
+    latitude,
+    longitude,
+    address,
   ]);
   const newId = res.insertId;
-
   const [rows] = await db.execute(Q.GET_MESSAGE_BY_ID, [newId]);
   return rows[0];
 }
@@ -107,6 +112,41 @@ async function deleteMessage(messageId, roomId, userId) {
   }
 }
 
+// services/chatService.js
+async function markMessagesRead(roomId, userId) {
+  // userId passes in for both reader_id and sender<>userId
+  await db.execute(Q.MARK_MESSAGES_READ, [userId, roomId, userId, userId]);
+}
+
+async function getMessagesWithRead(roomId, userId) {
+  const [rows] = await db.execute(Q.GET_MESSAGES_WITH_READ_STATUS, [
+    userId,
+    roomId,
+  ]);
+  // rows now each have a `readAt` column (null if unread by *this* user)
+  return rows;
+}
+
+async function getRoomsWithUnreadCounts(userId) {
+  // 1) fetch basic room info
+  const [rooms] = await db.execute(Q.GET_ROOMS_FOR_USER, [userId, userId]);
+  // 2) fetch unread counts map
+  const [counts] = await db.execute(Q.GET_UNREAD_COUNTS_FOR_USER, [
+    userId,
+    userId,
+    userId,
+  ]);
+  const byRoom = counts.reduce((acc, { room_id, unreadCount }) => {
+    acc[room_id] = unreadCount;
+    return acc;
+  }, {});
+  // 3) merge
+  return rooms.map((r) => ({
+    ...r,
+    unreadCount: byRoom[r.id] || 0,
+  }));
+}
+
 module.exports = {
   createRoom,
   getUserRooms,
@@ -117,4 +157,7 @@ module.exports = {
   removeMemberFromRoom,
   deleteRoom,
   deleteMessage,
+  markMessagesRead,
+  getMessagesWithRead,
+  getRoomsWithUnreadCounts,
 };
