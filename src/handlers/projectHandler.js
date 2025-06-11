@@ -2,10 +2,9 @@ const projectService = require("../services/projectService");
 
 exports.createProject = async (req, res) => {
   try {
-    console.log("Request Body:", req.body); // Debug incoming text fields
-    console.log("Uploaded Files:", req.files); // Debug uploaded files
+    console.log("Request Body:", req.body);
+    console.log("Uploaded Files:", req.files);
 
-    // Destructure other fields from req.body
     const {
       country,
       state,
@@ -24,10 +23,9 @@ exports.createProject = async (req, res) => {
       project_status,
       payment_type,
       description,
+      month_year, // extract top-level month_year if provided
     } = req.body;
 
-    // For fields that represent arrays (like project_category or employee_list),
-    // they might be received as JSON strings. Adjust as needed.
     const projectCategoryJson =
       typeof project_category === "string"
         ? project_category
@@ -39,14 +37,11 @@ exports.createProject = async (req, res) => {
         : JSON.stringify(req.body.employee_list)
       : JSON.stringify([]);
 
-    // Extract file information from req.files.
-    // For example, store the filenames (or you can use file.path if you need the full path).
     const attachments =
       req.files && req.files.length > 0
         ? req.files.map((file) => file.filename)
         : [];
 
-    // Insert Project. Pass the attachments as a JSON string.
     const projectId = await projectService.addProject([
       country,
       state,
@@ -68,20 +63,17 @@ exports.createProject = async (req, res) => {
       JSON.stringify(attachments),
     ]);
 
-    // Insert STS Owner
     await projectService.addSTSOwner([
       projectId,
       req.body.sts_owner_id,
       req.body.sts_owner,
       req.body.sts_contact,
-      employeeListJson, // Store employee_list as JSON
+      employeeListJson,
       req.body.key_considerations,
     ]);
 
-    // Insert Milestones and collect their IDs
     let milestoneIds = [];
-    const { milestones = [] } = req.body; // milestones may come as a JSON string; adjust if needed.
-    // If milestones is a string, parse it
+    const { milestones = [] } = req.body;
     const parsedMilestones =
       typeof milestones === "string" ? JSON.parse(milestones) : milestones;
     if (Array.isArray(parsedMilestones)) {
@@ -99,29 +91,45 @@ exports.createProject = async (req, res) => {
       }
     }
 
-    console.log("Stored Milestone IDs:", milestoneIds); // Debugging
+    console.log("Stored Milestone IDs:", milestoneIds);
 
-    // Insert Financial Details
+    // Insert Financial Details with monthly scheduled support
     let { financialDetails = [] } = req.body;
     const parsedFinancialDetails =
       typeof financialDetails === "string"
         ? JSON.parse(financialDetails)
         : financialDetails;
+
     if (Array.isArray(parsedFinancialDetails)) {
       for (const financial of parsedFinancialDetails) {
-        // Find the corresponding milestone ID based on milestone details
+        // try to find milestone; monthly scheduled can omit milestones
         const milestone = milestoneIds.find(
           (m) => m.details === financial.milestone_details
         );
-        const milestoneId = milestone ? milestone.id : null;
+        let milestoneId = milestone ? milestone.id : null;
+        // skip only if non-monthly and no milestone
+        if (payment_type !== "Monthly Scheduled" && !milestoneId) continue;
 
-        if (!milestoneId) {
-          console.error(
-            "Milestone ID not found for",
-            financial.milestone_details
-          );
-          continue; // Skip this financial entry if no matching milestone is found
-        }
+        // for monthly scheduled without milestones, allow null milestoneId
+
+        // Top-line values
+        const project_amount = Number(req.body.project_amount) || 0;
+        const tds_percentage = Number(req.body.tds_percentage) || 0;
+        const tds_amount = Number(req.body.tds_amount) || 0;
+        const gst_percentage = Number(req.body.gst_percentage) || 0;
+        const gst_amount = Number(req.body.gst_amount) || 0;
+        const total_amount = Number(req.body.total_amount) || 0;
+
+        const monthly_fixed_amount = Number(req.body.monthly_fixed_amount) || 0;
+        const service_description = req.body.service_description || null;
+
+        const m_actual_percentage = Number(financial.m_actual_percentage) || 0;
+        const m_actual_amount = Number(financial.m_actual_amount) || 0;
+        const m_tds_percentage = Number(financial.m_tds_percentage) || 0;
+        const m_tds_amount = Number(financial.m_tds_amount) || 0;
+        const m_gst_percentage = Number(financial.m_gst_percentage) || 0;
+        const m_gst_amount = Number(financial.m_gst_amount) || 0;
+        const m_total_amount = Number(financial.m_total_amount) || 0;
 
         const completedDate = financial.completed_date
           ? new Date(financial.completed_date)
@@ -130,28 +138,53 @@ exports.createProject = async (req, res) => {
               .replace("T", " ")
           : null;
 
-        await projectService.addFinancialDetails([
-          projectId,
-          milestoneId,
-          req.body.project_amount || 0,
-          req.body.tds_percentage || 0,
-          req.body.tds_amount || 0,
-          req.body.gst_percentage || 0,
-          req.body.gst_amount || 0,
-          req.body.total_amount || 0,
-          req.body.monthly_fixed_amount || 0,
-          req.body.service_description || null,
-          req.body.month_year || null,
-          financial.m_actual_percentage || 0,
-          financial.m_actual_amount || 0,
-          financial.m_tds_percentage || 0,
-          financial.m_tds_amount || 0,
-          financial.m_gst_percentage || 0,
-          financial.m_gst_amount || 0,
-          financial.m_total_amount || 0,
-          financial.status || "Pending",
-          completedDate,
-        ]);
+        if (payment_type === "Monthly Scheduled") {
+          await projectService.addFinancialDetails([
+            projectId,
+            milestoneId, // can be null
+            project_amount,
+            tds_percentage,
+            tds_amount,
+            gst_percentage,
+            gst_amount,
+            total_amount,
+            monthly_fixed_amount,
+            service_description,
+            month_year || null,
+            m_actual_percentage,
+            m_actual_amount,
+            m_tds_percentage,
+            m_tds_amount,
+            m_gst_percentage,
+            m_gst_amount,
+            m_total_amount,
+            financial.status || "Pending",
+            completedDate,
+          ]);
+        } else {
+          await projectService.addFinancialDetails([
+            projectId,
+            milestoneId,
+            project_amount,
+            tds_percentage,
+            tds_amount,
+            gst_percentage,
+            gst_amount,
+            total_amount,
+            monthly_fixed_amount,
+            service_description,
+            null,
+            m_actual_percentage,
+            m_actual_amount,
+            m_tds_percentage,
+            m_tds_amount,
+            m_gst_percentage,
+            m_gst_amount,
+            m_total_amount,
+            financial.status || "Pending",
+            completedDate,
+          ]);
+        }
       }
     }
 
@@ -384,7 +417,6 @@ exports.updateProject = async (req, res) => {
     }
 
     // 8. Handle financial details
-    //    Pull top‑level month_year (e.g. "April 2025")
     const month_year = req.body.month_year || null;
 
     let parsedFinancial = [];
@@ -396,7 +428,7 @@ exports.updateProject = async (req, res) => {
     }
 
     if (Array.isArray(parsedFinancial) && parsedFinancial.length > 0) {
-      // Optionally link milestone_id by matching details
+      // link milestone_id by matching details if needed
       if (Array.isArray(parsedMilestones)) {
         parsedFinancial.forEach((f) => {
           if (!f.milestone_id && f.milestone_details) {
@@ -408,14 +440,16 @@ exports.updateProject = async (req, res) => {
         });
       }
 
-      // Inside your loop for parsedFinancial
       for (const fin of parsedFinancial) {
-        if (!fin.milestone_id) {
+        // determine milestoneId (null if missing)
+        const milestoneId = fin.milestone_id || null;
+        // skip only non-monthly entries lacking a milestone
+        if (payment_type !== "Monthly Scheduled" && !milestoneId) {
           console.error("Skipping financial detail without milestone_id", fin);
           continue;
         }
 
-        // Shared topline values
+        // shared top-line values
         const project_amount = Number(req.body.project_amount) || 0;
         const tds_percentage = Number(req.body.tds_percentage) || 0;
         const tds_amount = Number(req.body.tds_amount) || 0;
@@ -424,26 +458,15 @@ exports.updateProject = async (req, res) => {
         const total_amount = Number(req.body.total_amount) || 0;
 
         const monthly_fixed_amount =
-          fin.monthly_fixed_amount != null &&
-          fin.monthly_fixed_amount !== "" &&
-          fin.monthly_fixed_amount !== "null"
+          fin.monthly_fixed_amount != null && fin.monthly_fixed_amount !== ""
             ? Number(fin.monthly_fixed_amount)
-            : req.body.monthly_fixed_amount != null &&
-              req.body.monthly_fixed_amount !== "null"
-            ? Number(req.body.monthly_fixed_amount)
-            : 0;
+            : Number(req.body.monthly_fixed_amount) || 0;
 
         const service_description =
-          fin.service_description != null &&
-          fin.service_description !== "" &&
-          fin.service_description !== "null"
+          fin.service_description != null && fin.service_description !== ""
             ? fin.service_description
-            : req.body.service_description &&
-              req.body.service_description !== "null"
-            ? req.body.service_description
-            : null;
+            : req.body.service_description || null;
 
-        // Per‑row actuals
         const m_actual_percentage = Number(fin.m_actual_percentage) || 0;
         const m_actual_amount = Number(fin.m_actual_amount) || 0;
         const m_tds_percentage = Number(fin.m_tds_percentage) || 0;
@@ -452,7 +475,6 @@ exports.updateProject = async (req, res) => {
         const m_gst_amount = Number(fin.m_gst_amount) || 0;
         const m_total_amount = Number(fin.m_total_amount) || 0;
 
-        // Format completed_date
         const formattedCompleted = fin.completed_date
           ? new Date(fin.completed_date)
               .toISOString()
@@ -461,65 +483,32 @@ exports.updateProject = async (req, res) => {
           : null;
 
         if (payment_type === "Monthly Scheduled") {
-          // 8a. For monthly, insert when month_year is new
-          const existing =
-            await projectService.getFinancialDetailByMilestoneAndMonthYear(
-              fin.milestone_id,
-              month_year
-            );
-
-          if (existing) {
-            // update existing row
-            await projectService.updateFinancialDetails([
-              project_amount,
-              tds_percentage,
-              tds_amount,
-              gst_percentage,
-              gst_amount,
-              total_amount,
-              monthly_fixed_amount, // This will be null if not provided
-              service_description, // This will be null if not provided
-              month_year,
-              m_actual_percentage,
-              m_actual_amount,
-              m_tds_percentage,
-              m_tds_amount,
-              m_gst_percentage,
-              m_gst_amount,
-              m_total_amount,
-              fin.status || "Pending",
-              formattedCompleted,
-              fin.milestone_id,
-              existing.id,
-            ]);
-          } else {
-            // insert new row
-            const newId = await projectService.addFinancialDetails([
-              fin.milestone_id,
-              project_amount,
-              tds_percentage,
-              tds_amount,
-              gst_percentage,
-              gst_amount,
-              total_amount,
-              monthly_fixed_amount, // This will be null if not provided
-              service_description, // This will be null if not provided
-              month_year,
-              m_actual_percentage,
-              m_actual_amount,
-              m_tds_percentage,
-              m_tds_amount,
-              m_gst_percentage,
-              m_gst_amount,
-              m_total_amount,
-              fin.status || "Pending",
-              formattedCompleted,
-            ]);
-            fin.id = newId;
-          }
+          // always insert new monthly row (milestoneId can be null)
+          await projectService.addFinancialDetails([
+            id,
+            milestoneId,
+            project_amount,
+            tds_percentage,
+            tds_amount,
+            gst_percentage,
+            gst_amount,
+            total_amount,
+            monthly_fixed_amount,
+            service_description,
+            month_year,
+            m_actual_percentage,
+            m_actual_amount,
+            m_tds_percentage,
+            m_tds_amount,
+            m_gst_percentage,
+            m_gst_amount,
+            m_total_amount,
+            fin.status || "Pending",
+            formattedCompleted,
+          ]);
         } else {
-          const financialId = fin.id || null; // Instead of undefined
-
+          // update existing or insert if id missing
+          const finId = fin.id || null;
           await projectService.updateFinancialDetails([
             project_amount,
             tds_percentage,
@@ -539,13 +528,11 @@ exports.updateProject = async (req, res) => {
             m_total_amount,
             fin.status || "Pending",
             formattedCompleted,
-            fin.milestone_id,
-            financialId, // <-- use this
+            milestoneId,
+            finId,
           ]);
         }
       }
-    } else {
-      console.log("No financial details provided; skipping.");
     }
 
     return res.status(200).json({ message: "Project updated successfully" });

@@ -16,5 +16,7 @@ router.post("/rooms/:roomId/members", chatHandler.addMember);
 router.delete("/rooms/:roomId/members/:employeeId", chatHandler.removeMember);
 router.delete("/rooms/:roomId", chatHandler.deleteRoom);
 router.delete("/rooms/:roomId/messages/:messageId", chatHandler.deleteMessage);
+router.get("/rooms/:roomId/messages", chatHandler.getMessages);
+router.post("/rooms/:roomId/read", chatHandler.markRead);
 
 module.exports = router;
