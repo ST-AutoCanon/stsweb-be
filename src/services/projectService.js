@@ -12,7 +12,7 @@ const addSTSOwner = async (stsOwnerData) => {
 
 const addMilestone = async (milestoneData) => {
   const [result] = await db.execute(queries.INSERT_MILESTONE, milestoneData);
-  return result.insertId; // Return the milestone ID
+  return result.insertId;
 };
 
 const addFinancialDetails = async (financialData) => {
@@ -25,7 +25,6 @@ const getAllProjects = async () => {
 };
 
 const getEmployeeProjects = async (employeeId) => {
-  // Wrap the employeeId in quotes so it becomes a valid JSON string for JSON_CONTAINS
   const jsonEmployeeId = `"${employeeId}"`;
   const [rows] = await db.query(queries.GET_EMPLOYEE_PROJECTS, [
     jsonEmployeeId,
@@ -33,7 +32,6 @@ const getEmployeeProjects = async (employeeId) => {
   return rows;
 };
 
-// Fetch single project by ID
 const getProjectById = async (id) => {
   const [rows] = await db.query(queries.GET_PROJECT_BY_ID, [id]);
 
@@ -48,10 +46,9 @@ const getProjectById = async (id) => {
     financialDetails: [],
     employee_list: [],
     key_considerations: [],
-    attachment_url: [], // Ensure this field is set up as an array
+    attachment_url: [],
   };
 
-  // Helper function to parse JSON fields
   const parseJSONField = (field) => {
     if (typeof field === "string") {
       try {
@@ -69,21 +66,17 @@ const getProjectById = async (id) => {
   project.key_considerations = parseJSONField(rows[0].key_considerations);
   project.milestones = parseJSONField(rows[0].milestones);
   project.financialDetails = parseJSONField(rows[0].financial_details);
-  project.attachment_url = parseJSONField(rows[0].attachment_url); // New: parse attachments
-
-  // Convert any numeric fields as needed
+  project.attachment_url = parseJSONField(rows[0].attachment_url);
   project.project_amount = parseFloat(project.project_amount) || 0;
   project.tds_percentage = parseFloat(project.tds_percentage) || 0;
   project.tds_amount = parseFloat(project.tds_amount) || 0;
   project.gst_percentage = parseFloat(project.gst_percentage) || 0;
   project.gst_amount = parseFloat(project.gst_amount) || 0;
   project.total_amount = parseFloat(project.total_amount) || 0;
-
   return project;
 };
 
 const updateProject = async (id, projectData) => {
-  // Update project details
   await db.execute(queries.UPDATE_PROJECT, projectData);
 };
 
@@ -131,9 +124,8 @@ const updateFinancialDetailsForInvoice = async (data) => {
   } = data;
 
   const status = "Received";
-  const completed_date = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+  const completed_date = new Date().toISOString().split("T")[0];
 
-  // 1: Build in the exact same order as your SQL's VALUES(?,…)
   const params = [
     project_id,
     milestone_id,
@@ -147,10 +139,8 @@ const updateFinancialDetailsForInvoice = async (data) => {
     completed_date,
   ];
 
-  // 2: Convert "" or "null" → actual null
   const cleanParams = params.map((v) => (v === "" || v === "null" ? null : v));
 
-  // 3: Catch any remaining undefined
   cleanParams.forEach((v, i) => {
     if (v === undefined) {
       console.error(`⚠️ cleanParams[${i}] is undefined!`);
@@ -180,6 +170,35 @@ const getFinancialDetailByMilestoneAndMonthYear = async (
   return rows.length > 0 ? rows[0] : null;
 };
 
+const upsertFinancialDetails = async (data) => {
+  await db.execute(queries.UPSERT_FINANCIAL_DETAILS, data);
+};
+
+const updateFinancialDetailsById = async ({
+  financial_id,
+  m_actual_amount,
+  m_tds_percentage,
+  m_tds_amount,
+  m_gst_percentage,
+  m_gst_amount,
+  m_total_amount,
+  status = "Received",
+  completed_date = new Date().toISOString().split("T")[0],
+}) => {
+  const params = [
+    m_actual_amount,
+    m_tds_percentage,
+    m_tds_amount,
+    m_gst_percentage,
+    m_gst_amount,
+    m_total_amount,
+    status,
+    completed_date,
+    financial_id,
+  ];
+  await db.execute(queries.UPDATE_FINANCIAL_BY_ID, params);
+};
+
 module.exports = {
   addProject,
   addSTSOwner,
@@ -195,4 +214,6 @@ module.exports = {
   searchEmployees,
   updateFinancialDetailsForInvoice,
   getFinancialDetailByMilestoneAndMonthYear,
+  upsertFinancialDetails,
+  updateFinancialDetailsById,
 };

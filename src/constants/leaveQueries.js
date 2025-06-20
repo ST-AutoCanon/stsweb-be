@@ -1,7 +1,13 @@
 module.exports = {
   // Fetch leave request by ID and employee ID to verify ownership
-  GET_LEAVE_BY_ID:
-    "SELECT * FROM leavequeries WHERE id = ? AND employee_id = ?",
+  GET_LEAVE_BY_ID: `
+  SELECT 
+    leavequeries.*, 
+    CONCAT(e.first_name, ' ', e.last_name) AS name
+  FROM leavequeries
+  INNER JOIN employees e ON leavequeries.employee_id = e.employee_id
+  WHERE leavequeries.id = ? AND leavequeries.employee_id = ?
+`,
 
   // Update leave request if still pending
   UPDATE_LEAVE_REQUEST: `
@@ -21,8 +27,14 @@ module.exports = {
         VALUES (?, ?, ?, ?, ?, ?)
       `,
   SELECT_LEAVE_REQUESTS: `
-        SELECT * FROM leavequeries WHERE employee_id = ?
-      `,
+      SELECT 
+        leavequeries.*, 
+        CONCAT(e.first_name, ' ', e.last_name) AS name
+      FROM leavequeries
+      INNER JOIN employees e ON leavequeries.employee_id = e.employee_id
+      WHERE leavequeries.employee_id = ?
+    `,
+
   GET_LEAVE_QUERIES: `
       SELECT 
         leavequeries.id AS leave_id, 
