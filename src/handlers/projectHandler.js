@@ -23,7 +23,7 @@ exports.createProject = async (req, res) => {
       project_status,
       payment_type,
       description,
-      month_year, // extract top-level month_year if provided
+      month_year,
     } = req.body;
 
     const projectCategoryJson =
@@ -93,7 +93,6 @@ exports.createProject = async (req, res) => {
 
     console.log("Stored Milestone IDs:", milestoneIds);
 
-    // Insert Financial Details with monthly scheduled support
     let { financialDetails = [] } = req.body;
     const parsedFinancialDetails =
       typeof financialDetails === "string"
@@ -102,17 +101,12 @@ exports.createProject = async (req, res) => {
 
     if (Array.isArray(parsedFinancialDetails)) {
       for (const financial of parsedFinancialDetails) {
-        // try to find milestone; monthly scheduled can omit milestones
         const milestone = milestoneIds.find(
           (m) => m.details === financial.milestone_details
         );
         let milestoneId = milestone ? milestone.id : null;
-        // skip only if non-monthly and no milestone
         if (payment_type !== "Monthly Scheduled" && !milestoneId) continue;
 
-        // for monthly scheduled without milestones, allow null milestoneId
-
-        // Top-line values
         const project_amount = Number(req.body.project_amount) || 0;
         const tds_percentage = Number(req.body.tds_percentage) || 0;
         const tds_amount = Number(req.body.tds_amount) || 0;
@@ -141,7 +135,7 @@ exports.createProject = async (req, res) => {
         if (payment_type === "Monthly Scheduled") {
           await projectService.addFinancialDetails([
             projectId,
-            milestoneId, // can be null
+            milestoneId || null,
             project_amount,
             tds_percentage,
             tds_amount,
@@ -149,8 +143,8 @@ exports.createProject = async (req, res) => {
             gst_amount,
             total_amount,
             monthly_fixed_amount,
-            service_description,
-            month_year || null,
+            financial.service_description,
+            financial.month_year,
             m_actual_percentage,
             m_actual_amount,
             m_tds_percentage,
@@ -211,7 +205,6 @@ exports.getProjects = async (req, res) => {
 
 exports.getEmployeeProjects = async (req, res) => {
   try {
-    // Assume employeeId is passed as a query parameter
     const { employeeId } = req.query;
     if (!employeeId) {
       return res.status(400).json({ error: "Employee ID is required" });
@@ -246,24 +239,17 @@ exports.getProjectById = async (req, res) => {
       return res.status(404).json({ message: "Project not found" });
     }
 
-    // Read userRole from session
     const userRole = req.session.userRole;
     console.log("User role from session:", userRole);
 
-    // If the user is Employee or Team Lead, remove sensitive financial fields.
     if (userRole === "Employee" || userRole === "Team Lead") {
-      // Remove the project-level financial fields
       delete project.project_amount;
       delete project.tds_percentage;
       delete project.tds_amount;
       delete project.gst_percentage;
       delete project.gst_amount;
       delete project.total_amount;
-
-      // Remove the raw aggregated financial_details if present
       delete project.financial_details;
-
-      // Also, set the parsed financialDetails to an empty array
       project.financialDetails = [];
     }
 
@@ -273,8 +259,6 @@ exports.getProjectById = async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 };
-
-// controllers/projectController.js
 
 exports.updateProject = async (req, res) => {
   try {
@@ -305,13 +289,11 @@ exports.updateProject = async (req, res) => {
     console.log("Request Body", req.body);
     console.log("Uploaded Files:", req.files);
 
-    // 1. Fetch existing project
     const existingProject = await projectService.getProjectById(id);
     if (!existingProject) {
       return res.status(404).json({ message: "Project not found" });
     }
 
-    // 2. Handle attachments
     let attachmentsArr = [];
     if (req.files && req.files.length > 0) {
       attachmentsArr = req.files.map((f) => f.filename);
@@ -325,7 +307,6 @@ exports.updateProject = async (req, res) => {
     }
     const attachmentsJson = JSON.stringify(attachmentsArr);
 
-    // 3. JSON‑encode arrays
     const projectCategoryJson =
       typeof project_category === "string"
         ? project_category
@@ -335,7 +316,6 @@ exports.updateProject = async (req, res) => {
         ? employee_list
         : JSON.stringify(employee_list || []);
 
-    // 4. Format project dates
     const formattedStartDate = start_date
       ? new Date(start_date).toISOString().split("T")[0]
       : null;
@@ -343,7 +323,6 @@ exports.updateProject = async (req, res) => {
       ? new Date(end_date).toISOString().split("T")[0]
       : null;
 
-    // 5. Update core project row
     await projectService.updateProject(id, [
       country,
       state,
@@ -366,7 +345,6 @@ exports.updateProject = async (req, res) => {
       id,
     ]);
 
-    // 6. Update STS owner block
     await projectService.updateSTSOwner(id, [
       req.body.sts_owner_id,
       req.body.sts_owner,
@@ -376,7 +354,6 @@ exports.updateProject = async (req, res) => {
       id,
     ]);
 
-    // 7. Sync milestones
     let parsedMilestones = [];
     if (milestones) {
       parsedMilestones =
@@ -416,7 +393,6 @@ exports.updateProject = async (req, res) => {
       }
     }
 
-    // 8. Handle financial details
     const month_year = req.body.month_year || null;
 
     let parsedFinancial = [];
@@ -427,8 +403,7 @@ exports.updateProject = async (req, res) => {
           : financialDetails;
     }
 
-    if (Array.isArray(parsedFinancial) && parsedFinancial.length > 0) {
-      // link milestone_id by matching details if needed
+    if (Array.isArray(parsedFinancial) && parsedFinancial.length) {
       if (Array.isArray(parsedMilestones)) {
         parsedFinancial.forEach((f) => {
           if (!f.milestone_id && f.milestone_details) {
@@ -441,32 +416,19 @@ exports.updateProject = async (req, res) => {
       }
 
       for (const fin of parsedFinancial) {
-        // determine milestoneId (null if missing)
-        const milestoneId = fin.milestone_id || null;
-        // skip only non-monthly entries lacking a milestone
-        if (payment_type !== "Monthly Scheduled" && !milestoneId) {
-          console.error("Skipping financial detail without milestone_id", fin);
-          continue;
-        }
-
-        // shared top-line values
+        const financialId = fin.id || null;
         const project_amount = Number(req.body.project_amount) || 0;
         const tds_percentage = Number(req.body.tds_percentage) || 0;
         const tds_amount = Number(req.body.tds_amount) || 0;
         const gst_percentage = Number(req.body.gst_percentage) || 0;
         const gst_amount = Number(req.body.gst_amount) || 0;
         const total_amount = Number(req.body.total_amount) || 0;
-
         const monthly_fixed_amount =
           fin.monthly_fixed_amount != null && fin.monthly_fixed_amount !== ""
             ? Number(fin.monthly_fixed_amount)
             : Number(req.body.monthly_fixed_amount) || 0;
-
         const service_description =
-          fin.service_description != null && fin.service_description !== ""
-            ? fin.service_description
-            : req.body.service_description || null;
-
+          fin.service_description || req.body.service_description || null;
         const m_actual_percentage = Number(fin.m_actual_percentage) || 0;
         const m_actual_amount = Number(fin.m_actual_amount) || 0;
         const m_tds_percentage = Number(fin.m_tds_percentage) || 0;
@@ -474,8 +436,8 @@ exports.updateProject = async (req, res) => {
         const m_gst_percentage = Number(fin.m_gst_percentage) || 0;
         const m_gst_amount = Number(fin.m_gst_amount) || 0;
         const m_total_amount = Number(fin.m_total_amount) || 0;
-
-        const formattedCompleted = fin.completed_date
+        const statusValue = fin.status || "Pending";
+        const completedDate = fin.completed_date
           ? new Date(fin.completed_date)
               .toISOString()
               .slice(0, 19)
@@ -483,10 +445,10 @@ exports.updateProject = async (req, res) => {
           : null;
 
         if (payment_type === "Monthly Scheduled") {
-          // always insert new monthly row (milestoneId can be null)
-          await projectService.addFinancialDetails([
+          const params = [
+            financialId,
             id,
-            milestoneId,
+            fin.milestone_id || null,
             project_amount,
             tds_percentage,
             tds_amount,
@@ -494,8 +456,8 @@ exports.updateProject = async (req, res) => {
             gst_amount,
             total_amount,
             monthly_fixed_amount,
-            service_description,
-            month_year,
+            fin.service_description,
+            fin.month_year,
             m_actual_percentage,
             m_actual_amount,
             m_tds_percentage,
@@ -503,34 +465,58 @@ exports.updateProject = async (req, res) => {
             m_gst_percentage,
             m_gst_amount,
             m_total_amount,
-            fin.status || "Pending",
-            formattedCompleted,
-          ]);
+            statusValue,
+            completedDate,
+          ];
+          await projectService.upsertFinancialDetails(params);
         } else {
-          // update existing or insert if id missing
-          const finId = fin.id || null;
-          await projectService.updateFinancialDetails([
-            project_amount,
-            tds_percentage,
-            tds_amount,
-            gst_percentage,
-            gst_amount,
-            total_amount,
-            monthly_fixed_amount,
-            service_description,
-            month_year,
-            m_actual_percentage,
-            m_actual_amount,
-            m_tds_percentage,
-            m_tds_amount,
-            m_gst_percentage,
-            m_gst_amount,
-            m_total_amount,
-            fin.status || "Pending",
-            formattedCompleted,
-            milestoneId,
-            finId,
-          ]);
+          if (financialId) {
+            await projectService.updateFinancialDetails([
+              project_amount,
+              tds_percentage,
+              tds_amount,
+              gst_percentage,
+              gst_amount,
+              total_amount,
+              monthly_fixed_amount,
+              service_description,
+              month_year,
+              m_actual_percentage,
+              m_actual_amount,
+              m_tds_percentage,
+              m_tds_amount,
+              m_gst_percentage,
+              m_gst_amount,
+              m_total_amount,
+              statusValue,
+              completedDate,
+              fin.milestone_id || null,
+              financialId,
+            ]);
+          } else {
+            await projectService.addFinancialDetails([
+              id,
+              fin.milestone_id || null,
+              project_amount,
+              tds_percentage,
+              tds_amount,
+              gst_percentage,
+              gst_amount,
+              total_amount,
+              monthly_fixed_amount,
+              service_description,
+              month_year,
+              m_actual_percentage,
+              m_actual_amount,
+              m_tds_percentage,
+              m_tds_amount,
+              m_gst_percentage,
+              m_gst_amount,
+              m_total_amount,
+              statusValue,
+              completedDate,
+            ]);
+          }
         }
       }
     }

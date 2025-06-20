@@ -17,7 +17,7 @@ const getFinancialYear = (invoiceDate) => {
   return fy
     .normalize("NFKD")
     .replace(/[^\d-]/g, "")
-    .trim(); // ensures clean ASCII
+    .trim();
 };
 
 const getInvoicesByProject = async (projectId) => {
@@ -227,12 +227,13 @@ const updateInvoice = async (id, invoiceData) => {
 
 const updateInvoiceExtra = async (id, invoiceData) => {
   const formattedInvoiceDate = invoiceData.invoiceDate
-    ? new Date(invoiceData.invoiceDate).toISOString().split("T")[0]
+    ? new Date(invoiceData.invoiceDate).toISOString().slice(0, 10)
     : null;
   const formattedReferenceDate = invoiceData.referenceDate
-    ? new Date(invoiceData.referenceDate).toISOString().split("T")[0]
+    ? new Date(invoiceData.referenceDate).toISOString().slice(0, 10)
     : null;
-  const basicValues = [
+
+  await db.execute(invoiceQueries.UPDATE_INVOICE_BASIC, [
     invoiceData.invoiceType,
     formattedInvoiceDate,
     invoiceData.invoiceNo,
@@ -249,29 +250,22 @@ const updateInvoiceExtra = async (id, invoiceData) => {
     invoiceData.totalAmount,
     invoiceData.totalIncludingTax,
     id,
-  ];
-  await db.execute(invoiceQueries.UPDATE_INVOICE_BASIC, basicValues);
+  ]);
 
-  const extraValues = [
+  await db.execute(invoiceQueries.UPDATE_INVOICE_EXTRA, [
     invoiceData.gstPayment,
     invoiceData.milestoneId,
     invoiceData.status,
     id,
-  ];
-  const [extraResults] = await db.execute(
-    invoiceQueries.UPDATE_INVOICE_EXTRA,
-    extraValues
-  );
-  console.log("Extra invoice fields updated. Results:", extraResults);
+  ]);
 
-  if (
-    invoiceData.gstPayment === "Completed" &&
-    invoiceData.milestoneId &&
-    invoiceData.projectId
-  ) {
-    const financialUpdateData = {
-      project_id: Number(invoiceData.projectId),
-      milestone_id: Number(invoiceData.milestoneId),
+  const [[{ payment_type }]] = await db.query(
+    `SELECT payment_type FROM add_project WHERE id = ?`,
+    [invoiceData.projectId]
+  );
+
+  if (invoiceData.gstPayment === "Completed" && invoiceData.milestoneId) {
+    const common = {
       m_actual_amount: invoiceData.totalExcludingTax,
       m_tds_percentage: null,
       m_tds_amount: invoiceData.tdsAmount || 0,
@@ -279,13 +273,19 @@ const updateInvoiceExtra = async (id, invoiceData) => {
       m_gst_amount: invoiceData.gstAmount,
       m_total_amount: invoiceData.totalIncludingTax,
     };
-    console.log("Mapping financial details update data:", financialUpdateData);
-    await projectService.updateFinancialDetailsForInvoice(financialUpdateData);
-    console.log("Financial details update executed successfully.");
-  } else {
-    console.log(
-      "Skipping financial details update due to missing required fields."
-    );
+
+    if (payment_type === "Monthly Scheduled") {
+      await projectService.updateFinancialDetailsById({
+        financial_id: Number(invoiceData.milestoneId),
+        ...common,
+      });
+    } else {
+      await projectService.updateFinancialDetailsForInvoice({
+        project_id: Number(invoiceData.projectId),
+        milestone_id: Number(invoiceData.milestoneId),
+        ...common,
+      });
+    }
   }
 
   return await getInvoiceById(id);

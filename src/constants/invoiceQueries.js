@@ -1,84 +1,99 @@
 module.exports = {
   GET_INVOICES_BY_PROJECT: `
-    SELECT 
-      i.id,
-      i.projectId,
-      i.invoiceType,
-      DATE_FORMAT(i.invoiceDate, '%Y-%m-%d') AS invoiceDate,
-      i.invoiceNo,
-      i.referenceId,
-      DATE_FORMAT(i.referenceDate, '%Y-%m-%d') AS referenceDate,
-      i.workDescription,
-      i.subTotal,
-      i.advance,
-      i.totalExcludingTax,
-      i.totalIncludingTax,
-      i.terms,
-      i.lineItems,
-      i.gst,
-      i.gstAmount,
-      i.totalAmount,
-      i.createdAt,
-      i.updatedAt,
-      i.gstPayment,
-      i.milestoneId,
-      i.status,
-      (
-        SELECT JSON_ARRAYAGG(
-          JSON_OBJECT(
-            'id', m.id, 
-            'milestone_details', m.milestone_details,
-            'month_year', fd.month_year
-          )
-        )
-        FROM milestones m 
-        LEFT JOIN financial_details fd ON fd.milestone_id = m.id
-        WHERE m.project_id = i.projectId
-      ) AS milestones
-    FROM invoices i
-    WHERE i.projectId = ?
-    ORDER BY i.createdAt DESC;
-  `,
+SELECT 
+  i.*,
+  -- also pull the project’s payment_type for convenience
+  p.payment_type,
+
+  COALESCE((
+    SELECT JSON_ARRAYAGG(
+      JSON_OBJECT(
+        'id',               entry_id,
+        'milestone_details',entry_label,
+        'month_year',       entry_month,
+        'source',           entry_source   -- NEW FLAG
+      )
+    )
+    FROM (
+      -- real milestones
+      SELECT 
+        m.id                 AS entry_id,
+        m.milestone_details  AS entry_label,
+        NULL                 AS entry_month,
+        'milestone'          AS entry_source
+      FROM milestones m
+      JOIN add_project p2 ON p2.id = m.project_id
+      WHERE m.project_id = i.projectId
+        AND p2.payment_type <> 'Monthly Scheduled'
+
+      UNION ALL
+
+      -- financial schedule entries
+      SELECT
+        fd.id                AS entry_id,
+        COALESCE(m2.milestone_details, 'Scheduled') AS entry_label,
+        fd.month_year        AS entry_month,
+        'financial'          AS entry_source
+      FROM financial_details fd
+      LEFT JOIN milestones m2 ON m2.id = fd.milestone_id
+      JOIN add_project p2 ON p2.id = fd.project_id
+      WHERE fd.project_id = i.projectId
+        AND p2.payment_type = 'Monthly Scheduled'
+        AND fd.month_year IS NOT NULL
+    ) AS t
+  ), JSON_ARRAY()) AS milestones
+
+FROM invoices i
+JOIN add_project p ON p.id = i.projectId     -- bring in payment_type
+WHERE i.projectId = ?
+ORDER BY i.createdAt DESC;
+`,
 
   GET_INVOICE_BY_ID: `
-    SELECT 
-      i.id,
-      i.projectId,
-      i.invoiceType,
-      DATE_FORMAT(i.invoiceDate, '%Y-%m-%d') AS invoiceDate,
-      i.invoiceNo,
-      i.referenceId,
-      DATE_FORMAT(i.referenceDate, '%Y-%m-%d') AS referenceDate,
-      i.workDescription,
-      i.subTotal,
-      i.advance,
-      i.totalExcludingTax,
-      i.totalIncludingTax,
-      i.terms,
-      i.lineItems,
-      i.gst,
-      i.gstAmount,
-      i.totalAmount,
-      i.createdAt,
-      i.updatedAt,
-      i.gstPayment,
-      i.milestoneId,
-      i.status,
-      (
-        SELECT JSON_ARRAYAGG(
-          JSON_OBJECT(
-            'id', m.id, 
-            'milestone_details', m.milestone_details,
-            'month_year', fd.month_year
-          )
-        )
-        FROM milestones m 
-        LEFT JOIN financial_details fd ON fd.milestone_id = m.id
-        WHERE m.project_id = i.projectId
-      ) AS milestones
-    FROM invoices i
-    WHERE i.id = ?;
-  `,
+SELECT 
+  i.*,
+  p.payment_type,
+
+  (
+    SELECT JSON_ARRAYAGG(
+      JSON_OBJECT(
+        'id',               entry_id,
+        'milestone_details',entry_label,
+        'month_year',       entry_month,
+        'source',           entry_source
+      )
+    )
+    FROM (
+      SELECT 
+        m.id                 AS entry_id,
+        m.milestone_details  AS entry_label,
+        NULL                 AS entry_month,
+        'milestone'          AS entry_source
+      FROM milestones m
+      JOIN add_project p2 ON p2.id = m.project_id
+      WHERE m.project_id = i.projectId
+        AND p2.payment_type <> 'Monthly Scheduled'
+
+      UNION ALL
+
+      SELECT
+        fd.id                AS entry_id,
+        COALESCE(m2.milestone_details, 'Scheduled') AS entry_label,
+        fd.month_year        AS entry_month,
+        'financial'          AS entry_source
+      FROM financial_details fd
+      LEFT JOIN milestones m2 ON m2.id = fd.milestone_id
+      JOIN add_project p2 ON p2.id = fd.project_id
+      WHERE fd.project_id = i.projectId
+        AND p2.payment_type = 'Monthly Scheduled'
+        AND fd.month_year IS NOT NULL
+    ) AS t
+  ) AS milestones
+
+FROM invoices i
+JOIN add_project p ON p.id = i.projectId
+WHERE i.id = ?;
+`,
 
   GET_INVOICE_COUNT_BY_DATE: `
     SELECT COUNT(*) AS count 

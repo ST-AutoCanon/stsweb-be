@@ -132,6 +132,7 @@ module.exports = {
           'gst_amount', f.gst_amount,
           'total_amount', f.total_amount,
           'monthly_fixed_amount', f.monthly_fixed_amount,
+          'month_year', f.month_year,
           'service_description', f.service_description,
           'm_actual_percentage', f.m_actual_percentage,
           'm_actual_amount', f.m_actual_amount,
@@ -240,8 +241,69 @@ ON DUPLICATE KEY UPDATE
   completed_date = VALUES(completed_date);
 `,
 
+  UPDATE_FINANCIAL_BY_ID: `
+UPDATE financial_details
+  SET m_actual_amount   = ?,
+      m_tds_percentage  = ?,
+      m_tds_amount      = ?,
+      m_gst_percentage  = ?,
+      m_gst_amount      = ?,
+      m_total_amount    = ?,
+      status            = ?,
+      completed_date    = ?
+WHERE id = ?;
+`,
+
   GET_FINANCIAL_BY_MILESTONE_AND_MONTH_YEAR: `
   SELECT * FROM financial_details 
   WHERE milestone_id = ? AND month_year = ?
+`,
+
+  UPSERT_FINANCIAL_DETAILS: `
+INSERT INTO financial_details (
+  id,
+  project_id,
+  milestone_id,
+  project_amount,
+  tds_percentage,
+  tds_amount,
+  gst_percentage,
+  gst_amount,
+  total_amount,
+  monthly_fixed_amount,
+  service_description,
+  month_year,
+  m_actual_percentage,
+  m_actual_amount,
+  m_tds_percentage,
+  m_tds_amount,
+  m_gst_percentage,
+  m_gst_amount,
+  m_total_amount,
+  status,
+  completed_date
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+  project_id            = VALUES(project_id),
+  milestone_id          = VALUES(milestone_id),
+  project_amount        = VALUES(project_amount),
+  tds_percentage        = VALUES(tds_percentage),
+  tds_amount            = VALUES(tds_amount),
+  gst_percentage        = VALUES(gst_percentage),
+  gst_amount            = VALUES(gst_amount),
+  total_amount          = VALUES(total_amount),
+  monthly_fixed_amount  = VALUES(monthly_fixed_amount),
+  service_description   = VALUES(service_description),
+  month_year            = VALUES(month_year),
+  m_actual_percentage   = VALUES(m_actual_percentage),
+  m_actual_amount       = VALUES(m_actual_amount),
+  m_tds_percentage      = VALUES(m_tds_percentage),
+  m_tds_amount          = VALUES(m_tds_amount),
+  m_gst_percentage      = VALUES(m_gst_percentage),
+  m_gst_amount          = VALUES(m_gst_amount),
+  m_total_amount        = VALUES(m_total_amount),
+  status                = VALUES(status),
+  completed_date        = VALUES(completed_date);
 `,
 };
