@@ -52,6 +52,7 @@ const vendorRoutes = require("./routes/vendorRoutes"); // ✅ Import vendor rout
 //generatepaysliproutes
 const oldEmployeeRoutes = require("./routes/oldEmployeeDetailsRoute");
 const oldEmployeeDetailsRoutes = require("./routes/oldEmployeeDetailsRoute");
+const empExcelRoutes = require('./routes/emp_excelsheetRoutes');
 
 
 
@@ -151,6 +152,7 @@ app.use("/admin/attendance", adminAttendanceRoutes);
 app.use("/admin-attendance", adminAttendanceRoutes);
 app.use("/face-punch", face_admin_page);
 app.use("/api/employeelogin", employeeloginRoutes);
+app.use('/api', empExcelRoutes);
 // vendor Route definitions
 app.use("/", vendorRoutes); // ✅ Prefix all vendor routes with /vendors
 
