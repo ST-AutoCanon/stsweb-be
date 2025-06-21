@@ -29,6 +29,8 @@
 // module.exports = {
 //   getTodayAndYesterdayPunchDataQuery
 // };
+
+
 const getTodayAndYesterdayPunchDataQuery = `
   SELECT ea.punch_id,
          ea.employee_id,
