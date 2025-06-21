@@ -53,6 +53,14 @@ const vendorRoutes = require("./routes/vendorRoutes"); // ✅ Import vendor rout
 const oldEmployeeRoutes = require("./routes/oldEmployeeDetailsRoute");
 const oldEmployeeDetailsRoutes = require("./routes/oldEmployeeDetailsRoute");
 
+
+
+//letters
+const letterRoutes = require("./routes/letterRoutes");
+const letterheadRoutes = require('./routes/letterheadRoute');
+const letterheadTemplateRoutes = require('./routes/letterheadTemplateRoutes');
+
+
 const app = express();
 const server = http.createServer(app);
 //assets
@@ -150,7 +158,21 @@ app.use("/", vendorRoutes); // ✅ Prefix all vendor routes with /vendors
 app.use("/", oldEmployeeRoutes);
 app.use("/", oldEmployeeDetailsRoutes);
 
+
+
+//letterheadroutes
+// Routes
+// app.use("/api/letters", letterRoutes); // Mount letter routes
+app.use('/api', letterRoutes);
+app.use('/letterheadfiles', express.static(path.join(__dirname, 'letterheadfiles'))); 
+app.use('/api', letterheadRoutes); 
+app.use('/api', letterheadTemplateRoutes);
+app.get("/", (req, res) => {
+  res.send("LetterHead API is running");
+});
+app.use('/api/templates', letterheadTemplateRoutes);
 //
+
 app.use("/api", payrollRoutes);
 const io = new Server(server, {
   cors: { origin: process.env.FRONTEND_URL || "*" },
