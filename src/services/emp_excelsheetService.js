@@ -15,7 +15,7 @@ const getAttendanceExcelData = async (fromDate, toDate) => {
   worksheet.columns = [
     { header: 'Employee ID', key: 'employee_id', width: 15 },
     { header: 'Employee Name', key: 'employee_name', width: 25 },
-    { header: 'Date', key: 'attendance_date', width: 15 },
+    // { header: 'Date', key: 'attendance_date', width: 15 },
     { header: 'First Punch In', key: 'first_punchin', width: 20 },
     { header: 'Last Punch Out', key: 'last_punchout', width: 20 },
     { header: 'Total Work Hours', key: 'total_work_hours', width: 15 },
