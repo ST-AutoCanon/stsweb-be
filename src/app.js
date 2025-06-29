@@ -45,6 +45,8 @@ const adminAttendanceRoutes = require("./routes/adminAttendancetrackerRoute");
 const adminAttendancetrackerRoute = require("./routes/adminAttendancetrackerRoute");
 const face_admin_page = require("./routes/face_adminpageRoutes");
 const employeeloginRoutes = require("./routes/employeeloginRoutes");
+require("./services/punchCronService");
+
 
 //vendors
 const vendorRoutes = require("./routes/vendorRoutes"); // ✅ Import vendor routes
@@ -69,20 +71,36 @@ app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 const assetsRoutesforreturn = require("./routes/assetsRoutes");
 const chatRoutes = require("./routes/chatRoutes");
 
-app.use(
-  cors({
-    origin: process.env.FRONTEND_URL || "*",
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    allowedHeaders: [
-      "Content-Type",
-      "Authorization",
-      "x-api-key",
-      "x-employee-id",
-    ],
-    exposedHeaders: ["Content-Disposition"],
-    credentials: true,
-  })
-);
+const allowedOrigins = [
+  "https://localhost",
+  "capacitor://localhost",
+  "https://sukalpatechsolutions.com",
+  // Add your production domain
+];
+
+// Replace the current CORS middleware with this:
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  
+  // Only allow specific origins for credentialed requests
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin'); // Important for caching
+  }
+
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.setHeader('Access-Control-Allow-Headers', 
+    'Content-Type, Authorization, x-api-key, X-Requested-With, Accept, Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range');
+  res.setHeader('Access-Control-Max-Age', '86400');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+
+  next();
+});
 
 app.use(express.json());
 app.use(bodyParser.urlencoded({ extended: true }));
