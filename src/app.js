@@ -45,8 +45,8 @@ const adminAttendanceRoutes = require("./routes/adminAttendancetrackerRoute");
 const adminAttendancetrackerRoute = require("./routes/adminAttendancetrackerRoute");
 const face_admin_page = require("./routes/face_adminpageRoutes");
 const employeeloginRoutes = require("./routes/employeeloginRoutes");
-require("./services/punchCronService");
-
+// require("./services/punchCronService");
+const employeeBirthdayRoutes = require("./routes/employeeBirthday");
 
 //vendors
 const vendorRoutes = require("./routes/vendorRoutes"); // ✅ Import vendor routes
@@ -75,6 +75,7 @@ const allowedOrigins = [
   "https://localhost",
   "capacitor://localhost",
   "https://sukalpatechsolutions.com",
+  "http://localhost:3000"
   // Add your production domain
 ];
 
@@ -90,8 +91,11 @@ app.use((req, res, next) => {
 
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-  res.setHeader('Access-Control-Allow-Headers', 
-    'Content-Type, Authorization, x-api-key, X-Requested-With, Accept, Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
+
+res.setHeader('Access-Control-Allow-Headers', 
+  'Content-Type, Authorization, x-api-key, x-employee-id, X-Requested-With, Accept, Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
+  // res.setHeader('Access-Control-Allow-Headers', 
+  //   'Content-Type, Authorization, x-api-key, X-Requested-With, Accept, Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
   res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range');
   res.setHeader('Access-Control-Max-Age', '86400');
 
@@ -171,6 +175,9 @@ app.use("/admin-attendance", adminAttendanceRoutes);
 app.use("/face-punch", face_admin_page);
 app.use("/api/employeelogin", employeeloginRoutes);
 app.use('/api', empExcelRoutes);
+app.use("/api/employee", employeeBirthdayRoutes);
+
+
 // vendor Route definitions
 app.use("/", vendorRoutes); // ✅ Prefix all vendor routes with /vendors
 
@@ -191,6 +198,7 @@ app.get("/", (req, res) => {
   res.send("LetterHead API is running");
 });
 app.use('/api/templates', letterheadTemplateRoutes);
+
 //
 
 app.use("/api", payrollRoutes);
