@@ -8,6 +8,7 @@ const session = require("express-session");
 const { Server } = require("socket.io");
 
 const EmployeeQueries = require("./services/employeeQueries");
+
 const chatService = require("./services/chatService");
 const apiKeyMiddleware = require("./middleware/apiKeyMiddleware");
 const idleTimeout = require("./middleware/idleTimeout");
@@ -65,6 +66,16 @@ const letterRoutes = require("./routes/letterRoutes");
 const letterheadRoutes = require("./routes/letterheadRoute");
 const letterheadTemplateRoutes = require("./routes/letterheadTemplateRoutes");
 
+const empExcelRoutes = require('./routes/emp_excelsheetRoutes');
+
+
+
+//letters
+const letterRoutes = require("./routes/letterRoutes");
+const letterheadRoutes = require('./routes/letterheadRoute');
+const letterheadTemplateRoutes = require('./routes/letterheadTemplateRoutes');
+
+
 const app = express();
 const server = http.createServer(app);
 //assets
@@ -109,6 +120,37 @@ app.use((req, res, next) => {
   res.setHeader("Access-Control-Max-Age", "86400");
 
   if (req.method === "OPTIONS") {
+
+
+const allowedOrigins = [
+  "https://localhost",
+  "capacitor://localhost",
+  "https://sukalpatechsolutions.com",
+  "http://localhost:3000"
+  // Add your production domain
+];
+
+// Replace the current CORS middleware with this:
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  
+  // Only allow specific origins for credentialed requests
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin'); // Important for caching
+  }
+
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+
+res.setHeader('Access-Control-Allow-Headers', 
+  'Content-Type, Authorization, x-api-key, x-employee-id, X-Requested-With, Accept, Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
+  // res.setHeader('Access-Control-Allow-Headers', 
+  //   'Content-Type, Authorization, x-api-key, X-Requested-With, Accept, Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range');
+  res.setHeader('Access-Control-Max-Age', '86400');
+
+  if (req.method === 'OPTIONS') {
     return res.status(204).end();
   }
 
@@ -188,6 +230,11 @@ app.use("/api/employeelogin", employeeloginRoutes);
 app.use("/api", empExcelRoutes);
 app.use("/api/employee", employeeBirthdayRoutes);
 
+app.use('/api', empExcelRoutes);
+app.use("/api/employee", employeeBirthdayRoutes);
+
+
+ 
 // vendor Route definitions
 app.use("/", vendorRoutes); // ✅ Prefix all vendor routes with /vendors
 
@@ -209,6 +256,20 @@ app.get("/", (req, res) => {
   res.send("LetterHead API is running");
 });
 app.use("/api/templates", letterheadTemplateRoutes);
+
+
+
+//letterheadroutes
+// Routes
+// app.use("/api/letters", letterRoutes); // Mount letter routes
+app.use('/api', letterRoutes);
+app.use('/letterheadfiles', express.static(path.join(__dirname, 'letterheadfiles'))); 
+app.use('/api', letterheadRoutes); 
+app.use('/api', letterheadTemplateRoutes);
+app.get("/", (req, res) => {
+  res.send("LetterHead API is running");
+});
+app.use('/api/templates', letterheadTemplateRoutes);
 
 //
 
@@ -273,6 +334,7 @@ io.on("connection", (socket) => {
     socket.emit("messageAck", newMsg);
   });
 
+
   socket.on(
     "send_message",
     async ({ roomId, content, type, fileUrl, location }) => {
@@ -319,8 +381,12 @@ io.on("connection", (socket) => {
       members
     );
     socket.join(roomId.toString());
+
     const [room] = await chatService.getUserRooms(socket.userId);
     socket.emit("room_created", room);
+
+    socket.emit("room_created", { roomId, name, isGroup });
+
   });
 });
 

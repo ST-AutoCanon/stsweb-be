@@ -11,8 +11,12 @@ router.post("/rooms", chatHandler.createRoom);
 router.get("/rooms", chatHandler.listRooms);
 router.get("/rooms/:roomId/members", chatHandler.listMembers);
 router.get("/rooms/:roomId/messages", chatHandler.getMessages);
+
 router.post("/ChatUploads", chatHandler.uploadFile);
 router.get("/ChatUploads/:filename", chatHandler.downloadAttachment);
+
+router.post("/upload", chatHandler.uploadFile);
+
 router.post("/rooms/:roomId/members", chatHandler.addMember);
 router.delete("/rooms/:roomId/members/:employeeId", chatHandler.removeMember);
 router.delete("/rooms/:roomId", chatHandler.deleteRoom);

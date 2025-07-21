@@ -1,6 +1,7 @@
 const chatService = require("../services/chatService");
 const multer = require("multer");
 const path = require("path");
+
 const fs = require("fs");
 
 const storage = multer.diskStorage({
@@ -20,6 +21,15 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     // use a timestamp + original extension
+    cb(null, Date.now() + path.extname(file.originalname));
+  },
+});
+
+
+
+const storage = multer.diskStorage({
+  destination: "uploads/",
+  filename: (req, file, cb) => {
     cb(null, Date.now() + path.extname(file.originalname));
   },
 });
@@ -89,7 +99,11 @@ module.exports = {
     upload.single("file"),
     (req, res) => {
       try {
+
         const url = `/ChatUploads/${req.file.filename}`;
+
+        const url = `/uploads/${req.file.filename}`;
+
         res.json({ url });
       } catch (err) {
         console.error("uploadFile error:", err);
@@ -97,6 +111,7 @@ module.exports = {
       }
     },
   ],
+
 
   downloadAttachment: (req, res) => {
     const filename = req.params.filename;
@@ -121,6 +136,7 @@ module.exports = {
       fs.createReadStream(filePath).pipe(res);
     });
   },
+
 
   listMembers: async (req, res) => {
     try {

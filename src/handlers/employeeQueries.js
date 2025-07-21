@@ -23,6 +23,23 @@ exports.upload = upload;
 exports.startThread = async (req, res) => {
   const { sender_id, sender_role, department_id, subject, message, role } =
     req.body;
+
+  try {
+    const threadId = await EmployeeQueries.startThread(
+      sender_id,
+      sender_role,
+      department_id,
+      subject,
+      message,
+      role
+    );
+    const response = ErrorHandler.generateSuccessResponse(
+      201,
+      "Thread started successfully!",
+      { threadId }
+    );
+    res.status(201).send(response);
+
   try {
     const threadId = await EmployeeQueries.startThread(
       sender_id,
@@ -47,6 +64,93 @@ exports.startThread = async (req, res) => {
     res.status(500).send(response);
   }
 };
+
+exports.addMessage = async (req, res) => {
+  try {
+    const { thread_id } = req.params;
+    const { sender_id, sender_role, message, recipient_id } = req.body;
+
+    const attachment_url = req.file
+      ? `${req.protocol}://${req.get("host")}/attachments/${req.file.filename}`
+      : null;
+
+    if (!recipient_id) {
+      return res
+        .status(400)
+        .json(
+          ErrorHandler.generateErrorResponse(400, "Recipient ID is required")
+        );
+    }
+
+    const messageId = await EmployeeQueries.addMessage(
+      thread_id,
+      sender_id,
+      sender_role,
+      message,
+      recipient_id,
+      attachment_url
+    );
+
+    if (!messageId) {
+      return res
+        .status(500)
+        .json(
+          ErrorHandler.generateErrorResponse(500, "Failed to insert message")
+        );
+    }
+
+    const created_at = new Date().toISOString();
+
+    const newMessage = {
+      id: messageId,
+      thread_id,
+      sender_id,
+      sender_role,
+      message,
+      attachment_url,
+      created_at,
+    };
+
+    // WebSocket emission removed since websockets are no longer used.
+    res.status(200).json({
+      status: "success",
+      code: 200,
+      message: "Message added successfully",
+      data: { message: newMessage },
+    });
+  } catch (error) {
+    console.error("Error adding message:", error);
+    res
+      .status(500)
+      .json(ErrorHandler.generateErrorResponse(500, "Failed to add message"));
+  }
+};
+
+exports.getThreadMessages = async (req, res) => {
+  const { thread_id } = req.params;
+  try {
+    const messages = await EmployeeQueries.getThreadMessages(thread_id);
+    const response = ErrorHandler.generateSuccessResponse(
+      200,
+      "Messages retrieved successfully.",
+      messages
+    );
+    res.status(200).send(response);
+
+  } catch (error) {
+    console.error(error);
+    const response = ErrorHandler.generateErrorResponse(
+      500,
+
+      "Failed to start thread."
+
+      "Failed to retrieve messages."
+
+    );
+    res.status(500).send(response);
+  }
+};
+
 
 exports.addMessage = async (req, res) => {
   try {
@@ -142,6 +246,17 @@ exports.closeThread = async (req, res) => {
       200,
       "Thread closed successfully with feedback."
     );
+
+exports.closeThread = async (req, res) => {
+  const { thread_id } = req.params;
+  const { feedback, note } = req.body;
+  try {
+    await EmployeeQueries.closeThread(thread_id, feedback, note);
+    const response = ErrorHandler.generateSuccessResponse(
+      200,
+      "Thread closed successfully with feedback."
+    );
+
     res.status(200).send(response);
   } catch (error) {
     console.error(error);

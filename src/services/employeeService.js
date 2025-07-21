@@ -76,6 +76,7 @@ info@sukalpatech.com`,
   }
 };
 
+
 // services/employeeService.js
 exports.addFullEmployee = async (data) => {
   console.log("[addFullEmployee] ⇒ start", { email: data.email });
@@ -221,6 +222,60 @@ exports.addFullEmployee = async (data) => {
   } finally {
     conn.release();
     console.log("[addFullEmployee] ⇒ end");
+
+/**
+ * Update Employee Photo.
+ */
+exports.updateEmployeePhoto = async (employeeId, photoUrl) => {
+  try {
+    // Validate inputs to prevent SQL injection
+    if (!employeeId || !photoUrl) {
+      throw new Error("Invalid input");
+    }
+
+    // Parameterized query to prevent SQL injection
+    const [result] = await db.execute(queries.UPDATE_EMPLOYEE_PHOTO, [
+      photoUrl,
+      employeeId,
+    ]);
+
+    if (result.affectedRows === 0) {
+      throw new Error("Employee not found");
+    }
+
+    return { message: "Employee photo updated successfully" };
+  } catch (error) {
+    console.error("Error in updateEmployeePhoto:", error.message);
+    throw error;
+  }
+};
+
+exports.addEmployee = async (employeeData) => {
+  let departmentId = null;
+
+  if (employeeData.role !== "Admin") {
+    const [departmentResult] = await db.execute(
+      queries.GET_DEPARTMENT_ID_BY_NAME,
+      [employeeData.department]
+    );
+    if (departmentResult.length === 0) {
+      throw new Error("Department not found");
+    }
+    departmentId = departmentResult[0].id;
+  }
+
+  // Check for duplicate Aadhaar or PAN number
+  const [existingEmployee] = await db.execute(
+    queries.CHECK_DUPLICATE_EMPLOYEE,
+    [employeeData.aadhaar_number, employeeData.pan_number]
+  );
+
+  if (existingEmployee.length > 0) {
+    throw {
+      code: "DUPLICATE_AADHAAR_PAN",
+      message: "Aadhaar or PAN number already exists.",
+    };
+
   }
 };
 
@@ -364,6 +419,100 @@ exports.getFullEmployee = async (employeeId) => {
 exports.listSupervisors = async () => {
   const [rows] = await db.execute(queries.GET_SUPERVISORS);
   return rows;
+
+  const generateTemporaryPassword = () => {
+    return crypto.randomBytes(6).toString("hex");
+  };
+
+  const temporaryPassword = generateTemporaryPassword();
+  const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
+
+  const params = [
+    employeeData.domain || "",
+    employeeData.employee_type || "",
+    employeeData.first_name || "",
+    employeeData.last_name || "",
+    employeeData.dob || "",
+    employeeData.email || "",
+    employeeData.aadhaar_number || "",
+    employeeData.pan_number || "",
+    employeeData.gender || "",
+    employeeData.marital_status || "",
+    employeeData.spouse_name || "",
+    employeeData.marriage_date || null,
+    employeeData.address || null,
+    employeeData.phone_number || "",
+    employeeData.father_name || null,
+    employeeData.mother_name || null,
+    departmentId,
+    employeeData.position || null,
+    employeeData.photo_url || null,
+    employeeData.salary || null,
+    employeeData.role || null,
+    hashedPassword,
+  ];
+
+  const [result] = await db.execute(queries.ADD_EMPLOYEE, params);
+  await sendResetEmail(
+    employeeData.email,
+    `${employeeData.first_name} ${employeeData.last_name}`
+  );
+
+  return result;
+};
+
+/**
+ * Edit employee details with safety checks for SQL injection.
+ */
+exports.editEmployee = async (employeeId, updatedData) => {
+  let departmentId = null;
+
+  // If a department is provided (for non-admin), fetch its ID.
+  if (updatedData.department && updatedData.department.trim() !== "") {
+    const [departmentResult] = await db.execute(
+      queries.GET_DEPARTMENT_ID_BY_NAME,
+      [updatedData.department]
+    );
+    if (departmentResult.length === 0) {
+      throw new Error("Department not found");
+    }
+    departmentId = departmentResult[0].id;
+  }
+
+  // Build the params array in the order expected by the EDIT_EMPLOYEE query.
+  const params = [
+    updatedData.domain || "",
+    updatedData.employee_type || "",
+    updatedData.first_name || "",
+    updatedData.last_name || "",
+    updatedData.dob || "",
+    updatedData.email || "",
+    updatedData.aadhaar_number || "",
+    updatedData.pan_number || "",
+    updatedData.gender || "",
+    updatedData.marital_status || "",
+    updatedData.spouse_name || "",
+    updatedData.marriage_date || null,
+    updatedData.address || "",
+    updatedData.phone_number || "",
+    updatedData.father_name || "",
+    updatedData.mother_name || "",
+    departmentId, // department_id (or null if role is Admin or not provided)
+    updatedData.position || "",
+    updatedData.photo_url || "",
+    updatedData.salary || "",
+    updatedData.role || "",
+    employeeId, // WHERE clause parameter
+  ];
+
+  try {
+    const [result] = await db.execute(queries.EDIT_EMPLOYEE, params);
+    return result;
+  } catch (error) {
+    console.error("Failed to update employee:", error);
+    throw error;
+  }
+
 };
 
 /**

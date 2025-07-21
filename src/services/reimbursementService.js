@@ -2,6 +2,7 @@ const db = require("../config");
 const queries = require("../constants/reimbursementQueries");
 const path = require("path");
 
+
 // Turn any JS Date (from MySQL DATETIME) into local YYYY‑MM‑DD
 const toLocalDateString = (dt) => {
   if (!dt) return null;
@@ -11,6 +12,7 @@ const toLocalDateString = (dt) => {
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 };
+
 
 exports.processUploadedFiles = async (files, reimbursementId) => {
   try {
@@ -50,6 +52,7 @@ exports.getReimbursementsByEmployee = async (
 ) => {
   let query = queries.GET_REIMBURSEMENTS_BY_EMPLOYEE;
   let queryParams = [employeeId];
+
   // … your dynamic filtering code …
 
   const [rawRows] = await db.query(query, queryParams);
@@ -75,6 +78,43 @@ exports.getReimbursementsByEmployee = async (
     attachments,
     employeeId
   );
+
+
+  // Dynamically append date filters only if provided
+  if (fromDate) {
+    query += " AND r.date >= ?";
+    queryParams.push(fromDate);
+  }
+  if (toDate) {
+    query += " AND r.date <= ?";
+    queryParams.push(toDate);
+  }
+
+  query += " ORDER BY r.date DESC"; // Append ORDER BY at the end
+
+  try {
+    // Fetch reimbursements
+    const [reimbursements] = await db.query(query, queryParams);
+
+    if (!reimbursements.length) return [];
+
+    // Fetch attachments for these reimbursements
+    const reimbursementIds = reimbursements.map((r) => r.id);
+    const [attachments] = await db.query(
+      queries.GET_ATTACHMENTS_BY_REIMBURSEMENT_IDS,
+      [reimbursementIds]
+    );
+
+    return mapAttachmentsToReimbursements(
+      reimbursements,
+      attachments,
+      employeeId
+    );
+  } catch (error) {
+    console.error("Error fetching reimbursements:", error);
+    throw new Error("Database query failed.");
+  }
+
 };
 
 // Utility function for mapping attachments
@@ -136,12 +176,16 @@ exports.getAttachmentsByReimbursementIds = async (reimbursementIds) => {
   );
   return attachments;
 };
+
 exports.getAllReimbursements = async (
   submittedFrom = null,
   submittedFromForBetween = null,
   submittedTo = null
 ) => {
   try {
+
+    // Log the incoming parameters
+
     console.log("getAllReimbursements params:", {
       submittedFrom,
       submittedFromForBetween,
@@ -149,6 +193,7 @@ exports.getAllReimbursements = async (
     });
 
     // 1) Fetch all reimbursements filtered by created_at
+
     const [rawRows] = await db.query(queries.GET_ALL_REIMBURSEMENTS, [
       submittedFrom,
       submittedFromForBetween,
@@ -168,13 +213,30 @@ exports.getAllReimbursements = async (
     }));
 
     // 3) Fetch attachments for these reimbursements
+
+    const [reimbursements] = await db.query(queries.GET_ALL_REIMBURSEMENTS, [
+      submittedFrom, // for `? IS NULL`
+      submittedFromForBetween, // start of BETWEEN
+      submittedTo, // end of BETWEEN
+    ]);
+
+    if (!reimbursements.length) {
+      return [];
+    }
+
+    // 2) Fetch attachments for these reimbursements
+
     const reimbursementIds = reimbursements.map((r) => r.id);
     const [attachments] = await db.query(
       queries.GET_ATTACHMENTS_BY_REIMBURSEMENT_IDS,
       [reimbursementIds]
     );
 
+
     // 4) Map attachments onto reimbursements
+
+    // 3) Map attachments onto reimbursements
+
     const attachmentMap = {};
     attachments.forEach((att) => {
       const key = att.reimbursement_id;
@@ -189,6 +251,7 @@ exports.getAllReimbursements = async (
     });
 
     // 5) Group by employee_id
+    // 4) Group by employee_id
     const grouped = reimbursements.reduce((acc, r) => {
       const eid = r.employee_id;
       if (!acc[eid]) acc[eid] = [];
@@ -197,6 +260,8 @@ exports.getAllReimbursements = async (
     }, {});
 
     // 6) Return array of { employee_id, claims }
+
+    // Return array of { employee_id, claims }
     return Object.entries(grouped).map(([employee_id, claims]) => ({
       employee_id,
       claims,
@@ -206,6 +271,7 @@ exports.getAllReimbursements = async (
     throw new Error("Database query failed.");
   }
 };
+
 
 exports.createReimbursement = async (reimbursementData) => {
   try {

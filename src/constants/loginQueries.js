@@ -7,6 +7,7 @@
 module.exports = {
   // Query to fetch user details by email
   GET_USER_BY_EMAIL: `
+
   SELECT
     pr.role,
     e.employee_id,
@@ -26,6 +27,26 @@ module.exports = {
     ON pr.department_id = d.id
   WHERE e.email = ?;
 `,
+    SELECT 
+  e.role, 
+  e.employee_id, 
+  CONCAT(e.first_name, ' ', e.last_name) AS name,
+  e.gender, 
+  e.email, 
+  e.password,
+  e.position,  
+  e.status,   
+  d.name AS department 
+FROM 
+  employees e
+LEFT JOIN 
+  departments d 
+ON 
+  e.department_id = d.id
+WHERE 
+  e.email = ?;
+  `,
+
 
   // Query to fetch admin details by employee_id
   GET_ADMIN_DETAILS: `
@@ -169,6 +190,9 @@ GROUP BY
 `,
   GET_SIDEBAR_MENU: `SELECT label, path, icon FROM sidebar_menu WHERE FIND_IN_SET(?, roles)`,
 
+
+
+ 
   /////////////////////////////////////////
   GET_EMPLOYEE_COUNT_BY_DEPARTMENT: `
   SELECT 
@@ -215,7 +239,12 @@ SELECT
 
 `,
 
+
   GET_EMPLOYEE_LOGIN_DATA_COUNT: `WITH FirstPunch AS (
+
+GET_EMPLOYEE_LOGIN_DATA_COUNT:
+`WITH FirstPunch AS (
+
 SELECT 
     employee_id, 
     MIN(punchin_time) AS first_punchin_time
@@ -246,7 +275,13 @@ ORDER BY STR_TO_DATE(SUBSTRING_INDEX(punchin_label, ' ', 1), '%H');
 
 `,
 
+
   GET_EMPLOYEE_SALARY_RANGE: `SELECT 
+
+
+  GET_EMPLOYEE_SALARY_RANGE:
+    `SELECT 
+
     CASE 
         WHEN salary < 30000 THEN '<30k'
         WHEN salary BETWEEN 30000 AND 50000 THEN '30k-50k'
@@ -259,7 +294,12 @@ FROM employees
 GROUP BY salary_range
 ORDER BY FIELD(salary_range, '<30k', '30k-50k', '50k-70k', '70k+', '90k+');
 
+
 `,
+
+`
+  ,
+
   GET_EMPLOYEE_BY_DEPARTMENT: `
         SELECT 
             d.name AS department_name, 
@@ -273,12 +313,26 @@ ORDER BY FIELD(salary_range, '<30k', '30k-50k', '50k-70k', '70k+', '90k+');
             d.name;
     `,
 
+
   GET_EMPLOYEE_PAYROLL: `SELECT
+
+
+
+  GET_EMPLOYEE_PAYROLL:
+    `SELECT
+
   SUM(CASE WHEN card_label = 'Previous Month Credit' THEN card_value ELSE 0 END) AS total_previous_month_credit,
   SUM(CASE WHEN card_label = 'Previous Month Expenses' THEN card_value ELSE 0 END) AS total_previous_month_expenses,
   SUM(CASE WHEN card_label = 'Previous Month Salary' THEN card_value ELSE 0 END) AS total_previous_month_salary
 FROM employee_payrolldata
 WHERE card_label IN ('Previous Month Credit', 'Previous Month Expenses', 'Previous Month Salary');
 
+
 `,
 };
+
+`
+  ,
+
+};
+

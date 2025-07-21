@@ -6,6 +6,7 @@ const path = require("path");
 const fs = require("fs");
 const { createReimbursement } = require("../services/reimbursementService");
 
+
 const forbiddenExts = new Set([
   ".xlsx",
   ".xls",
@@ -32,6 +33,10 @@ function fileFilter(req, file, cb) {
   cb(null, true);
 }
 
+
+
+// ── DYNAMIC STORAGE ────────────────────────────────────────────────────────────
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const { employeeId } = req.body;
@@ -44,8 +49,11 @@ const storage = multer.diskStorage({
     const basePath = path.join(
       __dirname,
       "..",
+
       "..",
       "..",
+
+
       "reimbursement",
       `${year}`,
       `${month}`,
@@ -64,8 +72,11 @@ const storage = multer.diskStorage({
     const uploadDir = path.join(
       __dirname,
       "..",
+
       "..",
       "..",
+
+
       "reimbursement",
       `${now.getFullYear()}`,
       `${String(now.getMonth() + 1).padStart(2, "0")}`,
