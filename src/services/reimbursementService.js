@@ -1,6 +1,17 @@
 const db = require("../config");
 const queries = require("../constants/reimbursementQueries");
 const path = require("path");
+
+// Turn any JS Date (from MySQL DATETIME) into local YYYY‑MM‑DD
+const toLocalDateString = (dt) => {
+  if (!dt) return null;
+  const d = new Date(dt);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+
 exports.processUploadedFiles = async (files, reimbursementId) => {
   try {
     for (const file of files) {
@@ -39,41 +50,31 @@ exports.getReimbursementsByEmployee = async (
 ) => {
   let query = queries.GET_REIMBURSEMENTS_BY_EMPLOYEE;
   let queryParams = [employeeId];
+  // … your dynamic filtering code …
 
-  // Dynamically append date filters only if provided
-  if (fromDate) {
-    query += " AND r.date >= ?";
-    queryParams.push(fromDate);
-  }
-  if (toDate) {
-    query += " AND r.date <= ?";
-    queryParams.push(toDate);
-  }
+  const [rawRows] = await db.query(query, queryParams);
 
-  query += " ORDER BY r.date DESC"; // Append ORDER BY at the end
+  if (!rawRows.length) return [];
+  // ── FORMAT ALL DATES INTO YYYY-MM-DD ─────────────────────────────────
+  const reimbursements = rawRows.map((r) => ({
+    ...r,
+    from_date: toLocalDateString(r.from_date),
+    to_date: toLocalDateString(r.to_date),
+    date: toLocalDateString(r.date),
+  }));
+  // ───────────────────────────────────────────────────────────────────────
 
-  try {
-    // Fetch reimbursements
-    const [reimbursements] = await db.query(query, queryParams);
-
-    if (!reimbursements.length) return [];
-
-    // Fetch attachments for these reimbursements
-    const reimbursementIds = reimbursements.map((r) => r.id);
-    const [attachments] = await db.query(
-      queries.GET_ATTACHMENTS_BY_REIMBURSEMENT_IDS,
-      [reimbursementIds]
-    );
-
-    return mapAttachmentsToReimbursements(
-      reimbursements,
-      attachments,
-      employeeId
-    );
-  } catch (error) {
-    console.error("Error fetching reimbursements:", error);
-    throw new Error("Database query failed.");
-  }
+  // Then fetch attachments and return
+  const reimbursementIds = reimbursements.map((r) => r.id);
+  const [attachments] = await db.query(
+    queries.GET_ATTACHMENTS_BY_REIMBURSEMENT_IDS,
+    [reimbursementIds]
+  );
+  return mapAttachmentsToReimbursements(
+    reimbursements,
+    attachments,
+    employeeId
+  );
 };
 
 // Utility function for mapping attachments
@@ -135,14 +136,12 @@ exports.getAttachmentsByReimbursementIds = async (reimbursementIds) => {
   );
   return attachments;
 };
-
 exports.getAllReimbursements = async (
   submittedFrom = null,
   submittedFromForBetween = null,
   submittedTo = null
 ) => {
   try {
-    // Log the incoming parameters
     console.log("getAllReimbursements params:", {
       submittedFrom,
       submittedFromForBetween,
@@ -150,24 +149,32 @@ exports.getAllReimbursements = async (
     });
 
     // 1) Fetch all reimbursements filtered by created_at
-    const [reimbursements] = await db.query(queries.GET_ALL_REIMBURSEMENTS, [
-      submittedFrom, // for `? IS NULL`
-      submittedFromForBetween, // start of BETWEEN
-      submittedTo, // end of BETWEEN
+    const [rawRows] = await db.query(queries.GET_ALL_REIMBURSEMENTS, [
+      submittedFrom,
+      submittedFromForBetween,
+      submittedTo,
     ]);
 
-    if (!reimbursements.length) {
+    if (!rawRows.length) {
       return [];
     }
 
-    // 2) Fetch attachments for these reimbursements
+    // 2) FORMAT DATES INTO LOCAL YYYY-MM-DD
+    const reimbursements = rawRows.map((r) => ({
+      ...r,
+      from_date: toLocalDateString(r.from_date),
+      to_date: toLocalDateString(r.to_date),
+      date: toLocalDateString(r.date),
+    }));
+
+    // 3) Fetch attachments for these reimbursements
     const reimbursementIds = reimbursements.map((r) => r.id);
     const [attachments] = await db.query(
       queries.GET_ATTACHMENTS_BY_REIMBURSEMENT_IDS,
       [reimbursementIds]
     );
 
-    // 3) Map attachments onto reimbursements
+    // 4) Map attachments onto reimbursements
     const attachmentMap = {};
     attachments.forEach((att) => {
       const key = att.reimbursement_id;
@@ -181,7 +188,7 @@ exports.getAllReimbursements = async (
       r.attachments = attachmentMap[r.id] || [];
     });
 
-    // 4) Group by employee_id
+    // 5) Group by employee_id
     const grouped = reimbursements.reduce((acc, r) => {
       const eid = r.employee_id;
       if (!acc[eid]) acc[eid] = [];
@@ -189,7 +196,7 @@ exports.getAllReimbursements = async (
       return acc;
     }, {});
 
-    // Return array of { employee_id, claims }
+    // 6) Return array of { employee_id, claims }
     return Object.entries(grouped).map(([employee_id, claims]) => ({
       employee_id,
       claims,
@@ -199,6 +206,7 @@ exports.getAllReimbursements = async (
     throw new Error("Database query failed.");
   }
 };
+
 exports.createReimbursement = async (reimbursementData) => {
   try {
     // … validation and existingClaim checks …

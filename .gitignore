@@ -3,3 +3,7 @@ node_modules/
 
 #ignore .env 
 .env
+
+venv_whisper/
+
+venv/

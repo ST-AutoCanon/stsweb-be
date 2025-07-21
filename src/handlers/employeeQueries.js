@@ -94,6 +94,10 @@ exports.addMessage = async (req, res) => {
       created_at,
     };
 
+    // inside exports.addMessage, after const newMessage = { … }
+    const io = req.app.get("io");
+    io.to(`query_${thread_id}`).emit("newMessage", newMessage);
+
     // WebSocket emission removed since websockets are no longer used.
     res.status(200).json({
       status: "success",

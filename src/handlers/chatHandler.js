@@ -1,13 +1,29 @@
 const chatService = require("../services/chatService");
 const multer = require("multer");
 const path = require("path");
+const fs = require("fs");
 
 const storage = multer.diskStorage({
-  destination: "uploads/",
+  destination: (req, file, cb) => {
+    // compute the absolute path to your ChatUploads folder:
+    const uploadDir = path.join(__dirname, "..", "..", "..", "ChatUploads");
+
+    // if it doesn't exist, create it (and any missing parents):
+    try {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    } catch (err) {
+      return cb(err);
+    }
+
+    // finally, tell multer to save files here:
+    cb(null, uploadDir);
+  },
   filename: (req, file, cb) => {
+    // use a timestamp + original extension
     cb(null, Date.now() + path.extname(file.originalname));
   },
 });
+
 const upload = multer({ storage });
 
 module.exports = {
@@ -73,7 +89,7 @@ module.exports = {
     upload.single("file"),
     (req, res) => {
       try {
-        const url = `/uploads/${req.file.filename}`;
+        const url = `/ChatUploads/${req.file.filename}`;
         res.json({ url });
       } catch (err) {
         console.error("uploadFile error:", err);
@@ -81,6 +97,30 @@ module.exports = {
       }
     },
   ],
+
+  downloadAttachment: (req, res) => {
+    const filename = req.params.filename;
+    const uploadDir = path.join(__dirname, "..", "..", "..", "ChatUploads");
+    const filePath = path.join(uploadDir, filename);
+
+    fs.stat(filePath, (err, stats) => {
+      if (err || !stats.isFile()) {
+        return res.status(404).json({ error: "File not found" });
+      }
+
+      // set headers to force download
+      res.setHeader("Content-Length", stats.size);
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${filename}"`
+      );
+      // (optional) detect mime-type if you care:
+      // res.setHeader("Content-Type", mime.lookup(filePath) || "application/octet-stream");
+
+      // stream the file
+      fs.createReadStream(filePath).pipe(res);
+    });
+  },
 
   listMembers: async (req, res) => {
     try {

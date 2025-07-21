@@ -7,6 +7,7 @@ const path = require("path");
 const session = require("express-session");
 const { Server } = require("socket.io");
 
+const EmployeeQueries = require("./services/employeeQueries");
 const chatService = require("./services/chatService");
 const apiKeyMiddleware = require("./middleware/apiKeyMiddleware");
 const idleTimeout = require("./middleware/idleTimeout");
@@ -48,21 +49,21 @@ const employeeloginRoutes = require("./routes/employeeloginRoutes");
 // require("./services/punchCronService");
 const employeeBirthdayRoutes = require("./routes/employeeBirthday");
 
+const meetingRoutes = require("./routes/meetingRoutes");
+const notificationsRouter = require("./routes/notifications");
+
 //vendors
 const vendorRoutes = require("./routes/vendorRoutes"); // ✅ Import vendor routes
 
 //generatepaysliproutes
 const oldEmployeeRoutes = require("./routes/oldEmployeeDetailsRoute");
 const oldEmployeeDetailsRoutes = require("./routes/oldEmployeeDetailsRoute");
-const empExcelRoutes = require('./routes/emp_excelsheetRoutes');
-
-
+const empExcelRoutes = require("./routes/emp_excelsheetRoutes");
 
 //letters
 const letterRoutes = require("./routes/letterRoutes");
-const letterheadRoutes = require('./routes/letterheadRoute');
-const letterheadTemplateRoutes = require('./routes/letterheadTemplateRoutes');
-
+const letterheadRoutes = require("./routes/letterheadRoute");
+const letterheadTemplateRoutes = require("./routes/letterheadTemplateRoutes");
 
 const app = express();
 const server = http.createServer(app);
@@ -75,31 +76,39 @@ const allowedOrigins = [
   "https://localhost",
   "capacitor://localhost",
   "https://sukalpatechsolutions.com",
-  "http://localhost:3000"
+  "http://localhost:2000",
   // Add your production domain
 ];
 
 // Replace the current CORS middleware with this:
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  
+
   // Only allow specific origins for credentialed requests
   if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Vary', 'Origin'); // Important for caching
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin"); // Important for caching
   }
 
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+  );
 
-res.setHeader('Access-Control-Allow-Headers', 
-  'Content-Type, Authorization, x-api-key, x-employee-id, X-Requested-With, Accept, Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
-  // res.setHeader('Access-Control-Allow-Headers', 
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, x-api-key, x-employee-id, X-Requested-With, Accept, Origin, Access-Control-Request-Method, Access-Control-Request-Headers"
+  );
+  // res.setHeader('Access-Control-Allow-Headers',
   //   'Content-Type, Authorization, x-api-key, X-Requested-With, Accept, Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
-  res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range');
-  res.setHeader('Access-Control-Max-Age', '86400');
+  res.setHeader(
+    "Access-Control-Expose-Headers",
+    "Content-Length, Content-Range"
+  );
+  res.setHeader("Access-Control-Max-Age", "86400");
 
-  if (req.method === 'OPTIONS') {
+  if (req.method === "OPTIONS") {
     return res.status(204).end();
   }
 
@@ -137,6 +146,8 @@ app.use("/", leaveRoutes);
 app.use("/", projects);
 app.use("/", invoices);
 app.use("/", employeeRoutes);
+app.use("/", meetingRoutes);
+app.use("/api", notificationsRouter);
 app.use("/", employeeQueries);
 app.use("/", resetPasswordRoutes);
 app.use("/", forgotPasswordRoutes);
@@ -174,9 +185,8 @@ app.use("/admin/attendance", adminAttendanceRoutes);
 app.use("/admin-attendance", adminAttendanceRoutes);
 app.use("/face-punch", face_admin_page);
 app.use("/api/employeelogin", employeeloginRoutes);
-app.use('/api', empExcelRoutes);
+app.use("/api", empExcelRoutes);
 app.use("/api/employee", employeeBirthdayRoutes);
-
 
 // vendor Route definitions
 app.use("/", vendorRoutes); // ✅ Prefix all vendor routes with /vendors
@@ -185,19 +195,20 @@ app.use("/", vendorRoutes); // ✅ Prefix all vendor routes with /vendors
 app.use("/", oldEmployeeRoutes);
 app.use("/", oldEmployeeDetailsRoutes);
 
-
-
 //letterheadroutes
 // Routes
 // app.use("/api/letters", letterRoutes); // Mount letter routes
-app.use('/api', letterRoutes);
-app.use('/letterheadfiles', express.static(path.join(__dirname, 'letterheadfiles'))); 
-app.use('/api', letterheadRoutes); 
-app.use('/api', letterheadTemplateRoutes);
+app.use("/api", letterRoutes);
+app.use(
+  "/letterheadfiles",
+  express.static(path.join(__dirname, "letterheadfiles"))
+);
+app.use("/api", letterheadRoutes);
+app.use("/api", letterheadTemplateRoutes);
 app.get("/", (req, res) => {
   res.send("LetterHead API is running");
 });
-app.use('/api/templates', letterheadTemplateRoutes);
+app.use("/api/templates", letterheadTemplateRoutes);
 
 //
 
@@ -205,6 +216,8 @@ app.use("/api", payrollRoutes);
 const io = new Server(server, {
   cors: { origin: process.env.FRONTEND_URL || "*" },
 });
+
+app.set("io", io);
 
 io.use((socket, next) => {
   const userId = socket.handshake.query.userId;
@@ -218,6 +231,47 @@ io.on("connection", (socket) => {
     .getUserRooms(socket.userId)
     .then((rooms) => rooms.forEach((r) => socket.join(r.id.toString())))
     .catch(console.error);
+
+  EmployeeQueries.getThreadsByEmployee(socket.userId) // implement this to return thread IDs
+    .then((threads) => threads.forEach((t) => socket.join(`query_${t.id}`)))
+    .catch(console.error);
+
+  // Handler for when the client selects a thread
+  socket.on("joinThread", (threadId) => {
+    socket.join(`query_${threadId}`);
+    console.log(`${socket.id} joined query thread ${threadId}`);
+  });
+
+  // Handler for sending a new query message over socket
+  socket.on("sendQueryMessage", async (payload) => {
+    // payload: { thread_id, sender_id, sender_role, recipient_id, sender_name, message, attachmentBase64 }
+    // 1️⃣ Persist via your existing addMessage logic:
+    const messageId = await EmployeeQueries.addMessage(
+      payload.thread_id,
+      payload.sender_id,
+      payload.sender_role,
+      payload.message,
+      payload.recipient_id,
+      null, // we'll handle attachment separately
+      payload.attachmentBase64 // if your service accepts base64
+    );
+
+    // 2️⃣ Build the message object
+    const newMsg = {
+      id: messageId,
+      ...payload,
+      created_at: new Date().toISOString(),
+      attachment_url: payload.attachmentBase64
+        ? `/attachments/${messageId}`
+        : null, // or however you expose it
+    };
+
+    // 3️⃣ Broadcast to everyone in this query thread room
+    io.to(`query_${payload.thread_id}`).emit("newMessage", newMsg);
+
+    // 4️⃣ (Optional) update your REST‑based preview list
+    socket.emit("messageAck", newMsg);
+  });
 
   socket.on(
     "send_message",
@@ -265,7 +319,8 @@ io.on("connection", (socket) => {
       members
     );
     socket.join(roomId.toString());
-    socket.emit("room_created", { roomId, name, isGroup });
+    const [room] = await chatService.getUserRooms(socket.userId);
+    socket.emit("room_created", room);
   });
 });
 
