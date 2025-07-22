@@ -1,5 +1,5 @@
 const db = require("../config");
-const queries = require("../constants/empDetailsQueries");
+const queries = require("../constants/loginQueries");
 
 class LeaveQueriesService {
   /**
@@ -12,8 +12,10 @@ class LeaveQueriesService {
     try {
       console.log("Executing query:", queries.GET_LEAVE_QUERIES_IN_DASHBOARD);
       console.log("With parameter:", employee_id);
-      
-      const [rows] = await db.execute(queries.GET_LEAVE_QUERIES_IN_DASHBOARD, [employee_id]);
+
+      const [rows] = await db.execute(queries.GET_LEAVE_QUERIES_IN_DASHBOARD, [
+        employee_id,
+      ]);
       return rows;
     } catch (error) {
       console.error("Error fetching leave queries for dashboard:", error);
