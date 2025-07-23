@@ -161,8 +161,8 @@ exports.addFullEmployee = async (data) => {
       data.domain,
       data.employee_type,
       data.role,
-      data.department_id,
-      data.position,
+      data.department_id || null,
+      data.position || null,
       data.supervisor_id,
       data.salary,
       data.resume_url,
@@ -195,12 +195,12 @@ exports.addFullEmployee = async (data) => {
       for (let exp of data.experience) {
         // assume `exp.doc` was turned into exp.doc_url in your handler mapping
         await conn.execute(queries.ADD_EMPLOYEE_EXP, [
-          eid,
-          exp.company,
-          exp.role,
-          exp.start_date,
-          exp.end_date,
-          exp.doc_url,
+          eid || null,
+          exp.company || null,
+          exp.role || null,
+          exp.start_date || null,
+          exp.end_date || null,
+          exp.doc_url || null,
         ]);
       }
     }
@@ -297,8 +297,8 @@ exports.editFullEmployee = async (data) => {
       data.domain,
       data.employee_type,
       data.role,
-      data.department_id,
-      data.position,
+      data.department_id || null,
+      data.position || null,
       data.supervisor_id,
       data.salary,
       data.resume_url,
@@ -322,12 +322,12 @@ exports.editFullEmployee = async (data) => {
     if (Array.isArray(data.experience)) {
       for (let exp of data.experience) {
         await conn.execute(queries.ADD_EMPLOYEE_EXP, [
-          data.employee_id,
-          exp.company,
-          exp.role,
-          exp.start_date,
-          exp.end_date,
-          exp.doc_url,
+          data.employee_id || null,
+          exp.company || null,
+          exp.role || null,
+          exp.start_date || null,
+          exp.end_date || null,
+          exp.doc_url || null,
         ]);
       }
     }

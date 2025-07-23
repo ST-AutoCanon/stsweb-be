@@ -1,10 +1,11 @@
-
 const db = require("../config"); // Import your DB connection
-const queries = require("../constants/empDetailsQueries"); // Import queries from constants
+const queries = require("../constants/loginQueries"); // Import queries from constants
 
 const getReimbursementStats = async (employeeId) => {
   try {
-    const [rows] = await db.execute(queries.GET_REIMBURSEMENT_STATS, [employeeId]);
+    const [rows] = await db.execute(queries.GET_REIMBURSEMENT_STATS, [
+      employeeId,
+    ]);
     return rows[0]; // Return the first row (since it's an aggregated query)
   } catch (error) {
     console.error("Error fetching reimbursement stats:", error);
