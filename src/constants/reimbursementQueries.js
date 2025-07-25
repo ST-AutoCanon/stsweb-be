@@ -39,8 +39,8 @@ module.exports = {
       INSERT INTO reimbursement (
           employee_id, department_id, claim_type, transport_type,  from_date, to_date, date, 
           travel_from, travel_to, meals_objective, purpose,  purchasing_item, accommodation_fees, no_of_days, transport_amount, da,  total_amount, 
-          meal_type, stationary, service_provider
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0), ?, ?, ?, ?, ?, ?)
+          meal_type, stationary, service_provider, project
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0), ?, ?, ?, ?, ?, ?, ?)
   `,
   CHECK_EXISTING_REIMBURSEMENT_SINGLE_DATE: `
     SELECT * FROM reimbursement 
@@ -76,7 +76,7 @@ module.exports = {
       UPDATE reimbursement 
       SET department_id=?, claim_type=?, transport_type=?, from_date=?, to_date=?, date=?, 
           travel_from=?, travel_to=?,   meals_objective=?, purpose=?,  purchasing_item=?, accommodation_fees=?, no_of_days=?, transport_amount=?, da=?, total_amount=?, 
-          meal_type=?, stationary=?, service_provider=?
+          meal_type=?, stationary=?, service_provider=?, project=?
       WHERE id=?
   `,
 

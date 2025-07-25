@@ -117,7 +117,7 @@ exports.createFullEmployee = async (req, res) => {
         .json(
           ErrorHandler.generateErrorResponse(
             400,
-            `${field} number already exists.`
+            `Aadhaar/PAN number already exists.`
           )
         );
     }

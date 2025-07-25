@@ -20,7 +20,14 @@ router.get("/attachments/:filename", (req, res) => {
     return res.status(400).json({ message: "Invalid filename" });
   }
 
-  const filePath = path.join(__dirname, "..", "uploads", filename);
+  const filePath = path.join(
+    __dirname,
+    "..",
+    "..",
+    "..",
+    "EmpQueryUploads",
+    filename
+  );
 
   if (fs.existsSync(filePath)) {
     const mimeType =

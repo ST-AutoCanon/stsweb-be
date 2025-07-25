@@ -199,31 +199,35 @@ WHERE id = ?;
   `,
 
   SEARCH_EMPLOYEES: `
-SELECT 
-  e.employee_id, 
-  CONCAT(e.first_name, ' ', e.last_name) AS name, 
-  d.name AS department_name
-FROM employees e
-LEFT JOIN departments d ON e.department_id = d.id
-WHERE e.status <> 'Inactive'
-  AND ( CONCAT(e.first_name, ' ', e.last_name) LIKE ? 
-   OR e.employee_id LIKE ? 
-   OR d.name LIKE ?)
-`,
+    SELECT
+      e.employee_id,
+      CONCAT(e.first_name, ' ', e.last_name) AS name,
+      d.name AS department_name
+    FROM employees e
+    LEFT JOIN employee_professional pr ON e.employee_id = pr.employee_id
+    LEFT JOIN departments d             ON pr.department_id = d.id
+    WHERE e.status <> 'Inactive'
+      AND (
+        CONCAT(e.first_name, ' ', e.last_name) LIKE ? OR
+        e.employee_id LIKE ? OR
+        d.name LIKE ?
+      );
+  `,
 
   GET_ALL_EMPLOYEES: `
-  SELECT 
-    e.employee_id,
-    e.role,
-    e.phone_number,
-    e.photo_url,
-    CONCAT(e.first_name, ' ', e.last_name) AS name, 
-    e.department_id, 
-    d.name AS department_name
-  FROM employees e
-  LEFT JOIN departments d ON e.department_id = d.id
-  WHERE e.status <> 'Inactive'
-`,
+    SELECT
+      e.employee_id,
+      pr.role,
+      e.phone_number,
+      p.photo_url,
+      CONCAT(e.first_name, ' ', e.last_name) AS name,
+      d.name AS department_name
+    FROM employees e
+    LEFT JOIN employee_professional pr ON e.employee_id = pr.employee_id
+    LEFT JOIN departments d             ON pr.department_id = d.id
+    LEFT JOIN employee_personal p       ON e.employee_id = p.employee_id
+    WHERE e.status <> 'Inactive';
+  `,
 
   UPDATE_FINANCIAL_DETAILS_FOR_INVOICE: `
  INSERT INTO financial_details

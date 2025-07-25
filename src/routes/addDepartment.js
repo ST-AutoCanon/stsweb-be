@@ -5,24 +5,34 @@ const fs = require("fs");
 const {
   addDepartmentHandler,
   getDepartmentsHandler,
+  getEmployeesByDepartmentHandler,
+  getHierarchyHandler,
+  reassignDept,
+  changeSupervisor,
 } = require("../handlers/addDepartment");
 
 const router = express.Router();
 
-// Ensure uploads folder exists
-const uploadDir = path.join(__dirname, "../departments/");
+const uploadDir = path.join(__dirname, "../../../departments/");
 
-// Set up storage
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
-    cb(null, Date.now() + path.extname(file.originalname));
+    let name = req.body.name || "department";
+    name = name
+      .toString()
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "-")
+      .replace(/[^\w\-]+/g, "")
+      .replace(/\-+/g, "-");
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, `${name}${ext}`);
   },
 });
 
-// File filter to allow only images
 const fileFilter = (req, file, cb) => {
   const fileTypes = /jpeg|jpg|png|gif/;
   const extName = fileTypes.test(path.extname(file.originalname).toLowerCase());
@@ -35,7 +45,6 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
-// Multer middleware
 const upload = multer({ storage, fileFilter });
 
 router.post("/departments/add", upload.single("icon"), addDepartmentHandler);
@@ -47,7 +56,11 @@ router.get("/departments/:filename", (req, res) => {
     return res.status(403).json({ message: "API key is required" });
   }
 
-  const filePath = path.join(__dirname, "../departments", req.params.filename);
+  const filePath = path.join(
+    __dirname,
+    "../../../departments",
+    req.params.filename
+  );
 
   fs.access(filePath, fs.constants.F_OK, (err) => {
     if (err) {

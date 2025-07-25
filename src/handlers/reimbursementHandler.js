@@ -6,6 +6,7 @@ const { generateDocx } = require("../services/docxService");
 const { convertDocxToPdf } = require("../services/pdfService");
 const db = require("../config");
 const queries = require("../constants/reimbursementQueries");
+const XLSX = require("xlsx");
 
 // forbidden extensions
 const forbiddenExts = new Set([
@@ -160,19 +161,22 @@ exports.getReimbursementsByEmployee = async (req, res) => {
   }
 };
 
+// reimbursementHandler.js (controller)
 exports.updatePaymentStatus = async (req, res) => {
   try {
     const { id } = req.params;
     let { payment_status, user_role } = req.body;
 
-    if (payment_status === "payable") payment_status = "paid";
-    if (!["pending", "paid"].includes(payment_status)) {
+    // drop the old “payable” → “paid” mapping
+    // allow exactly these three statuses now:
+    if (!["pending", "paid", "rejected"].includes(payment_status)) {
       return res.status(400).json({ error: "Invalid payment status." });
     }
     if (user_role === "employee") {
       return res.status(403).json({ error: "Not authorized." });
     }
 
+    // only approved claims may be paid or rejected
     const [rows] = await db.query(
       "SELECT status FROM reimbursement WHERE id = ?",
       [id]
@@ -184,6 +188,7 @@ exports.updatePaymentStatus = async (req, res) => {
       });
     }
 
+    // set paid_date only when status === "paid"
     const paid_date = payment_status === "paid" ? new Date() : null;
     const updated = await reimbursementService.updatePaymentStatus(
       id,
@@ -214,6 +219,51 @@ exports.getAllReimbursements = async (req, res) => {
   } catch (error) {
     console.error("Error fetching all reimbursements:", error);
     res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+/**
+ * GET /reimbursements/export?submittedFrom=…&submittedTo=…
+ */
+exports.exportReimbursements = async (req, res) => {
+  try {
+    let { submittedFrom, submittedTo } = req.query;
+    submittedFrom = submittedFrom !== "null" ? submittedFrom : null;
+    submittedTo = submittedTo !== "null" ? submittedTo : null;
+
+    // reuse your service to fetch the _flat_ array of rows:
+    const rows = await reimbursementService.getAllReimbursements(
+      submittedFrom,
+      submittedFrom,
+      submittedTo
+    );
+    // rows is an array of { employee_id, claims: [ … ] }
+    // flatten into one big array of claims:
+    const flat = rows.reduce((acc, r) => acc.concat(r.claims), []);
+
+    // convert to sheet
+    const ws = XLSX.utils.json_to_sheet(flat);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Reimbursements");
+
+    // write to buffer
+    const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+
+    // set a filename
+    const fname = `Reimbursements_${submittedFrom || "all"}-to-${
+      submittedTo || "all"
+    }.xlsx`;
+
+    res
+      .setHeader("Content-Disposition", `attachment; filename="${fname}"`)
+      .setHeader(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      )
+      .send(buf);
+  } catch (err) {
+    console.error("Export error:", err);
+    res.status(500).json({ error: "Failed to export Excel" });
   }
 };
 
@@ -258,6 +308,7 @@ exports.createReimbursement = async (req, res) => {
       meal_type: req.body.meal_type,
       stationary: req.body.stationary,
       service_provider: req.body.service_provider,
+      project: req.body.project,
       attachments: req.files
         ? req.files.map((file) => ({
             file_name: file.filename,
@@ -336,6 +387,7 @@ exports.updateReimbursement = async (req, res) => {
       meal_type: req.body.meal_type || null,
       stationary: req.body.stationary || null,
       service_provider: req.body.service_provider || null,
+      project: req.body.project || null,
       attachments: req.files
         ? req.files.map((file) => ({
             file_name: file.filename,

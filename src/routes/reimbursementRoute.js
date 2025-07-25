@@ -142,6 +142,8 @@ router.get(
   reimbursementHandler.getAttachmentsByReimbursementId
 );
 
+router.get("/reimbursements/export", reimbursementHandler.exportReimbursements);
+
 router.post(
   "/reimbursement/upload",
   upload.array("attachments", 5),
