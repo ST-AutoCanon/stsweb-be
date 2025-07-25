@@ -104,6 +104,7 @@ const mapAttachmentsToReimbursements = (
 };
 
 // New service function to update payment status and paid_date
+// reimbursementService.js (service)
 exports.updatePaymentStatus = async (id, payment_status, paid_date) => {
   try {
     console.log("Service: Updating payment status...");
@@ -111,7 +112,7 @@ exports.updatePaymentStatus = async (id, payment_status, paid_date) => {
     console.log("New Payment Status:", payment_status);
     console.log("Paid Date:", paid_date);
 
-    // Assumes you have defined UPDATE_PAYMENT_STATUS in your queries constants.
+    // your UPDATE_PAYMENT_STATUS query should allow "rejected" too
     const result = await db.query(queries.UPDATE_PAYMENT_STATUS, [
       payment_status,
       paid_date,
@@ -120,7 +121,6 @@ exports.updatePaymentStatus = async (id, payment_status, paid_date) => {
 
     console.log("Database update result:", result);
 
-    // Return an object with updated information
     return { id, payment_status, paid_date };
   } catch (error) {
     console.error("Error in updatePaymentStatus service:", error);
@@ -244,9 +244,10 @@ exports.createReimbursement = async (reimbursementData) => {
       reimbursementData.meal_type || null,
       reimbursementData.stationary || null,
       reimbursementData.service_provider || null,
+      reimbursementData.project || null,
     ];
 
-    // Check for duplicates before insert
+    // 1) Fetch any existing claims that overlap
     const [existingClaims] = await db.query(queries.CHECK_EXISTING_CLAIM, [
       reimbursementData.employeeId,
       reimbursementData.claim_type,
@@ -255,7 +256,19 @@ exports.createReimbursement = async (reimbursementData) => {
       reimbursementData.to_date || null,
     ]);
 
-    if (existingClaims.length > 0) {
+    // 2) Log the statuses we got back (for debugging)
+    console.log(
+      "🚀 createReimbursement: found existing claims with statuses:",
+      existingClaims.map((c) => c.status)
+    );
+
+    // 3) Filter out the ones that are truly “blocking” (i.e. not rejected)
+    const stillActive = existingClaims.filter(
+      (c) => c.status && c.status.toString().toLowerCase().trim() !== "rejected"
+    );
+
+    if (stillActive.length > 0) {
+      // there is at least one overlapping claim that’s pending or approved, so block
       throw {
         statusCode: 400,
         message:
@@ -263,12 +276,14 @@ exports.createReimbursement = async (reimbursementData) => {
       };
     }
 
+    // 4) Insert the new reimbursement
     const [result] = await db.query(
       queries.CREATE_REIMBURSEMENT,
       reimbursementArray
     );
     const reimbursementId = result.insertId;
 
+    // 5) Save attachments, if any
     if (reimbursementData.attachments?.length) {
       const attachmentValues = reimbursementData.attachments.map((f) => [
         reimbursementId,
@@ -381,6 +396,7 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
       meal_type,
       stationary,
       service_provider,
+      project,
       attachments, // new attachments array from updateData
     } = updateData;
 
@@ -411,6 +427,7 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
       meal_type,
       stationary,
       service_provider,
+      project,
       reimbursementId,
     ]);
 

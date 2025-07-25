@@ -1,15 +1,17 @@
 module.exports = {
-  /* employee-queries */
+  /* Create a new conversation thread */
   CREATE_THREAD: `
-  INSERT INTO threads (sender_id, recipient_id, subject, department_id) 
-  VALUES (?, ?, ?, ?)
+    INSERT INTO threads (sender_id, recipient_id, subject, department_id)
+    VALUES (?, ?, ?, ?);
   `,
 
+  /* Add a message to a thread */
   ADD_MESSAGE: `
-  INSERT INTO employee_queries (thread_id, sender_id, sender_role, message, attachment_url)
-  VALUES (?, ?, ?, ?, ?)
+    INSERT INTO employee_queries (thread_id, sender_id, sender_role, message, attachment_url)
+    VALUES (?, ?, ?, ?, ?);
   `,
 
+  /* Retrieve all messages in a thread */
   GET_THREAD_MESSAGES: `
     SELECT 
     eq.id, 
@@ -30,117 +32,109 @@ module.exports = {
   
   `,
 
+  /* Close a thread with optional feedback and note */
   CLOSE_THREAD: `
-  UPDATE threads 
-  SET status = 'closed', feedback = ?, note = ? 
-  WHERE id = ?
+    UPDATE threads
+    SET status = 'closed', feedback = ?, note = ?, updated_at = NOW()
+    WHERE id = ?;
   `,
 
+  /* List all threads (admin view), including unread counts */
   GET_ALL_THREADS: `
-  SELECT 
-  t.id, 
-  t.sender_id, 
-  CONCAT(e.first_name, ' ', e.last_name) AS sender_name,
-  e.photo_url,
-  e.role,
-  e.gender,
-  COUNT(CASE WHEN mrs.is_read = FALSE THEN 1 ELSE NULL END) AS unread_message_count, 
-  t.recipient_id, 
-  t.department_id, 
-  t.status,
-  t.subject,
-  t.latest_message, 
-  t.feedback,
-  t.note, 
-  t.created_at, 
-  t.updated_at 
-FROM 
-  threads t
-JOIN
-  employees e ON e.employee_id = t.sender_id
-LEFT JOIN 
-  employee_queries q ON t.id = q.thread_id
-LEFT JOIN 
-  message_read_status mrs ON q.id = mrs.message_id
-GROUP BY 
-  t.id, 
-  t.sender_id, 
-  e.first_name, 
-  e.last_name,
-  e.photo_url,
-  e.role,
-  e.gender, 
-  t.recipient_id, 
-  t.department_id, 
-  t.status, 
-  t.subject, 
-  t.latest_message, 
-  t.feedback, 
-  t.note, 
-  t.created_at, 
-  t.updated_at
-ORDER BY 
-  t.updated_at DESC;
+    SELECT
+      t.id,
+      t.sender_id,
+      CONCAT(e.first_name, ' ', e.last_name) AS sender_name,
+      p.photo_url,
+      pr.role,
+      p.gender,
+      COUNT(CASE WHEN mrs.is_read = 0 THEN 1 END) AS unread_message_count,
+      t.recipient_id,
+      t.department_id,
+      t.status,
+      t.subject,
+      t.latest_message,
+      t.feedback,
+      t.note,
+      DATE_FORMAT(t.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+      DATE_FORMAT(t.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+    FROM threads t
+    JOIN employees e
+      ON e.employee_id = t.sender_id
+    LEFT JOIN employee_personal p
+      ON p.employee_id = e.employee_id
+    LEFT JOIN employee_professional pr
+      ON pr.employee_id = e.employee_id
+    LEFT JOIN employee_queries q
+      ON t.id = q.thread_id
+    LEFT JOIN message_read_status mrs
+      ON q.id = mrs.message_id
+    GROUP BY t.id
+    ORDER BY t.updated_at DESC;
   `,
 
+  /* Get employee IDs by role */
   GET_EMPLOYEE_BY_ROLE: `
-  SELECT 
-    employee_id 
-  FROM 
-    employees 
-  WHERE 
-    role = ?
+    SELECT employee_id
+    FROM employee_professional
+    WHERE role = ?;
   `,
 
+  /* Get manager IDs for a specific department */
   GET_MANAGER_BY_DEPARTMENT: `
-  SELECT 
-    employee_id 
-  FROM 
-    employees 
-  WHERE 
-    role = 'Manager' AND department_id = ?
+    SELECT employee_id
+    FROM employee_professional
+    WHERE role = 'Manager' AND department_id = ?;
   `,
 
   FETCH_THREADS: `
-  SELECT 
-      t.id, 
-      t.subject, 
-      CONCAT(e.first_name, ' ', e.last_name) AS recipient_name,
-      e.photo_url,
-      e.role,
-      e.gender,
-      t.department_id,
-      t.recipient_id, 
-      t.created_at,
-      t.updated_at, 
-      t.status, 
-      t.latest_message,
-      COUNT(CASE WHEN mrs.is_read = FALSE THEN 1 ELSE NULL END) AS unread_message_count
-  FROM threads t
-  JOIN employees e ON e.employee_id = 
-      CASE 
-          WHEN t.sender_id = ? THEN t.recipient_id 
-          ELSE t.sender_id 
+  SELECT
+    t.id AS id,
+    ANY_VALUE(t.subject) AS subject,
+    ANY_VALUE(
+      CASE
+        WHEN t.sender_id = ? THEN t.recipient_id
+        ELSE t.sender_id
       END
-  LEFT JOIN employee_queries q ON t.id = q.thread_id
-  LEFT JOIN message_read_status mrs ON q.id = mrs.message_id AND mrs.recipient_id = ?
-  WHERE t.sender_id = ? OR t.recipient_id = ?
-  GROUP BY 
-      t.id, 
-      t.subject, 
-      e.first_name, 
-      e.last_name, 
-      e.photo_url,
-      e.role,
-      e.gender,
-      t.department_id,
-      t.recipient_id, 
-      t.created_at, 
-      t.updated_at, 
-      t.status, 
-      t.latest_message
-  ORDER BY t.created_at DESC;
-  `,
+    )                                   AS recipient_id,
+    ANY_VALUE(CONCAT(e.first_name, ' ', e.last_name)) AS recipient_name,
+    ANY_VALUE(p.photo_url)              AS photo_url,
+    ANY_VALUE(pr.role)                  AS role,
+    ANY_VALUE(p.gender)                 AS gender,
+    ANY_VALUE(t.department_id)          AS department_id,
+    ANY_VALUE(DATE_FORMAT(t.created_at, '%Y-%m-%d %H:%i:%s')) AS created_at,
+    ANY_VALUE(DATE_FORMAT(t.updated_at, '%Y-%m-%d %H:%i:%s')) AS updated_at,
+    ANY_VALUE(t.status)                 AS status,
+    ANY_VALUE(t.latest_message)         AS latest_message,
+    /* real aggregation for unread count */
+    COUNT(CASE WHEN mrs.is_read = 0 THEN 1 END) AS unread_message_count
+
+  FROM threads t
+
+  JOIN employees e
+    ON e.employee_id = (
+      CASE
+        WHEN t.sender_id = ? THEN t.recipient_id
+        ELSE t.sender_id
+      END
+    )
+  LEFT JOIN employee_personal p
+    ON p.employee_id = e.employee_id
+  LEFT JOIN employee_professional pr
+    ON pr.employee_id = e.employee_id
+
+  LEFT JOIN employee_queries q
+    ON q.thread_id = t.id
+  LEFT JOIN message_read_status mrs
+    ON mrs.message_id = q.id
+    AND mrs.recipient_id = ?
+
+  WHERE t.sender_id   = ?
+     OR t.recipient_id = ?
+
+  GROUP BY t.id
+  ORDER BY ANY_VALUE(t.created_at) DESC;
+`,
 
   MARK_MESSAGES_AS_READ: `
   UPDATE message_read_status

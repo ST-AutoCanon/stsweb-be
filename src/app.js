@@ -76,7 +76,7 @@ const allowedOrigins = [
   "https://localhost",
   "capacitor://localhost",
   "https://sukalpatechsolutions.com",
-  "http://localhost:2000",
+  "http://localhost:3000",
   // Add your production domain
 ];
 

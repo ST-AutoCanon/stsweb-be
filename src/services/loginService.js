@@ -124,11 +124,8 @@ class LoginService {
    */
   static async fetchEmployeeDashboard(employeeId) {
     try {
+      // Only one parameter needed for the dashboard query
       const [rows] = await db.execute(queries.GET_EMPLOYEE_DASHBOARD, [
-        employeeId,
-        employeeId,
-        employeeId,
-        employeeId,
         employeeId,
       ]);
 
@@ -136,25 +133,26 @@ class LoginService {
         throw new Error("Employee not found");
       }
 
-      const employee = rows[0];
+      const emp = rows[0];
 
       return {
-        name: employee.name,
-        employeeId: employee.employee_id,
-        position: employee.position,
-        gender: employee.gender,
-        department_id: employee.department_id,
-        salary: employee.salary,
-        photoUrl: employee.photo_url,
-        attendance_count: employee.attendance_count,
-        leave_queries_count: employee.leave_queries_count,
+        name: emp.name,
+        employeeId: emp.employee_id,
+        position: emp.position,
+        gender: emp.gender,
+        department: emp.department, // department name
+        salary: emp.salary,
+        photoUrl: emp.photo_url,
+        attendance_count: emp.attendance_count || 0,
+        leave_queries_count: emp.leave_queries_count || 0,
         attendance_breakdown: {
-          present: employee.attendance_count,
-          sick_leave: employee.sick_leave,
-          other_absence: employee.other_absence,
+          present: emp.attendance_count || 0,
+          sick_leave: emp.sick_leave || 0,
+          other_absence: emp.other_absence || 0,
         },
       };
     } catch (err) {
+      console.error("Error in fetchEmployeeDashboard:", err.message);
       throw new Error("Error fetching employee dashboard data");
     }
   }

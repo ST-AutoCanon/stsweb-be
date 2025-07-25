@@ -17,39 +17,43 @@ const toLocalDateString = (dateInput) => {
 const getLeaveQueries = async (filters = {}) => {
   const { status, search, from_date, to_date } = filters;
   try {
+    // Base query includes WHERE 1=1
     let query = queries.GET_LEAVE_QUERIES;
     const params = [];
     const whereConditions = [];
 
     if (status) {
-      whereConditions.push("leavequeries.status = ?");
+      whereConditions.push("lq.status = ?");
       params.push(status);
     }
     if (search) {
-      whereConditions.push(`
-        (leavequeries.employee_id LIKE ? OR 
-         leavequeries.reason LIKE ? OR 
-         CONCAT(employees.first_name, ' ', employees.last_name) LIKE ?)
-      `);
+      whereConditions.push(
+        `(lq.employee_id LIKE ? OR lq.reason LIKE ? OR CONCAT(e.first_name, ' ', e.last_name) LIKE ?)`
+      );
       params.push(`%${search}%`, `%${search}%`, `%${search}%`);
     }
     if (from_date) {
-      whereConditions.push("leavequeries.start_date >= ?");
+      whereConditions.push("lq.start_date >= ?");
       params.push(from_date);
     }
     if (to_date) {
-      whereConditions.push("leavequeries.end_date <= ?");
+      whereConditions.push("lq.end_date <= ?");
       params.push(to_date);
     }
     if (whereConditions.length > 0) {
-      query += ` WHERE ${whereConditions.join(" AND ")}`;
+      // Append filters using AND, not a second WHERE
+      query += ` AND ${whereConditions.join(" AND ")}`;
     }
+
+    console.log("Executing SQL:", query, params);
     const [rows] = await db.execute(query, params);
-    console.log(query, params);
+
+    // Format dates for client
     rows.forEach((row) => {
       row.start_date = toLocalDateString(row.start_date);
       row.end_date = toLocalDateString(row.end_date);
     });
+
     return rows;
   } catch (err) {
     console.error("Error fetching leave queries:", err.message);

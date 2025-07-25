@@ -145,6 +145,7 @@ SELECT
   DATE_FORMAT(e.dob,'%Y-%m-%d')       AS dob,
   e.phone_number,
 
+  -- personal
   p.address, p.father_name, p.mother_name, p.gender,
   p.marital_status, p.spouse_name,
   DATE_FORMAT(p.marriage_date,'%Y-%m-%d') AS marriage_date,
@@ -152,14 +153,47 @@ SELECT
   p.pan_number, p.pan_doc_url,
   p.passport_number, p.voter_id, p.photo_url,
 
-  ed.*,
+  -- education (enumerate all *other* columns, but omit ed.employee_id)
+  ed.tenth_institution,
+  ed.tenth_year,
+  ed.tenth_board,
+  ed.tenth_score,
+  ed.tenth_cert_url,
+  ed.twelfth_institution,
+  ed.twelfth_year,
+  ed.twelfth_board,
+  ed.twelfth_score,
+  ed.twelfth_cert_url,
+  ed.ug_institution,
+  ed.ug_year,
+  ed.ug_board,
+  ed.ug_score,
+  ed.ug_cert_url,
+  ed.pg_institution,
+  ed.pg_year,
+  ed.pg_board,
+  ed.pg_score,
+  ed.pg_cert_url,
+  ed.additional_cert_name,
+  ed.additional_cert_url,
 
-  pr.domain, pr.employee_type, pr.role, pr.department_id,
-  pr.position, pr.supervisor_id, pr.salary, pr.resume_url,
+  -- professional
+  pr.domain,
+  pr.employee_type,
+  pr.role,
+  pr.department_id,
+  pr.position,
+  pr.supervisor_id,
+  pr.salary,
+  pr.resume_url,
 
-  bd.bank_name, bd.account_number, bd.ifsc_code, bd.branch_name,
+  -- bank
+  bd.bank_name,
+  bd.account_number,
+  bd.ifsc_code,
+  bd.branch_name,
 
-  -- experience as a separate JSON array
+  -- experience as JSON array
   (
     SELECT JSON_ARRAYAGG(
       JSON_OBJECT(
@@ -174,7 +208,7 @@ SELECT
     WHERE exp.employee_id = e.employee_id
   ) AS experience,
 
-  -- other_docs as a separate JSON array
+  -- other docs as JSON array
   (
     SELECT JSON_ARRAYAGG(doc.other_doc_url)
     FROM employee_documents doc
@@ -249,39 +283,45 @@ SELECT
   ep.salary,
   b.bank_name,
   b.account_number,
-  -- fetch the supervisor's name from the self‑join
   CONCAT(s.first_name, ' ', s.last_name) AS supervisor
 FROM employees e
-  LEFT JOIN departments d
-    ON e.department_id = d.id
   LEFT JOIN employee_professional ep
     ON e.employee_id = ep.employee_id
+  LEFT JOIN departments d
+    ON ep.department_id = d.id       -- ← moved here
   LEFT JOIN employee_bank_details b
     ON e.employee_id = b.employee_id
   LEFT JOIN employees s
     ON ep.supervisor_id = s.employee_id
 WHERE 1=1
 `,
+
   SEARCH_EMPLOYEES: `
-SELECT e.employee_id, 
-       CONCAT(e.first_name, ' ', e.last_name) AS name, 
-       DATE_FORMAT(e.created_at, '%Y-%m-%d') AS joining_date, 
-       e.status,
-       d.name AS department, 
-       e.position, 
-       e.email, 
-       e.phone_number, 
-       e.aadhaar_number, 
-       e.pan_number, 
-       e.salary
-FROM employees e
-LEFT JOIN departments d ON e.department_id = d.id
-WHERE (e.first_name LIKE ? 
-   OR e.last_name LIKE ? 
-   OR e.email LIKE ? 
-   OR e.employee_id LIKE ? 
-   OR d.name LIKE ?)
-`,
+    SELECT
+      e.employee_id,
+      CONCAT(e.first_name, ' ', e.last_name) AS name,
+      DATE_FORMAT(e.created_at, '%Y-%m-%d') AS joining_date,
+      e.status,
+      d.name AS department,
+      pr.position,
+      e.email,
+      e.phone_number,
+      p.aadhaar_number,
+      p.pan_number,
+      pr.salary
+    FROM employees e
+    LEFT JOIN employee_professional pr ON e.employee_id = pr.employee_id
+    LEFT JOIN departments d          ON pr.department_id = d.id
+    LEFT JOIN employee_personal p    ON e.employee_id = p.employee_id
+    WHERE (
+      e.first_name LIKE ? OR
+      e.last_name LIKE ? OR
+      e.email LIKE ? OR
+      e.employee_id LIKE ? OR
+      d.name LIKE ?
+    )
+    ORDER BY e.employee_id;
+  `,
 
   UPDATE_EMPLOYEE_STATUS: `UPDATE employees SET status = 'Inactive' WHERE employee_id = ?`,
 
