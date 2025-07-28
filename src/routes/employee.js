@@ -9,9 +9,13 @@ router.post("/full", upload.any(), employeeHandler.createFullEmployee);
 
 router.get("/full/:employeeId", employeeHandler.getFullEmployee);
 
-router.get("/supervisors", employeeHandler.listSupervisors);
+router.get("/user_roles", employeeHandler.listUserRoles);
 
 router.get("/admin/employees", employeeHandler.searchEmployees);
+
+router.get("/positions", employeeHandler.listPositions);
+
+router.get("/positions/supervisors", employeeHandler.listSupervisorsByPosition);
 
 router.put(
   "/full/:employeeId",

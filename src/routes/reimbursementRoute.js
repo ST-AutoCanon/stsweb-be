@@ -175,6 +175,8 @@ router.get("/reimbursement/:year/:month/:employeeId/:filename", (req, res) => {
   const filePath = path.join(
     __dirname,
     "..",
+    "..",
+    "..",
     "reimbursement",
     year,
     month,

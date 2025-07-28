@@ -9,65 +9,67 @@ const db = require("../config");
 const queries = require("../constants/empDetailsQueries");
 
 /**
- * Bulk add employees from an Excel file.
- * Expects the Excel file to be uploaded via req.file (using a middleware like multer).
- * Each row in the Excel should have headers matching the employeeData keys (e.g., first_name, email, etc.).
+ * Bulk add employees from an Excel file (concurrent processing).
+ * Expects the Excel file to be uploaded via req.file (using multer).
  */
 exports.bulkAddEmployees = async (req, res) => {
-  try {
-    if (!req.file) {
-      return res
-        .status(400)
-        .json(
-          ErrorHandler.generateErrorResponse(
-            400,
-            "Excel file is required for bulk upload."
-          )
-        );
-    }
+  if (!req.file) {
+    return res
+      .status(400)
+      .json(
+        ErrorHandler.generateErrorResponse(
+          400,
+          "Excel file is required for bulk upload."
+        )
+      );
+  }
 
+  try {
     // Parse the Excel file
     const workbook = xlsx.readFile(req.file.path);
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
     const employeesData = xlsx.utils.sheet_to_json(worksheet);
 
-    // Prepare arrays for success and error results
+    // Remove temp file
+    fs.unlink(req.file.path, (err) => {
+      if (err) console.warn("Temp file removal failed:", err);
+    });
+
     const results = [];
     const errors = [];
 
-    // Process each employee record in the Excel sheet
-    for (const employeeData of employeesData) {
-      try {
-        // You can add any necessary data validation or transformation here.
-        // The addEmployee service already handles duplicate checks and sending reset emails.
-        const dbResult = await employeeService.addEmployee(employeeData);
-        results.push({
-          email: employeeData.email,
-          status: "success",
+    // Kick off all addEmployee calls concurrently
+    const promises = employeesData.map((employeeData) => {
+      return employeeService
+        .addFullEmployee(employeeData)
+        .then(() => {
+          results.push({ email: employeeData.email, status: "success" });
+        })
+        .catch((err) => {
+          console.error(
+            `Error adding employee (${employeeData.email}):`,
+            err.message || err
+          );
+          errors.push({
+            email: employeeData.email,
+            error: err.message || "Error adding employee",
+          });
         });
-      } catch (error) {
-        console.error(
-          `Error adding employee with email ${employeeData.email}:`,
-          error
-        );
-        errors.push({
-          email: employeeData.email,
-          error: error.message || "Error adding employee",
-        });
-      }
-    }
+    });
 
-    return res.status(201).json(
-      ErrorHandler.generateSuccessResponse(
-        201,
-        "Bulk employee process completed.",
-        {
-          added: results,
-          errors: errors,
-        }
-      )
-    );
+    // Wait for all to finish
+    await Promise.all(promises);
+
+    return res
+      .status(207)
+      .json(
+        ErrorHandler.generateSuccessResponse(
+          207,
+          "Bulk employee process completed.",
+          { added: results, errors }
+        )
+      );
   } catch (error) {
     console.error("Bulk employee addition error:", error);
     return res
@@ -471,5 +473,56 @@ exports.deactivateEmployee = async (req, res) => {
       .json(
         ErrorHandler.generateErrorResponse(400, "Failed to deactivate employee")
       );
+  }
+};
+
+/**
+ * GET /api/user_roles
+ * Returns [{ id, name }, …]
+ */
+exports.listUserRoles = async (req, res) => {
+  try {
+    const roles = await employeeService.getUserRoles();
+    return res.status(200).json({ status: "success", data: roles });
+  } catch (err) {
+    console.error("listUserRoles error:", err);
+    return res
+      .status(500)
+      .json({ status: "error", message: "Failed to fetch roles" });
+  }
+};
+
+/**
+ * GET /api/positions?role=Manager&department_id=23
+ */
+exports.listPositions = async (req, res) => {
+  try {
+    const { role, department_id } = req.query;
+    const positions = await employeeService.getPositions(role, department_id);
+    return res.status(200).json({ status: "success", data: positions });
+  } catch (err) {
+    console.error("listPositions error:", err);
+    return res
+      .status(500)
+      .json({ status: "error", message: "Failed to fetch positions" });
+  }
+};
+
+/**
+ * GET /api/positions/supervisors?position=Engineer&department_id=23
+ */
+exports.listSupervisorsByPosition = async (req, res) => {
+  try {
+    const { position, department_id } = req.query;
+    const supervisors = await employeeService.getSupervisorsByPosition(
+      position,
+      department_id
+    );
+    return res.status(200).json({ status: "success", data: supervisors });
+  } catch (err) {
+    console.error("listSupervisorsByPosition error:", err);
+    return res
+      .status(500)
+      .json({ status: "error", message: "Failed to fetch supervisors" });
   }
 };

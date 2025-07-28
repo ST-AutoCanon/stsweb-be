@@ -17,15 +17,16 @@ exports.forgotPassword = async (req, res) => {
     const { email } = req.body;
     console.log("Forgot password requested for:", email);
 
-    // 1. Check if the email exists
+    // 1. Try to load an ACTIVE employee by email
     const employee = await getEmployeeByEmail(email);
     if (!employee) {
-      console.warn("Email not found in database:", email);
-      const errorResponse = ErrorHandler.generateErrorResponse(
+      console.warn("No active user found for:", email);
+      // generateErrorResponse returns { statusCode, message, ... }
+      const notFound = ErrorHandler.generateErrorResponse(
         404,
-        "Email not found."
+        "No active account found with that email."
       );
-      return res.status(404).json(errorResponse);
+      return res.status(404).json(notFound);
     }
 
     const userName =
@@ -85,13 +86,19 @@ info@sukalpatech.com`,
       message: "Password reset link has been sent to your email.",
     });
     res.status(200).json(successResponse);
-  } catch (error) {
-    console.error("Error processing forgot password request:", error);
+  } catch (err) {
+    console.error("Forgot password error:", err);
 
-    const errorResponse = ErrorHandler.generateErrorResponse(
+    // If we threw an ErrorHandler response, pass it through
+    if (err.statusCode) {
+      return res.status(err.statusCode).json(err);
+    }
+
+    // Otherwise, generic 500
+    const serverError = ErrorHandler.generateErrorResponse(
       500,
-      "An error occurred while processing your request."
+      "An internal error occurred. Please try again later."
     );
-    res.status(500).json(errorResponse);
+    return res.status(500).json(serverError);
   }
 };

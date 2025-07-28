@@ -140,11 +140,11 @@ exports.addFullEmployee = async (data) => {
       data.twelfth_board,
       data.twelfth_score,
       data.twelfth_cert_url,
-      data.ug_institution,
-      data.ug_year,
-      data.ug_board,
-      data.ug_score,
-      data.ug_cert_url,
+      data.ug_institution || null,
+      data.ug_year || null,
+      data.ug_board || null,
+      data.ug_score || null,
+      data.ug_cert_url || null,
       data.pg_institution || null,
       data.pg_year || null,
       data.pg_board || null,
@@ -159,11 +159,11 @@ exports.addFullEmployee = async (data) => {
     await conn.execute(queries.ADD_EMPLOYEE_PRO, [
       eid,
       data.domain,
-      data.employee_type,
+      data.employee_type || null,
       data.role,
       data.department_id || null,
       data.position || null,
-      data.supervisor_id,
+      data.supervisor_id || null,
       data.salary,
       data.resume_url,
     ]);
@@ -276,11 +276,11 @@ exports.editFullEmployee = async (data) => {
       data.twelfth_board,
       data.twelfth_score,
       data.twelfth_cert_url,
-      data.ug_institution,
-      data.ug_year,
-      data.ug_board,
-      data.ug_score,
-      data.ug_cert_url,
+      data.ug_institution || null,
+      data.ug_year || null,
+      data.ug_board || null,
+      data.ug_score || null,
+      data.ug_cert_url || null,
       data.pg_institution || null,
       data.pg_year || null,
       data.pg_board || null,
@@ -295,11 +295,11 @@ exports.editFullEmployee = async (data) => {
     console.log("[editFullEmployee] updating professional details");
     await conn.execute(queries.UPDATE_EMPLOYEE_PRO, [
       data.domain,
-      data.employee_type,
+      data.employee_type || null,
       data.role,
       data.department_id || null,
       data.position || null,
-      data.supervisor_id,
+      data.supervisor_id || null,
       data.salary,
       data.resume_url,
       data.employee_id,
@@ -465,4 +465,43 @@ exports.getEmployee = async (employeeId) => {
     console.error("Error in getEmployee:", error.message);
     throw error;
   }
+};
+
+exports.getUserRoles = async () => {
+  const [rows] = await db.execute(queries.GET_USER_ROLES);
+  return rows;
+};
+
+exports.getPositions = async (role, department_id) => {
+  const dept = department_id || null;
+  const [rows] = await db.execute(queries.GET_POSITIONS_BY_ROLE_AND_DEPT, [
+    role,
+    role,
+    dept,
+    role,
+    dept,
+    role,
+    dept,
+    role,
+    dept,
+  ]);
+  return rows.map((r) => r.name);
+};
+
+exports.getSupervisorsByPosition = async (position, department_id) => {
+  const [rankRows] = await db.execute(queries.GET_POSITION_RANK, [position]);
+  const currentRank = rankRows[0]?.rank;
+  if (!currentRank) return [];
+
+  const minRank = Math.max(1, currentRank - 3);
+  const maxRank = currentRank - 1;
+  if (minRank > maxRank) return [];
+
+  const [rows] = await db.execute(queries.GET_SUPERVISORS_BY_POSITION, [
+    department_id || null,
+    minRank,
+    maxRank,
+  ]);
+
+  return rows;
 };

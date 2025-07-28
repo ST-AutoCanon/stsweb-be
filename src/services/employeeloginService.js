@@ -20,7 +20,8 @@ const fetchTodayAndYesterdayData = async () => {
       ea.punchout_device,
       ea.punchout_location,
       ea.punchmode,
-      CONCAT(e.first_name, ' ', e.last_name) AS employee_name,
+      e.first_name, 
+      e.last_name,
       p.photo_url,
       pr.role,
       CASE
