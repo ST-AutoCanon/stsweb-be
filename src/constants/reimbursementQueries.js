@@ -32,7 +32,16 @@ module.exports = {
 `,
 
   GET_EMPLOYEE_DETAILS: `
-    SELECT department_id FROM employees WHERE employee_id = ?;
+  SELECT
+    CONCAT(e.first_name, " ", e.last_name) AS name,
+    ep.position,
+    d.name AS department_name
+  FROM employees e
+  LEFT JOIN employee_professional ep
+    ON e.employee_id = ep.employee_id
+  LEFT JOIN departments d
+    ON ep.department_id = d.id
+  WHERE e.employee_id = ?
 `,
 
   CREATE_REIMBURSEMENT: `
@@ -81,9 +90,13 @@ module.exports = {
   `,
 
   GET_APPROVER_DETAILS: `
-  SELECT CONCAT(first_name, ' ', last_name) AS name, role
-  FROM employees
-  WHERE employee_id = ?
+  SELECT
+    CONCAT(e.first_name, ' ', e.last_name) AS name,
+    ep.role
+  FROM employees e
+  JOIN employee_professional ep
+    ON e.employee_id = ep.employee_id
+  WHERE e.employee_id = ?;
 `,
 
   UPDATE_REIMBURSEMENT_STATUS: `
@@ -109,13 +122,6 @@ module.exports = {
   GET_ATTACHMENTS: `SELECT file_name, file_path FROM reimbursement_attachments WHERE reimbursement_id = ?`,
 
   GET_CLAIM_DETAILS: `SELECT * FROM reimbursement WHERE id = ?`,
-
-  GET_EMPLOYEE_DETAILS: `
-    SELECT CONCAT(e.first_name, " ", e.last_name) AS name, e.position, d.name AS department_name
-    FROM employees e
-    LEFT JOIN departments d ON e.department_id = d.id
-    WHERE e.employee_id = ?
-  `,
 
   GET_ATTACHMENTS: `SELECT file_name, file_path FROM reimbursement_attachments WHERE reimbursement_id = ?`,
 

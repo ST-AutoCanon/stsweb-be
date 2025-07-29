@@ -1,6 +1,9 @@
 module.exports = {
   /* forgot-password queries*/
-  GET_EMPLOYEE_BY_EMAIL: `SELECT * FROM employees WHERE email = ?
+  GET_EMPLOYEE_BY_EMAIL: `SELECT *
+  FROM employees
+  WHERE email = ?
+    AND status = 'Active';
   `,
   SAVE_RESET_TOKEN: `
   INSERT INTO password_resets (email, token, expiry_time) 
@@ -21,9 +24,9 @@ module.exports = {
   `,
 
   /* add-department queries*/
-  ADD_DEPARTMENT: 'INSERT INTO departments (name, icon) VALUES (?, ?)',
-      GET_DEPARTMENTS: 'SELECT * FROM departments',
+  ADD_DEPARTMENT: "INSERT INTO departments (name, icon) VALUES (?, ?)",
+  GET_DEPARTMENTS: "SELECT * FROM departments",
 
-      GET_HOLIDAYS: "SELECT date, occasion, type FROM holidays WHERE YEAR(date) = YEAR(CURDATE())"
-      
+  GET_HOLIDAYS:
+    "SELECT date, occasion, type FROM holidays WHERE YEAR(date) = YEAR(CURDATE())",
 };

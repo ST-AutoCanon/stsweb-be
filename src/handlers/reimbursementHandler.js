@@ -21,13 +21,44 @@ const forbiddenExts = new Set([
   ".xltm",
 ]);
 
-// multer storage
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, path.join(__dirname, "..", "uploads"));
+    // Derive date parts
+    const isoDate = req.body.date || new Date().toISOString().slice(0, 10);
+    const [year, month] = isoDate.split("-");
+
+    // Build the destination path
+    const dest = path.join(
+      __dirname,
+      "..",
+      "..",
+      "..",
+      "reimbursement",
+      year,
+      month,
+      req.user.employeeId
+    );
+
+    // Log for debugging
+    console.log("[MULTER] Upload date:", isoDate);
+    console.log("[MULTER] Year/month:", year, month);
+    console.log("[MULTER] Employee ID:", req.user.employeeId);
+    console.log("[MULTER] Destination folder:", dest);
+
+    // Ensure folder exists
+    fs.mkdirSync(dest, { recursive: true });
+    cb(null, dest);
   },
+
   filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
+    const datePrefix = new Date().toISOString().slice(0, 10);
+    const filename = `${datePrefix}-${Date.now()}-${file.originalname}`;
+
+    // Log for debugging
+    console.log("[MULTER] Original filename:", file.originalname);
+    console.log("[MULTER] Generated filename:", filename);
+
+    cb(null, filename);
   },
 });
 
@@ -477,6 +508,8 @@ exports.getAttachments = async (req, res) => {
 
     const filePath = path.join(
       __dirname,
+      "..",
+      "..",
       "..",
       "reimbursement",
       year,
