@@ -8,6 +8,11 @@ const xlsx = require("xlsx");
 const db = require("../config");
 const queries = require("../constants/empDetailsQueries");
 
+const getWebPath = (fullPath) => {
+  const relPath = fullPath.split("EmployeeDetails").pop().replace(/\\/g, "/");
+  return path.posix.join("/EmployeeDetails", relPath);
+};
+
 /**
  * Bulk add employees from an Excel file (concurrent processing).
  * Expects the Excel file to be uploaded via req.file (using multer).
@@ -30,6 +35,19 @@ exports.bulkAddEmployees = async (req, res) => {
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
     const employeesData = xlsx.utils.sheet_to_json(worksheet);
+    // Excel epoch: day 1 = 1900‑01‑01 (but Excel mistakenly treats 1900 as leap year, so we adjust by 1)
+    function excelSerialToJSDate(serial) {
+      const utc_days = serial - 25569; // days since 1970‑01‑01
+      const ms = utc_days * 86400 * 1000;
+      return new Date(ms).toISOString().slice(0, 10); // "YYYY-MM-DD"
+    }
+
+    for (let row of employeesData) {
+      if (typeof row.dob === "number") {
+        row.dob = excelSerialToJSDate(row.dob);
+      }
+    }
+    console.log(employeesData);
 
     // Remove temp file
     fs.unlink(req.file.path, (err) => {
@@ -88,8 +106,22 @@ exports.createFullEmployee = async (req, res) => {
   try {
     // 1) flat-copy body
     const data = { ...req.body };
+    console.log(data);
+    const raw = req.body;
+    const additionalCerts = [];
 
-    console.log("req body", req.body);
+    for (let key of Object.keys(raw)) {
+      const m = key.match(
+        /^additional_certs\[(\d+)\]\[(name|year|institution)\]$/
+      );
+      if (!m) continue;
+      const idx = Number(m[1]);
+      const field = m[2];
+      additionalCerts[idx] = additionalCerts[idx] || {};
+      additionalCerts[idx][field] = raw[key];
+    }
+
+    data.additional_certs = additionalCerts.filter((c) => c);
 
     // 1) email uniqueness
     const [emailRows] = await db.execute(queries.CHECK_EMAIL, [data.email]);
@@ -125,70 +157,85 @@ exports.createFullEmployee = async (req, res) => {
     }
 
     // 2) reorganize files into a map by fieldname
-    const filesByField = (req.files || []).reduce((acc, file) => {
-      acc[file.fieldname] = acc[file.fieldname] || [];
-      acc[file.fieldname].push(file);
-      return acc;
-    }, {});
+    let filesByField = {};
+
+    if (Array.isArray(req.files)) {
+      // upload.any() case
+      for (let f of req.files) {
+        filesByField[f.fieldname] = filesByField[f.fieldname] || [];
+        filesByField[f.fieldname].push(f);
+      }
+    } else if (typeof req.files === "object") {
+      // upload.fields() case: req.files = { photo: [File], aadhaar_doc: [File], … }
+      for (let [fieldname, fileArray] of Object.entries(req.files)) {
+        filesByField[fieldname] = fileArray;
+      }
+    }
 
     // 3) derive base URL folder
     const safeEmail = data.email.replace(/[^a-zA-Z0-9.@_-]/g, "_");
-    const baseUrl = `/EmployeeDetails/${safeEmail}`;
 
     // 4) list of your 1‑to‑1 fields + their target data keys
     const simpleMap = {
       photo: "photo_url",
       aadhaar_doc: "aadhaar_doc_url",
       pan_doc: "pan_doc_url",
+      passport_doc: "passport_doc_url",
+      driving_license_doc: "driving_license_doc_url",
+      voter_id_doc: "voter_id_doc_url",
       tenth_cert: "tenth_cert_url",
       twelfth_cert: "twelfth_cert_url",
       ug_cert: "ug_cert_url",
       pg_cert: "pg_cert_url",
-      additional_cert: "additional_cert_url",
       resume: "resume_url",
+      other_docs: "other_docs_urls",
     };
 
-    // 5) process 1‑to‑1 fields
     for (let [field, dataKey] of Object.entries(simpleMap)) {
-      if (filesByField[field]) {
-        const file = filesByField[field][0];
-        const ext = path.extname(file.originalname).toLowerCase();
-        data[dataKey] = path
-          .join(baseUrl, `${field}${ext}`)
-          .replace(/\\/g, "/");
-        console.log(`[createFullEmployee] mapped ${field} → ${data[dataKey]}`);
+      const files = filesByField[field] || [];
+      if (!files.length) continue;
+
+      if (field === "other_docs") {
+        data[dataKey] = files.map((f) => getWebPath(f.path));
+      } else {
+        data[dataKey] = getWebPath(files[0].path);
       }
     }
 
-    // 6) process other_docs as an array
-    if (filesByField.other_docs) {
-      data.other_docs_urls = filesByField.other_docs.map((f) => {
-        const ext = path.extname(f.originalname).toLowerCase();
-        return path.join(baseUrl, `${f.fieldname}${ext}`).replace(/\\/g, "/");
+    // 5) additional_certs
+    if (Array.isArray(data.additional_certs)) {
+      data.additional_certs = data.additional_certs.map((cert, idx) => {
+        const key = `additional_certs[${idx}][file]`;
+        const files = filesByField[key] || [];
+        cert.file_urls = files.map((f) => getWebPath(f.path));
+        return cert;
       });
-      console.log(
-        "[createFullEmployee] mapped other_docs_urls:",
-        data.other_docs_urls
-      );
     }
 
-    // 7) process dynamic experience_<idx>_doc fields
-    Object.keys(filesByField)
-      .filter((f) => /^experience_\d+_doc$/.test(f))
-      .forEach((f) => {
-        const idx = Number(f.match(/^experience_(\d+)_doc$/)[1]);
-        const file = filesByField[f][0];
-        const ext = path.extname(file.originalname).toLowerCase();
-        // ensure array slot exists
-        data.experience = data.experience || [];
-        data.experience[idx] = data.experience[idx] || {};
-        data.experience[idx].doc_url = path
-          .join(baseUrl, `${f}${ext}`)
-          .replace(/\\/g, "/");
-        console.log(
-          `[createFullEmployee] mapped ${f} → ${data.experience[idx].doc_url}`
-        );
+    // 6) experience
+    if (Array.isArray(data.experience)) {
+      data.experience = data.experience.map((exp, idx) => {
+        const key = `experience[${idx}][doc]`;
+        const files = filesByField[key] || [];
+        exp.doc_urls = files.map((f) => getWebPath(f.path));
+        return exp;
       });
+    }
+
+    // 7) family docs
+    for (let side of [
+      "father",
+      "mother",
+      "spouse",
+      "child1",
+      "child2",
+      "child3",
+    ]) {
+      const field = `${side}_gov_doc`;
+      const urlKey = `${side}_gov_doc_url`;
+      const files = filesByField[field] || [];
+      data[urlKey] = files.map((f) => getWebPath(f.path));
+    }
 
     // 8) call service
     console.log("[createFullEmployee] calling service.addFullEmployee");
@@ -221,6 +268,23 @@ exports.updateFullEmployee = async (req, res) => {
     // 1) pull in path param + body
     const data = { employee_id: req.params.employeeId, ...req.body };
     console.log("[updateFullEmployee] raw data:", data);
+    console.log("👉 RAW req.files:", JSON.stringify(req.files, null, 2));
+
+    [
+      "dob",
+      "father_dob",
+      "mother_dob",
+      "spouse_dob",
+      "child1_dob",
+      "child2_dob",
+      "child3_dob",
+      "marriage_date",
+      "joining_date",
+    ].forEach((k) => {
+      if (data[k] && typeof data[k] === "string" && data[k].includes("T")) {
+        data[k] = data[k].split("T")[0];
+      }
+    });
 
     const [emailRows] = await db.execute(queries.CHECK_EMAIL_UPDATE, [
       data.email,
@@ -256,69 +320,85 @@ exports.updateFullEmployee = async (req, res) => {
         );
     }
 
-    // 2) bucket all incoming files by their fieldname
-    const filesByField = (req.files || []).reduce((acc, file) => {
-      acc[file.fieldname] = acc[file.fieldname] || [];
-      acc[file.fieldname].push(file);
-      return acc;
-    }, {});
+    console.log("👉 RAW req.files:", JSON.stringify(req.files, null, 2));
 
-    // 3) reconstruct the same baseUrl from email
-    const safeEmail = data.email.replace(/[^a-zA-Z0-9.@_-]/g, "_");
-    const baseUrl = `/EmployeeDetails/${safeEmail}`;
+    let filesByField = {};
+    if (Array.isArray(req.files)) {
+      // upload.any()
+      for (let f of req.files) {
+        filesByField[f.fieldname] = filesByField[f.fieldname] || [];
+        filesByField[f.fieldname].push(f);
+      }
+    } else if (typeof req.files === "object") {
+      // upload.fields()
+      for (let [field, arr] of Object.entries(req.files)) {
+        filesByField[field] = arr;
+      }
+    }
+
+    const safeEmail = data.email;
 
     // 4) your 1‑to‑1 file fields → target keys
     const simpleMap = {
       photo: "photo_url",
       aadhaar_doc: "aadhaar_doc_url",
       pan_doc: "pan_doc_url",
+      passport_doc: "passport_doc_url",
+      driving_license_doc: "driving_license_doc_url",
+      voter_id_doc: "voter_id_doc_url",
       tenth_cert: "tenth_cert_url",
       twelfth_cert: "twelfth_cert_url",
       ug_cert: "ug_cert_url",
       pg_cert: "pg_cert_url",
-      additional_cert: "additional_cert_url",
       resume: "resume_url",
+      other_docs: "other_docs_urls",
     };
 
-    // 5) assign each if present
-    for (let [field, key] of Object.entries(simpleMap)) {
-      if (filesByField[field]) {
-        const file = filesByField[field][0];
-        const ext = path.extname(file.originalname).toLowerCase();
-        data[key] = path.join(baseUrl, `${field}${ext}`).replace(/\\/g, "/");
-        console.log(`[updateFullEmployee] mapped ${field} → ${data[key]}`);
+    for (let [field, dataKey] of Object.entries(simpleMap)) {
+      const files = filesByField[field] || [];
+      if (!files.length) continue;
+
+      if (field === "other_docs") {
+        data[dataKey] = files.map((f) => getWebPath(f.path));
+      } else {
+        data[dataKey] = getWebPath(files[0].path);
       }
     }
 
-    // 6) other_docs array
-    if (filesByField.other_docs) {
-      data.other_docs_urls = filesByField.other_docs.map((f) => {
-        const ext = path.extname(f.originalname).toLowerCase();
-        return path.join(baseUrl, `${f.fieldname}${ext}`).replace(/\\/g, "/");
+    // 5) additional_certs
+    if (Array.isArray(data.additional_certs)) {
+      data.additional_certs = data.additional_certs.map((cert, idx) => {
+        const key = `additional_certs[${idx}][file]`;
+        const files = filesByField[key] || [];
+        cert.file_urls = files.map((f) => getWebPath(f.path));
+        return cert;
       });
-      console.log(
-        "[updateFullEmployee] mapped other_docs_urls:",
-        data.other_docs_urls
-      );
     }
 
-    // 7) dynamic experience_<idx>_doc fields
-    Object.keys(filesByField)
-      .filter((f) => /^experience_\d+_doc$/.test(f))
-      .forEach((f) => {
-        const idx = Number(f.match(/^experience_(\d+)_doc$/)[1]);
-        const file = filesByField[f][0];
-        const ext = path.extname(file.originalname).toLowerCase();
-        data.experience = data.experience || [];
-        data.experience[idx] = data.experience[idx] || {};
-        data.experience[idx].doc_url = path
-          .join(baseUrl, `${f}${ext}`)
-          .replace(/\\/g, "/");
-        console.log(
-          `[updateFullEmployee] mapped ${f} → ${data.experience[idx].doc_url}`
-        );
+    // 6) experience
+    if (Array.isArray(data.experience)) {
+      data.experience = data.experience.map((exp, idx) => {
+        const key = `experience[${idx}][doc]`;
+        const files = filesByField[key] || [];
+        exp.doc_urls = files.map((f) => getWebPath(f.path));
+        return exp;
       });
+    }
 
+    // 7) family docs
+    for (let side of [
+      "father",
+      "mother",
+      "spouse",
+      "child1",
+      "child2",
+      "child3",
+    ]) {
+      const field = `${side}_gov_doc`;
+      const urlKey = `${side}_gov_doc_url`;
+      const files = filesByField[field] || [];
+      data[urlKey] = files.map((f) => getWebPath(f.path));
+    }
     // 8) call your service
     console.log("[updateFullEmployee] calling service.editFullEmployee");
     await employeeService.editFullEmployee(data);

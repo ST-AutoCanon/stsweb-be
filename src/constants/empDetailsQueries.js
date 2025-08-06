@@ -20,29 +20,64 @@ module.exports = {
 
   ADD_EMPLOYEE_PERSONAL: `
     INSERT INTO employee_personal (
-      employee_id, address, father_name, mother_name,
-      gender, marital_status, spouse_name, marriage_date,
-      aadhaar_number, aadhaar_doc_url, pan_number, pan_doc_url,
-      passport_number, voter_id, photo_url
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    employee_id, address, father_name, mother_name,
+    gender, marital_status, spouse_name, spouse_dob, marriage_date,
+    aadhaar_number, aadhaar_doc_url, pan_number, pan_doc_url,
+    passport_number, passport_doc_url, driving_license_number, 
+    driving_license_doc_url, voter_id, voter_id_doc_url, 
+    uan_number, pf_number, esi_number, photo_url,
+    alternate_email, alternate_number, blood_group,
+    emergency_name, emergency_number,
+    father_dob, father_gov_doc_url,
+    mother_dob, mother_gov_doc_url,
+    child1_name, child1_dob, child1_gov_doc_url,
+    child2_name, child2_dob, child2_gov_doc_url,
+    child3_name, child3_dob, child3_gov_doc_url
+  ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `,
   UPDATE_EMPLOYEE_PERSONAL: `
     UPDATE employee_personal
-       SET address         = ?,
-           father_name     = ?,
-           mother_name     = ?,
-           gender          = ?,
-           marital_status  = ?,
-           spouse_name     = ?,
-           marriage_date   = ?,
-           aadhaar_number  = ?,
-           aadhaar_doc_url = ?,
-           pan_number      = ?,
-           pan_doc_url     = ?,
-           passport_number = ?,
-           voter_id        = ?,
-           photo_url       = ?
-     WHERE employee_id    = ?
+       SET address               = ?,
+           father_name           = ?,
+           mother_name           = ?,
+           gender                = ?,
+           marital_status        = ?,
+           spouse_name           = ?,
+           spouse_dob            = ?,
+           marriage_date         = ?,
+           aadhaar_number        = ?,
+           aadhaar_doc_url       = ?,
+           pan_number            = ?,
+           pan_doc_url           = ?,
+           passport_number       = ?,
+           passport_doc_url      = ?,
+           driving_license_number= ?,
+           driving_license_doc_url= ?,
+           voter_id              = ?,
+           voter_id_doc_url      = ?,
+           uan_number            = ?,
+           pf_number             = ?,
+           esi_number            = ?,
+           photo_url             = ?,
+           alternate_email       = ?,
+           alternate_number      = ?,
+           blood_group           = ?,
+           emergency_name        = ?,
+           emergency_number      = ?,
+           father_dob            = ?,
+           father_gov_doc_url    = ?,
+           mother_dob            = ?,
+           mother_gov_doc_url    = ?,
+           child1_name           = ?,
+           child1_dob            = ?,
+           child1_gov_doc_url    = ?,
+           child2_name           = ?,
+           child2_dob            = ?,
+           child2_gov_doc_url    = ?,
+           child3_name           = ?,
+           child3_dob            = ?,
+           child3_gov_doc_url    = ?
+     WHERE employee_id          = ?
   `,
 
   ADD_EMPLOYEE_EDU: `
@@ -51,9 +86,8 @@ module.exports = {
       tenth_institution, tenth_year, tenth_board, tenth_score, tenth_cert_url,
       twelfth_institution, twelfth_year, twelfth_board, twelfth_score, twelfth_cert_url,
       ug_institution, ug_year, ug_board, ug_score, ug_cert_url,
-      pg_institution, pg_year, pg_board, pg_score, pg_cert_url,
-      additional_cert_name, additional_cert_url
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      pg_institution, pg_year, pg_board, pg_score, pg_cert_url
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `,
   UPDATE_EMPLOYEE_EDU: `
     UPDATE employee_education
@@ -76,22 +110,21 @@ module.exports = {
       pg_year = ?, 
       pg_board = ?, 
       pg_score = ?, 
-      pg_cert_url = ?,
-      additional_cert_name = ?, 
-      additional_cert_url   = ?
+      pg_cert_url = ?
      WHERE employee_id  = ?
   `,
 
   ADD_EMPLOYEE_PRO: `
     INSERT INTO employee_professional (
-      employee_id, domain, employee_type, role, department_id,
+      employee_id, domain, employee_type, joining_date, role, department_id,
       position, supervisor_id, salary, resume_url
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   UPDATE_EMPLOYEE_PRO: `
     UPDATE employee_professional
        SET domain        = ?,
            employee_type = ?,
+           joining_date  = ?,
            role          = ?,
            department_id = ?,
            position      = ?,
@@ -147,53 +180,59 @@ SELECT
 
   -- personal
   p.address, p.father_name, p.mother_name, p.gender,
-  p.marital_status, p.spouse_name,
+  p.marital_status, p.spouse_name, DATE_FORMAT(p.spouse_dob, '%Y-%m-%d') AS spouse_dob,
   DATE_FORMAT(p.marriage_date,'%Y-%m-%d') AS marriage_date,
   p.aadhaar_number, p.aadhaar_doc_url,
   p.pan_number, p.pan_doc_url,
-  p.passport_number, p.voter_id, p.photo_url,
+  p.passport_number, p.passport_doc_url,
+  p.driving_license_number, p.driving_license_doc_url,
+  p.voter_id, p.voter_id_doc_url,
+  p.uan_number, p.pf_number, p.esi_number, p.photo_url,
+  p.alternate_email, p.alternate_number, p.blood_group,
+  p.emergency_name, p.emergency_number,
+  DATE_FORMAT(p.father_dob, '%Y-%m-%d') AS father_dob, p.father_gov_doc_url,
+  DATE_FORMAT(p.mother_dob, '%Y-%m-%d') AS mother_dob, p.mother_gov_doc_url,
+  p.child1_name, DATE_FORMAT(p.child1_dob, '%Y-%m-%d') AS child1_dob, p.child1_gov_doc_url,
+  p.child2_name, DATE_FORMAT(p.child2_dob, '%Y-%m-%d') AS child2_dob, p.child2_gov_doc_url,
+  p.child3_name, DATE_FORMAT(p.child3_dob, '%Y-%m-%d') AS child3_dob, p.child3_gov_doc_url,
 
-  -- education (enumerate all *other* columns, but omit ed.employee_id)
-  ed.tenth_institution,
-  ed.tenth_year,
-  ed.tenth_board,
-  ed.tenth_score,
-  ed.tenth_cert_url,
-  ed.twelfth_institution,
-  ed.twelfth_year,
-  ed.twelfth_board,
-  ed.twelfth_score,
-  ed.twelfth_cert_url,
-  ed.ug_institution,
-  ed.ug_year,
-  ed.ug_board,
-  ed.ug_score,
-  ed.ug_cert_url,
-  ed.pg_institution,
-  ed.pg_year,
-  ed.pg_board,
-  ed.pg_score,
-  ed.pg_cert_url,
-  ed.additional_cert_name,
-  ed.additional_cert_url,
+  -- education
+  ed.tenth_institution, ed.tenth_year, ed.tenth_board, ed.tenth_score, ed.tenth_cert_url,
+  ed.twelfth_institution, ed.twelfth_year, ed.twelfth_board, ed.twelfth_score, ed.twelfth_cert_url,
+  ed.ug_institution, ed.ug_year, ed.ug_board, ed.ug_score, ed.ug_cert_url,
+  ed.pg_institution, ed.pg_year, ed.pg_board, ed.pg_score, ed.pg_cert_url,
+
+  -- additional certs as JSON array of objects { name, institution, year, files: [...] }
+  (
+    SELECT JSON_ARRAYAGG(
+      JSON_OBJECT(
+        'name',    ac.cert_name,
+        'institution', ac.institution,
+        'year',    ac.year,
+        'files',   (
+          SELECT JSON_ARRAYAGG(cf.file_url)
+          FROM employee_cert_files cf
+          WHERE cf.employee_id = ac.employee_id
+            AND cf.cert_idx    = ac.id
+        )
+      )
+    )
+    FROM employee_additional_certs ac
+    WHERE ac.employee_id = e.employee_id
+  ) AS additional_certs,
 
   -- professional
-  pr.domain,
-  pr.employee_type,
-  pr.role,
-  pr.department_id,
-  pr.position,
-  pr.supervisor_id,
-  pr.salary,
-  pr.resume_url,
+  pr.domain, pr.employee_type,
+  DATE_FORMAT(pr.joining_date,'%Y-%m-%d') AS joining_date,
+  pr.role, pr.department_id, d.name AS department,
+  pr.position, pr.supervisor_id,
+  CONCAT(sup.first_name,' ',sup.last_name) AS supervisor_name,
+  pr.salary, pr.resume_url,
 
   -- bank
-  bd.bank_name,
-  bd.account_number,
-  bd.ifsc_code,
-  bd.branch_name,
+  bd.bank_name, bd.account_number, bd.ifsc_code, bd.branch_name,
 
-  -- experience as JSON array
+  -- experience as JSON array of objects { company, role, dates..., files: [...] }
   (
     SELECT JSON_ARRAYAGG(
       JSON_OBJECT(
@@ -201,25 +240,36 @@ SELECT
         'role',    exp.designation,
         'start_date', DATE_FORMAT(exp.start_date,'%Y-%m-%d'),
         'end_date',   DATE_FORMAT(exp.end_date,'%Y-%m-%d'),
-        'doc_url', exp.doc_url
+        'files', (
+          SELECT JSON_ARRAYAGG(ef.file_url)
+          FROM employee_exp_files ef
+          WHERE ef.employee_id = exp.employee_id
+            AND ef.exp_idx     = exp.exp_idx
+        )
       )
     )
-    FROM employee_experience exp
-    WHERE exp.employee_id = e.employee_id
+    FROM (
+      SELECT employee_id, company, designation, start_date, end_date,
+             ROW_NUMBER() OVER (PARTITION BY employee_id ORDER BY start_date) - 1 AS exp_idx
+      FROM employee_experience
+      WHERE employee_id = e.employee_id
+    ) exp
   ) AS experience,
 
-  -- other docs as JSON array
+  -- other docs
   (
     SELECT JSON_ARRAYAGG(doc.other_doc_url)
     FROM employee_documents doc
     WHERE doc.employee_id = e.employee_id
-  ) AS other_docs_urls
+  ) AS other_docs
 
 FROM employees e
-LEFT JOIN employee_personal      p  ON e.employee_id = p.employee_id
-LEFT JOIN employee_education     ed ON e.employee_id = ed.employee_id
-LEFT JOIN employee_professional  pr ON e.employee_id = pr.employee_id
-LEFT JOIN employee_bank_details  bd ON e.employee_id = bd.employee_id
+LEFT JOIN employee_personal      p   ON e.employee_id = p.employee_id
+LEFT JOIN employee_education     ed  ON e.employee_id = ed.employee_id
+LEFT JOIN employee_professional  pr  ON e.employee_id = pr.employee_id
+LEFT JOIN employee_bank_details  bd  ON e.employee_id = bd.employee_id
+LEFT JOIN departments            d   ON pr.department_id = d.id
+LEFT JOIN employees              sup ON pr.supervisor_id = sup.employee_id
 
 WHERE e.employee_id = ?
 `,
@@ -304,8 +354,6 @@ SELECT employee_id
     ed.pg_board,
     ed.pg_score,
     ed.pg_cert_url,
-    ed.additional_cert_name,
-    ed.additional_cert_url,
 
     pr.domain,
     pr.employee_type,
@@ -406,8 +454,6 @@ SELECT employee_id
     ed.pg_board,
     ed.pg_score,
     ed.pg_cert_url,
-    ed.additional_cert_name,
-    ed.additional_cert_url,
 
     pr.domain,
     pr.employee_type,
@@ -528,14 +574,40 @@ SELECT employee_id
     e.employee_id,
     CONCAT(e.first_name, ' ', e.last_name) AS name,
     p.position,
-    pos.\`rank\`
+    p.department_id,
+    pos.\`rank\`,
+    d.name AS department
   FROM employees e
   JOIN employee_professional p USING (employee_id)
   JOIN positions pos
     ON pos.name = p.position
    AND (pos.department_id = ? OR pos.department_id IS NULL)
+   LEFT JOIN departments d ON p.department_id = d.id
   WHERE pos.\`rank\` BETWEEN ? AND ?
     AND e.status = 'Active'
   ORDER BY pos.\`rank\` DESC
+`,
+
+  ADD_EMPLOYEE_ADDITIONAL_CERT: `
+  INSERT INTO employee_additional_certs
+    (employee_id, cert_name, institution, year, file_urls)
+  VALUES (?, ?, ?, ?, ?)
+`,
+
+  ADD_CERT_FILE: `
+INSERT INTO employee_cert_files (employee_id, cert_idx, file_url)
+VALUES (?, ?, ?)
+`,
+  ADD_EXP_FILE: `
+INSERT INTO employee_exp_files (employee_id, exp_idx, file_url)
+VALUES (?, ?, ?)
+`,
+  DELETE_CERT_FILES: `
+  DELETE FROM employee_cert_files
+   WHERE employee_id = ?
+`,
+  DELETE_EXP_FILES: `
+  DELETE FROM employee_exp_files
+   WHERE employee_id = ? AND exp_idx = ?
 `,
 };
