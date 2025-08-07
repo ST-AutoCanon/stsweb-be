@@ -113,17 +113,43 @@ exports.addFullEmployee = async (data) => {
       data.address || null,
       data.father_name || null,
       data.mother_name || null,
-      data.gender,
-      data.marital_status,
+      data.gender || null,
+      data.marital_status || null,
       data.spouse_name || null,
+      data.spouse_dob || null,
       data.marriage_date || null,
-      data.aadhaar_number,
-      data.aadhaar_doc_url,
-      data.pan_number,
-      data.pan_doc_url,
+      data.aadhaar_number || null,
+      data.aadhaar_doc_url || null,
+      data.pan_number || null,
+      data.pan_doc_url || null,
       data.passport_number || null,
+      data.passport_doc_url || null,
+      data.driving_license_number || null,
+      data.driving_license_doc_url || null,
       data.voter_id || null,
+      data.voter_id_doc_url || null,
+      data.uan_number || null,
+      data.pf_number || null,
+      data.esi_number || null,
       data.photo_url || null,
+      data.alternate_email || null,
+      data.alternate_number || null,
+      data.blood_group || null,
+      data.emergency_name || null,
+      data.emergency_number || null,
+      data.father_dob || null,
+      data.father_gov_doc_url || null,
+      data.mother_dob || null,
+      data.mother_gov_doc_url || null,
+      data.child1_name || null,
+      data.child1_dob || null,
+      data.child1_gov_doc_url || null,
+      data.child2_name || null,
+      data.child2_dob || null,
+      data.child2_gov_doc_url || null,
+      data.child3_name || null,
+      data.child3_dob || null,
+      data.child3_gov_doc_url || null,
     ]);
 
     // 3) Education
@@ -134,12 +160,12 @@ exports.addFullEmployee = async (data) => {
       data.tenth_year,
       data.tenth_board,
       data.tenth_score,
-      data.tenth_cert_url,
+      data.tenth_cert_url || null,
       data.twelfth_institution,
       data.twelfth_year,
       data.twelfth_board,
       data.twelfth_score,
-      data.twelfth_cert_url,
+      data.twelfth_cert_url || null,
       data.ug_institution || null,
       data.ug_year || null,
       data.ug_board || null,
@@ -150,9 +176,19 @@ exports.addFullEmployee = async (data) => {
       data.pg_board || null,
       data.pg_score || null,
       data.pg_cert_url || null,
-      data.additional_cert_name || null,
-      data.additional_cert_url || null,
     ]);
+
+    if (Array.isArray(data.additional_certs)) {
+      for (let cert of data.additional_certs) {
+        await conn.execute(queries.ADD_EMPLOYEE_ADDITIONAL_CERT, [
+          eid,
+          cert.name,
+          cert.institution,
+          cert.year,
+          (cert.file_urls || []).join(","),
+        ]);
+      }
+    }
 
     // 4) Professional
     console.log("[addFullEmployee] inserting professional details");
@@ -160,12 +196,13 @@ exports.addFullEmployee = async (data) => {
       eid,
       data.domain,
       data.employee_type || null,
+      data.joining_date || null,
       data.role,
       data.department_id || null,
       data.position || null,
       data.supervisor_id || null,
       data.salary,
-      data.resume_url,
+      data.resume_url || null,
     ]);
 
     console.log("[addFullEmployee] inserting other document records");
@@ -193,25 +230,33 @@ exports.addFullEmployee = async (data) => {
       // await conn.execute(queries.UPDATE_EMPLOYEE_EXP, [eid]);
 
       for (let exp of data.experience) {
-        // assume `exp.doc` was turned into exp.doc_url in your handler mapping
+        const docUrl =
+          Array.isArray(exp.doc_urls) && exp.doc_urls.length
+            ? exp.doc_urls[0]
+            : null;
         await conn.execute(queries.ADD_EMPLOYEE_EXP, [
           eid || null,
           exp.company || null,
           exp.role || null,
           exp.start_date || null,
           exp.end_date || null,
-          exp.doc_url || null,
+          docUrl,
         ]);
       }
     }
 
     await conn.commit();
     console.log("[addFullEmployee] committed transaction");
-
-    // send reset email
-    console.log("[addFullEmployee] sending reset email to:", data.email);
-    await sendResetEmail(data.email, data.first_name + " " + data.last_name);
-    console.log("[addFullEmployee] reset email sent");
+    try {
+      console.log("[addFullEmployee] sending reset email to:", data.email);
+      await sendResetEmail(data.email, `${data.first_name} ${data.last_name}`);
+      console.log("[addFullEmployee] reset email sent");
+    } catch (mailErr) {
+      console.warn(
+        "[addFullEmployee] warning: reset‐email failed — not rolling back:",
+        mailErr.message
+      );
+    }
 
     return { employee_id: eid };
   } catch (err) {
@@ -249,17 +294,43 @@ exports.editFullEmployee = async (data) => {
       data.address || null,
       data.father_name || null,
       data.mother_name || null,
-      data.gender,
-      data.marital_status,
+      data.gender || null,
+      data.marital_status || null,
       data.spouse_name || null,
+      data.spouse_dob || null,
       data.marriage_date || null,
-      data.aadhaar_number,
-      data.aadhaar_doc_url,
-      data.pan_number,
-      data.pan_doc_url,
+      data.aadhaar_number || null,
+      data.aadhaar_doc_url || null,
+      data.pan_number || null,
+      data.pan_doc_url || null,
       data.passport_number || null,
+      data.passport_doc_url || null,
+      data.driving_license_number || null,
+      data.driving_license_doc_url || null,
       data.voter_id || null,
+      data.voter_id_doc_url || null,
+      data.uan_number || null,
+      data.pf_number || null,
+      data.esi_number || null,
       data.photo_url || null,
+      data.alternate_email || null,
+      data.alternate_number || null,
+      data.blood_group || null,
+      data.emergency_name || null,
+      data.emergency_number || null,
+      data.father_dob || null,
+      data.father_gov_doc_url || null,
+      data.mother_dob || null,
+      data.mother_gov_doc_url || null,
+      data.child1_name || null,
+      data.child1_dob || null,
+      data.child1_gov_doc_url || null,
+      data.child2_name || null,
+      data.child2_dob || null,
+      data.child2_gov_doc_url || null,
+      data.child3_name || null,
+      data.child3_dob || null,
+      data.child3_gov_doc_url || null,
       data.employee_id,
     ]);
 
@@ -286,8 +357,6 @@ exports.editFullEmployee = async (data) => {
       data.pg_board || null,
       data.pg_score || null,
       data.pg_cert_url || null,
-      data.additional_cert_name || null,
-      data.additional_cert_url || null,
       data.employee_id,
     ]);
 
@@ -296,6 +365,7 @@ exports.editFullEmployee = async (data) => {
     await conn.execute(queries.UPDATE_EMPLOYEE_PRO, [
       data.domain,
       data.employee_type || null,
+      data.joining_date || null,
       data.role,
       data.department_id || null,
       data.position || null,
@@ -305,7 +375,6 @@ exports.editFullEmployee = async (data) => {
       data.employee_id,
     ]);
 
-    // 5) Bank
     console.log("[editFullEmployee] updating bank details");
     const fullName = `${data.first_name} ${data.last_name}`.trim();
     await conn.execute(queries.UPDATE_EMPLOYEE_BANK, [
@@ -317,40 +386,61 @@ exports.editFullEmployee = async (data) => {
       data.employee_id,
     ]);
 
-    console.log("[editFullEmployee] replacing experience entries");
-    await conn.execute(queries.UPDATE_EMPLOYEE_EXP, [data.employee_id]);
-    if (Array.isArray(data.experience)) {
-      for (let exp of data.experience) {
-        await conn.execute(queries.ADD_EMPLOYEE_EXP, [
-          data.employee_id || null,
-          exp.company || null,
-          exp.role || null,
-          exp.start_date || null,
-          exp.end_date || null,
-          exp.doc_url || null,
-        ]);
+    await conn.execute(queries.DELETE_CERT_FILES, [data.employee_id]);
+
+    if (Array.isArray(data.additional_certs)) {
+      for (let idx = 0; idx < data.additional_certs.length; idx++) {
+        const cert = data.additional_certs[idx];
+        if (Array.isArray(cert.file_urls)) {
+          for (let url of cert.file_urls) {
+            await conn.execute(queries.ADD_CERT_FILE, [
+              data.employee_id,
+              idx,
+              url,
+            ]);
+          }
+        }
       }
     }
 
-    if (Array.isArray(data.other_docs_urls)) {
-      for (let url of data.other_docs_urls) {
-        await conn.execute(queries.ADD_EMPLOYEE_OTHER_DOC, [
-          data.employee_id,
-          url,
-        ]);
+    // --- experience entries & files ---
+    // delete old experience rows & files
+    await conn.execute(queries.UPDATE_EMPLOYEE_EXP, [data.employee_id]);
+    // now re‐insert the experience rows
+    for (let ix = 0; ix < data.experience.length; ix++) {
+      const exp = data.experience[ix];
+      const docUrl =
+        Array.isArray(exp.doc_urls) && exp.doc_urls.length
+          ? exp.doc_urls[0]
+          : null;
+      const [expRes] = await conn.execute(queries.ADD_EMPLOYEE_EXP, [
+        data.employee_id,
+        exp.company,
+        exp.role,
+        exp.start_date,
+        exp.end_date,
+        docUrl,
+      ]);
+      // delete & re‐insert files for this exp record if you have a separate table
+      if (Array.isArray(exp.doc_urls)) {
+        // remove any old files for this record
+        await conn.execute(queries.DELETE_EXP_FILES, [data.employee_id, ix]);
+        for (let fileUrl of exp.doc_urls) {
+          await conn.execute(queries.ADD_EXP_FILE, [
+            data.employee_id,
+            ix,
+            fileUrl,
+          ]);
+        }
       }
     }
 
     await conn.commit();
-    console.log("[editFullEmployee] committed transaction");
-    console.log("[editFullEmployee] ⇒ success");
   } catch (err) {
-    console.error("[editFullEmployee] error, rolling back:", err);
     await conn.rollback();
     throw err;
   } finally {
     conn.release();
-    console.log("[editFullEmployee] ⇒ end");
   }
 };
 

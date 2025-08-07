@@ -78,9 +78,17 @@ info@sukalpatech.com`,
       `,
     };
 
-    // 5. Send email
-    await sgMail.send(emailContent);
-    console.log("Reset email sent successfully to:", email);
+    try {
+      await sgMail.send(emailContent);
+      console.log("Reset email sent successfully to:", email);
+    } catch (sgErr) {
+      console.error("SendGrid send failed:", sgErr.response?.body || sgErr);
+      // wrap or rethrow so your outer catch handles it
+      throw ErrorHandler.generateErrorResponse(
+        502,
+        "Failed to send reset email. Please try again later."
+      );
+    }
 
     const successResponse = ErrorHandler.generateSuccessResponse(200, {
       message: "Password reset link has been sent to your email.",
