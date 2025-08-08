@@ -65,6 +65,15 @@ const letterRoutes = require("./routes/letterRoutes");
 const letterheadRoutes = require("./routes/letterheadRoute");
 const letterheadTemplateRoutes = require("./routes/letterheadTemplateRoutes");
 
+
+
+//compensation
+const compensationRoutes = require('./routes/compensationRoutes'); 
+const assignCompensationRoutes = require('./routes/assignCompensationRoute');
+const employeeRoutesforsalarybreakup = require('./routes/compensationRoutes');
+const overtimeRoutes = require("./routes/assignCompensationRoute");
+
+
 const app = express();
 const server = http.createServer(app);
 //assets
@@ -211,6 +220,13 @@ app.get("/", (req, res) => {
 app.use("/api/templates", letterheadTemplateRoutes);
 
 //
+
+//compensation
+app.use('/api/compensations', compensationRoutes);
+app.use('/api/compensation', assignCompensationRoutes);
+app.use('/api', employeeRoutesforsalarybreakup);
+
+app.use("/api/overtime", overtimeRoutes);
 
 app.use("/api", payrollRoutes);
 const io = new Server(server, {
