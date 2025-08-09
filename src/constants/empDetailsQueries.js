@@ -326,12 +326,19 @@ SELECT employee_id
     p.marital_status,
     p.spouse_name,
     DATE_FORMAT(p.marriage_date, '%Y-%m-%d') AS marriage_date,
-    p.aadhaar_number,
-    p.aadhaar_doc_url,
-    p.pan_number,
-    p.pan_doc_url,
-    p.passport_number,
-    p.voter_id,
+    p.aadhaar_number, p.aadhaar_doc_url,
+  p.pan_number, p.pan_doc_url,
+  p.passport_number, p.passport_doc_url,
+  p.driving_license_number, p.driving_license_doc_url,
+  p.voter_id, p.voter_id_doc_url,
+  p.uan_number, p.pf_number, p.esi_number, p.photo_url,
+  p.alternate_email, p.alternate_number, p.blood_group,
+  p.emergency_name, p.emergency_number,
+  DATE_FORMAT(p.father_dob, '%Y-%m-%d') AS father_dob, p.father_gov_doc_url,
+  DATE_FORMAT(p.mother_dob, '%Y-%m-%d') AS mother_dob, p.mother_gov_doc_url,
+  p.child1_name, DATE_FORMAT(p.child1_dob, '%Y-%m-%d') AS child1_dob, p.child1_gov_doc_url,
+  p.child2_name, DATE_FORMAT(p.child2_dob, '%Y-%m-%d') AS child2_dob, p.child2_gov_doc_url,
+  p.child3_name, DATE_FORMAT(p.child3_dob, '%Y-%m-%d') AS child3_dob, p.child3_gov_doc_url,
     p.photo_url,
 
     ed.tenth_institution,
@@ -361,6 +368,7 @@ SELECT employee_id
     d.name AS department,
     pr.position,
     pr.supervisor_id,
+    CONCAT(sup.first_name,' ',sup.last_name) AS supervisor_name,
     pr.salary,
     pr.resume_url,
 
@@ -383,6 +391,8 @@ SELECT employee_id
     ON pr.department_id = d.id
   LEFT JOIN employee_bank_details bd 
     ON e.employee_id = bd.employee_id
+    LEFT JOIN employees sup 
+    ON pr.supervisor_id = sup.employee_id
 
   LEFT JOIN (
     SELECT employee_id,
@@ -426,12 +436,19 @@ SELECT employee_id
     p.marital_status,
     p.spouse_name,
     DATE_FORMAT(p.marriage_date, '%Y-%m-%d')  AS marriage_date,
-    p.aadhaar_number,
-    p.aadhaar_doc_url,
-    p.pan_number,
-    p.pan_doc_url,
-    p.passport_number,
-    p.voter_id,
+    p.aadhaar_number, p.aadhaar_doc_url,
+  p.pan_number, p.pan_doc_url,
+  p.passport_number, p.passport_doc_url,
+  p.driving_license_number, p.driving_license_doc_url,
+  p.voter_id, p.voter_id_doc_url,
+  p.uan_number, p.pf_number, p.esi_number, p.photo_url,
+  p.alternate_email, p.alternate_number, p.blood_group,
+  p.emergency_name, p.emergency_number,
+  DATE_FORMAT(p.father_dob, '%Y-%m-%d') AS father_dob, p.father_gov_doc_url,
+  DATE_FORMAT(p.mother_dob, '%Y-%m-%d') AS mother_dob, p.mother_gov_doc_url,
+  p.child1_name, DATE_FORMAT(p.child1_dob, '%Y-%m-%d') AS child1_dob, p.child1_gov_doc_url,
+  p.child2_name, DATE_FORMAT(p.child2_dob, '%Y-%m-%d') AS child2_dob, p.child2_gov_doc_url,
+  p.child3_name, DATE_FORMAT(p.child3_dob, '%Y-%m-%d') AS child3_dob, p.child3_gov_doc_url,
     p.photo_url,
 
     ed.tenth_institution,
@@ -461,6 +478,7 @@ SELECT employee_id
     d.name AS department,
     pr.position,
     pr.supervisor_id,
+    CONCAT(sup.first_name,' ',sup.last_name) AS supervisor_name,
     pr.salary,
     pr.resume_url,
 
@@ -478,6 +496,7 @@ SELECT employee_id
   LEFT JOIN employee_professional pr ON e.employee_id = pr.employee_id
   LEFT JOIN departments           d  ON pr.department_id = d.id
   LEFT JOIN employee_bank_details bd ON e.employee_id = bd.employee_id
+  LEFT JOIN employees             sup ON pr.supervisor_id = sup.employee_id
 
   LEFT JOIN (
     SELECT employee_id,
@@ -609,5 +628,32 @@ VALUES (?, ?, ?)
   DELETE_EXP_FILES: `
   DELETE FROM employee_exp_files
    WHERE employee_id = ? AND exp_idx = ?
+`,
+  UPDATE_SUPERVISOR_ASSIGNMENT_END: `
+  UPDATE supervisor_assignments
+     SET end_date = ?
+   WHERE employee_id = ?
+     AND end_date IS NULL
+`,
+
+  // 2) insert the new assignment
+  ADD_SUPERVISOR_ASSIGNMENT: `
+  INSERT INTO supervisor_assignments
+    (employee_id, supervisor_id, start_date)
+  VALUES (?, ?, ?)
+`,
+
+  // 3) fetch full history for an employee
+  GET_SUPERVISOR_HISTORY: `
+  SELECT
+    sa.id,
+    sa.supervisor_id,
+    CONCAT(e.first_name, ' ', e.last_name) AS supervisor_name,
+    sa.start_date,
+    sa.end_date
+  FROM supervisor_assignments sa
+  JOIN employees e ON e.employee_id = sa.supervisor_id
+ WHERE sa.employee_id = ?
+ ORDER BY sa.start_date DESC
 `,
 };

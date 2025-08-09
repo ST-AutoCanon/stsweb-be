@@ -35,7 +35,7 @@ exports.bulkAddEmployees = async (req, res) => {
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
     const employeesData = xlsx.utils.sheet_to_json(worksheet);
-    // Excel epoch: day 1 = 1900‑01‑01 (but Excel mistakenly treats 1900 as leap year, so we adjust by 1)
+    // Excel epoch: day 1 = 1900‑01‑01 (but Excel mistakenly treats 1900 as leap year, so we adjust by 1)
     function excelSerialToJSDate(serial) {
       const utc_days = serial - 25569; // days since 1970‑01‑01
       const ms = utc_days * 86400 * 1000;
@@ -604,5 +604,44 @@ exports.listSupervisorsByPosition = async (req, res) => {
     return res
       .status(500)
       .json({ status: "error", message: "Failed to fetch supervisors" });
+  }
+};
+
+exports.assignSupervisor = async (req, res, next) => {
+  try {
+    const { employeeId, supervisorId, startDate } = req.body;
+    if (!employeeId || !supervisorId || !startDate) {
+      return res
+        .status(400)
+        .json(
+          ErrorHandler.generateErrorResponse(
+            400,
+            "employeeId, supervisorId and startDate are required."
+          )
+        );
+    }
+    const result = await employeeService.assignSupervisor(
+      employeeId,
+      supervisorId,
+      startDate
+    );
+    return res.json(
+      ErrorHandler.generateSuccessResponse(200, "Supervisor assigned.", result)
+    );
+  } catch (err) {
+    next(err);
+  }
+};
+
+// GET /api/supervisor/history/:employeeId
+exports.getSupervisorHistory = async (req, res, next) => {
+  try {
+    const employeeId = req.params.employeeId;
+    const history = await employeeService.getSupervisorHistory(employeeId);
+    return res.json(
+      ErrorHandler.generateSuccessResponse(200, "History fetched.", { history })
+    );
+  } catch (err) {
+    next(err);
   }
 };
