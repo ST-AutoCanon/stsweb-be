@@ -375,6 +375,7 @@ exports.editFullEmployee = async (data) => {
       data.employee_id,
     ]);
 
+    // 5) Bank
     console.log("[editFullEmployee] updating bank details");
     const fullName = `${data.first_name} ${data.last_name}`.trim();
     await conn.execute(queries.UPDATE_EMPLOYEE_BANK, [
@@ -386,8 +387,8 @@ exports.editFullEmployee = async (data) => {
       data.employee_id,
     ]);
 
+    // 6) Additional certs
     await conn.execute(queries.DELETE_CERT_FILES, [data.employee_id]);
-
     if (Array.isArray(data.additional_certs)) {
       for (let idx = 0; idx < data.additional_certs.length; idx++) {
         const cert = data.additional_certs[idx];
@@ -403,12 +404,16 @@ exports.editFullEmployee = async (data) => {
       }
     }
 
-    // --- experience entries & files ---
-    // delete old experience rows & files
+    // 7) Experience entries & files
+    // Ensure `experience` is always an array
+    const expList = Array.isArray(data.experience) ? data.experience : [];
+
+    // Delete old experience rows
     await conn.execute(queries.UPDATE_EMPLOYEE_EXP, [data.employee_id]);
-    // now re‐insert the experience rows
-    for (let ix = 0; ix < data.experience.length; ix++) {
-      const exp = data.experience[ix];
+
+    // Re‐insert the experience rows
+    for (let ix = 0; ix < expList.length; ix++) {
+      const exp = expList[ix];
       const docUrl =
         Array.isArray(exp.doc_urls) && exp.doc_urls.length
           ? exp.doc_urls[0]
@@ -421,9 +426,9 @@ exports.editFullEmployee = async (data) => {
         exp.end_date,
         docUrl,
       ]);
-      // delete & re‐insert files for this exp record if you have a separate table
+
       if (Array.isArray(exp.doc_urls)) {
-        // remove any old files for this record
+        // Remove old files
         await conn.execute(queries.DELETE_EXP_FILES, [data.employee_id, ix]);
         for (let fileUrl of exp.doc_urls) {
           await conn.execute(queries.ADD_EXP_FILE, [
@@ -593,5 +598,35 @@ exports.getSupervisorsByPosition = async (position, department_id) => {
     maxRank,
   ]);
 
+  return rows;
+};
+
+exports.assignSupervisor = async (employeeId, supervisorId, startDate) => {
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    // 1) close existing
+    await conn.execute(queries.UPDATE_SUPERVISOR_ASSIGNMENT_END, [
+      startDate,
+      employeeId,
+    ]);
+    // 2) add new
+    const [addRes] = await conn.execute(queries.ADD_SUPERVISOR_ASSIGNMENT, [
+      employeeId,
+      supervisorId,
+      startDate,
+    ]);
+    await conn.commit();
+    return { assignment_id: addRes.insertId };
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
+  }
+};
+
+exports.getSupervisorHistory = async (employeeId) => {
+  const [rows] = await db.execute(queries.GET_SUPERVISOR_HISTORY, [employeeId]);
   return rows;
 };

@@ -15,6 +15,8 @@ const idleTimeout = require("./middleware/idleTimeout");
 const holidayRoutes = require("./routes/holidayRoutes");
 const loginRoutes = require("./routes/login");
 const leaveRoutes = require("./routes/leave");
+const leavePolicy = require("./routes/leavePolicyRoutes");
+
 const employeeRoutes = require("./routes/employee");
 const employeeQueries = require("./routes/employeeQueries");
 const projects = require("./routes/project");
@@ -65,14 +67,11 @@ const letterRoutes = require("./routes/letterRoutes");
 const letterheadRoutes = require("./routes/letterheadRoute");
 const letterheadTemplateRoutes = require("./routes/letterheadTemplateRoutes");
 
-
-
 //compensation
-const compensationRoutes = require('./routes/compensationRoutes'); 
-const assignCompensationRoutes = require('./routes/assignCompensationRoute');
-const employeeRoutesforsalarybreakup = require('./routes/compensationRoutes');
+const compensationRoutes = require("./routes/compensationRoutes");
+const assignCompensationRoutes = require("./routes/assignCompensationRoute");
+const employeeRoutesforsalarybreakup = require("./routes/compensationRoutes");
 const overtimeRoutes = require("./routes/assignCompensationRoute");
-
 
 const app = express();
 const server = http.createServer(app);
@@ -129,6 +128,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 
 app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
 app.use("/assets", express.static(path.join(__dirname, "assets")));
+app.use("/api/leave-policies", leavePolicy);
 
 app.use(apiKeyMiddleware);
 
@@ -222,9 +222,9 @@ app.use("/api/templates", letterheadTemplateRoutes);
 //
 
 //compensation
-app.use('/api/compensations', compensationRoutes);
-app.use('/api/compensation', assignCompensationRoutes);
-app.use('/api', employeeRoutesforsalarybreakup);
+app.use("/api/compensations", compensationRoutes);
+app.use("/api/compensation", assignCompensationRoutes);
+app.use("/api", employeeRoutesforsalarybreakup);
 
 app.use("/api/overtime", overtimeRoutes);
 

@@ -50,4 +50,11 @@ router.put(
 
 router.get("/docs/*", employeeHandler.serveEmployeeFile);
 
+router.post("/supervisor/assign", employeeHandler.assignSupervisor);
+
+router.get(
+  "/supervisor/history/:employeeId",
+  employeeHandler.getSupervisorHistory
+);
+
 module.exports = router;
