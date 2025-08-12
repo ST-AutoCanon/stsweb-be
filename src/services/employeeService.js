@@ -4,6 +4,115 @@ const sgMail = require("@sendgrid/mail");
 const { v4: uuidv4 } = require("uuid");
 const crypto = require("crypto");
 const bcrypt = require("bcrypt");
+const path = require("path");
+
+const BASE_UPLOADS = path.join(__dirname, "../../../EmployeeDetails");
+
+// ---------- helpers (add/ensure these are available in this module) ----------
+function tryParseJSON(val) {
+  if (val == null) return val;
+  if (typeof val !== "string") return val;
+  try {
+    return JSON.parse(val);
+  } catch {
+    return val;
+  }
+}
+
+function normalizeToStringArray(input) {
+  if (input == null) return [];
+
+  if (Array.isArray(input)) {
+    const out = [];
+    for (const item of input) {
+      const nested = normalizeToStringArray(item);
+      for (const v of nested) if (v) out.push(v);
+    }
+    return Array.from(new Set(out));
+  }
+
+  if (typeof input === "object") {
+    try {
+      return normalizeToStringArray(JSON.stringify(input));
+    } catch {
+      return [];
+    }
+  }
+
+  const s = String(input).trim();
+  if (!s) return [];
+
+  if (s.startsWith("[") && s.endsWith("]")) {
+    try {
+      const parsed = JSON.parse(s);
+      return normalizeToStringArray(parsed);
+    } catch {}
+  }
+
+  if (
+    (s.startsWith('"') && s.endsWith('"')) ||
+    (s.startsWith("'") && s.endsWith("'"))
+  ) {
+    try {
+      const parsed = JSON.parse(s);
+      return normalizeToStringArray(parsed);
+    } catch {}
+  }
+
+  if (s.includes(",")) {
+    const parts = s
+      .split(",")
+      .map((p) => p.trim())
+      .filter(Boolean);
+    return normalizeToStringArray(parts);
+  }
+
+  return [s];
+}
+
+function arrayToJsonOrNull(val) {
+  const arr = normalizeToStringArray(val);
+  if (!arr || !arr.length) return null;
+  return JSON.stringify(arr);
+}
+
+function ensureArrayField(raw) {
+  return normalizeToStringArray(raw);
+}
+
+// convert a web URL (/EmployeeDetails/...) -> full disk path
+function webUrlToFullPath(webUrl) {
+  if (!webUrl) return null;
+  // remove query params if any
+  const clean = String(webUrl).split("?")[0];
+  // trim leading slashes then remove the EmployeeDetails/ prefix
+  const rel = clean.replace(/^\/?EmployeeDetails[\\/]/, "");
+  return path.join(BASE_UPLOADS, rel);
+}
+
+// delete files on disk given a mixed value (string/array/JSON-string)
+function deleteFilesByUrlsMixed(val) {
+  const arr = normalizeToStringArray(val);
+  for (const url of arr) {
+    try {
+      const full = webUrlToFullPath(url);
+      if (full && fs.existsSync(full)) {
+        fs.unlinkSync(full);
+        console.log("[file-delete] removed:", full);
+      } else {
+        // file not present — still okay
+        // console.log("[file-delete] not found:", full);
+      }
+    } catch (e) {
+      console.warn(
+        "[file-delete] failed for",
+        url,
+        e && e.message ? e.message : e
+      );
+    }
+  }
+}
+// ---------- end helpers ----------
 
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
@@ -106,6 +215,25 @@ exports.addFullEmployee = async (data) => {
     );
     console.log("[addFullEmployee] new employee_id:", eid);
 
+    // ensure personal file fields are JSON strings (or null) — use flattening helper
+    const personalFileKeys = [
+      "spouse_gov_doc_url",
+      "aadhaar_doc_url",
+      "pan_doc_url",
+      "passport_doc_url",
+      "driving_license_doc_url",
+      "voter_id_doc_url",
+      "father_gov_doc_url",
+      "mother_gov_doc_url",
+      "child1_gov_doc_url",
+      "child2_gov_doc_url",
+      "child3_gov_doc_url",
+      "photo_url",
+    ];
+    personalFileKeys.forEach((k) => {
+      if (k in data) data[k] = arrayToJsonOrNull(data[k]);
+    });
+
     // 2) Personal
     console.log("[addFullEmployee] inserting personal details");
     await conn.execute(queries.ADD_EMPLOYEE_PERSONAL, [
@@ -117,6 +245,7 @@ exports.addFullEmployee = async (data) => {
       data.marital_status || null,
       data.spouse_name || null,
       data.spouse_dob || null,
+      data.spouse_gov_doc_url || null,
       data.marriage_date || null,
       data.aadhaar_number || null,
       data.aadhaar_doc_url || null,
@@ -156,36 +285,41 @@ exports.addFullEmployee = async (data) => {
     console.log("[addFullEmployee] inserting education details");
     await conn.execute(queries.ADD_EMPLOYEE_EDU, [
       eid,
-      data.tenth_institution,
-      data.tenth_year,
-      data.tenth_board,
-      data.tenth_score,
-      data.tenth_cert_url || null,
-      data.twelfth_institution,
-      data.twelfth_year,
-      data.twelfth_board,
-      data.twelfth_score,
-      data.twelfth_cert_url || null,
+      data.tenth_institution || null,
+      data.tenth_year || null,
+      data.tenth_board || null,
+      data.tenth_score || null,
+      arrayToJsonOrNull(
+        data.tenth_cert_url || data.tenth_cert || data.tenth_cert_urls
+      ),
+      data.twelfth_institution || null,
+      data.twelfth_year || null,
+      data.twelfth_board || null,
+      data.twelfth_score || null,
+      arrayToJsonOrNull(
+        data.twelfth_cert_url || data.twelfth_cert || data.twelfth_cert_urls
+      ),
       data.ug_institution || null,
       data.ug_year || null,
       data.ug_board || null,
       data.ug_score || null,
-      data.ug_cert_url || null,
+      arrayToJsonOrNull(data.ug_cert_url || data.ug_cert || data.ug_cert_urls),
       data.pg_institution || null,
       data.pg_year || null,
       data.pg_board || null,
       data.pg_score || null,
-      data.pg_cert_url || null,
+      arrayToJsonOrNull(data.pg_cert_url || data.pg_cert || data.pg_cert_urls),
     ]);
 
     if (Array.isArray(data.additional_certs)) {
       for (let cert of data.additional_certs) {
+        const fileUrls = cert.file_urls || cert.files || cert.file || null;
         await conn.execute(queries.ADD_EMPLOYEE_ADDITIONAL_CERT, [
           eid,
-          cert.name,
-          cert.institution,
-          cert.year,
-          (cert.file_urls || []).join(","),
+          cert.name || null,
+          cert.institution || null,
+          cert.year || null,
+          arrayToJsonOrNull(fileUrls),
         ]);
       }
     }
@@ -202,12 +336,15 @@ exports.addFullEmployee = async (data) => {
       data.position || null,
       data.supervisor_id || null,
       data.salary,
-      data.resume_url || null,
+      arrayToJsonOrNull(data.resume_url || data.resume || data.resume_urls),
     ]);
 
     console.log("[addFullEmployee] inserting other document records");
-    if (Array.isArray(data.other_docs_urls)) {
-      for (let url of data.other_docs_urls) {
+    // insert other docs per-row if present
+    const otherDocsRaw = data.other_docs_urls || data.other_docs || null;
+    const otherDocs = ensureArrayField(otherDocsRaw);
+    if (otherDocs.length) {
+      for (const url of otherDocs) {
         await conn.execute(queries.ADD_EMPLOYEE_OTHER_DOC, [eid, url]);
       }
     }
@@ -226,21 +363,15 @@ exports.addFullEmployee = async (data) => {
 
     console.log("[addFullEmployee] inserting experience entries");
     if (Array.isArray(data.experience)) {
-      // first, optionally clean up any old rows if editing
-      // await conn.execute(queries.UPDATE_EMPLOYEE_EXP, [eid]);
-
       for (let exp of data.experience) {
-        const docUrl =
-          Array.isArray(exp.doc_urls) && exp.doc_urls.length
-            ? exp.doc_urls[0]
-            : null;
+        const docUrls = exp.doc_urls || exp.files || exp.doc || null;
         await conn.execute(queries.ADD_EMPLOYEE_EXP, [
-          eid || null,
+          eid,
           exp.company || null,
           exp.role || null,
           exp.start_date || null,
           exp.end_date || null,
-          docUrl,
+          arrayToJsonOrNull(docUrls),
         ]);
       }
     }
@@ -269,7 +400,6 @@ exports.addFullEmployee = async (data) => {
   }
 };
 
-// services/employeeService.js
 exports.editFullEmployee = async (data) => {
   console.log("[editFullEmployee] ⇒ start", { employee_id: data.employee_id });
   const conn = await db.getConnection();
@@ -277,172 +407,333 @@ exports.editFullEmployee = async (data) => {
     await conn.beginTransaction();
     console.log("[editFullEmployee] began transaction");
 
-    // 1) Core update (all employees columns except password)
-    console.log("[editFullEmployee] updating core employee fields");
-    await conn.execute(queries.UPDATE_EMPLOYEE_CORE, [
-      data.first_name,
-      data.last_name,
-      data.email,
-      data.phone_number,
-      data.dob,
-      data.employee_id,
-    ]);
+    const eid = data.employee_id; // <- use this throughout
 
-    // 2) Personal
-    console.log("[editFullEmployee] updating personal details");
-    await conn.execute(queries.UPDATE_EMPLOYEE_PERSONAL, [
-      data.address || null,
-      data.father_name || null,
-      data.mother_name || null,
-      data.gender || null,
-      data.marital_status || null,
-      data.spouse_name || null,
-      data.spouse_dob || null,
-      data.marriage_date || null,
-      data.aadhaar_number || null,
-      data.aadhaar_doc_url || null,
-      data.pan_number || null,
-      data.pan_doc_url || null,
-      data.passport_number || null,
-      data.passport_doc_url || null,
-      data.driving_license_number || null,
-      data.driving_license_doc_url || null,
-      data.voter_id || null,
-      data.voter_id_doc_url || null,
-      data.uan_number || null,
-      data.pf_number || null,
-      data.esi_number || null,
-      data.photo_url || null,
-      data.alternate_email || null,
-      data.alternate_number || null,
-      data.blood_group || null,
-      data.emergency_name || null,
-      data.emergency_number || null,
-      data.father_dob || null,
-      data.father_gov_doc_url || null,
-      data.mother_dob || null,
-      data.mother_gov_doc_url || null,
-      data.child1_name || null,
-      data.child1_dob || null,
-      data.child1_gov_doc_url || null,
-      data.child2_name || null,
-      data.child2_dob || null,
-      data.child2_gov_doc_url || null,
-      data.child3_name || null,
-      data.child3_dob || null,
-      data.child3_gov_doc_url || null,
-      data.employee_id,
-    ]);
+    // Load existing DB row so we can fallback when client didn't send a value
+    const [existingRows] = await conn.execute(queries.GET_FULL_EMPLOYEE, [eid]);
+    const existing = existingRows && existingRows[0] ? existingRows[0] : {};
+    console.log("[editFullEmployee] loaded existing row for fallback");
 
-    // 3) Education
-    console.log("[editFullEmployee] updating education details");
-    await conn.execute(queries.UPDATE_EMPLOYEE_EDU, [
-      data.tenth_institution,
-      data.tenth_year,
-      data.tenth_board,
-      data.tenth_score,
-      data.tenth_cert_url,
-      data.twelfth_institution,
-      data.twelfth_year,
-      data.twelfth_board,
-      data.twelfth_score,
-      data.twelfth_cert_url,
-      data.ug_institution || null,
-      data.ug_year || null,
-      data.ug_board || null,
-      data.ug_score || null,
-      data.ug_cert_url || null,
-      data.pg_institution || null,
-      data.pg_year || null,
-      data.pg_board || null,
-      data.pg_score || null,
-      data.pg_cert_url || null,
-      data.employee_id,
-    ]);
+    // Helper to check whether client explicitly sent a key
+    const hasKey = (k) => Object.prototype.hasOwnProperty.call(data, k);
 
-    // 4) Professional
-    console.log("[editFullEmployee] updating professional details");
-    await conn.execute(queries.UPDATE_EMPLOYEE_PRO, [
-      data.domain,
-      data.employee_type || null,
-      data.joining_date || null,
-      data.role,
-      data.department_id || null,
-      data.position || null,
-      data.supervisor_id || null,
-      data.salary,
-      data.resume_url,
-      data.employee_id,
-    ]);
+    // Normalize a few incoming JSON-ish fields if the client provided them
+    if (hasKey("resume_url") && typeof data.resume_url === "string") {
+      const parsed = tryParseJSON(data.resume_url);
+      if (Array.isArray(parsed)) data.resume_url = parsed;
+    }
+    if (
+      hasKey("additional_certs") &&
+      typeof data.additional_certs === "string"
+    ) {
+      const parsed = tryParseJSON(data.additional_certs);
+      if (Array.isArray(parsed)) data.additional_certs = parsed;
+    }
+    if (hasKey("experience") && typeof data.experience === "string") {
+      const parsed = tryParseJSON(data.experience);
+      if (Array.isArray(parsed)) data.experience = parsed;
+    }
 
-    // 5) Bank
-    console.log("[editFullEmployee] updating bank details");
-    const fullName = `${data.first_name} ${data.last_name}`.trim();
-    await conn.execute(queries.UPDATE_EMPLOYEE_BANK, [
-      fullName,
-      data.bank_name,
-      data.account_number,
-      data.ifsc_code,
-      data.branch_name,
-      data.employee_id,
-    ]);
+    // small pick helper: prefer client's explicit key, else existing DB value
+    const pick = (key) => (hasKey(key) ? data[key] : existing[key]);
 
-    // 6) Additional certs
-    await conn.execute(queries.DELETE_CERT_FILES, [data.employee_id]);
-    if (Array.isArray(data.additional_certs)) {
-      for (let idx = 0; idx < data.additional_certs.length; idx++) {
-        const cert = data.additional_certs[idx];
-        if (Array.isArray(cert.file_urls)) {
-          for (let url of cert.file_urls) {
-            await conn.execute(queries.ADD_CERT_FILE, [
-              data.employee_id,
-              idx,
-              url,
-            ]);
-          }
-        }
+    // === BEFORE WRITES: delete old files only for fields client supplied ===
+
+    // personal file-array fields (photo, gov docs, etc.)
+    const personalFileFields = [
+      "spouse_gov_doc_url",
+      "aadhaar_doc_url",
+      "pan_doc_url",
+      "passport_doc_url",
+      "driving_license_doc_url",
+      "voter_id_doc_url",
+      "photo_url",
+      "father_gov_doc_url",
+      "mother_gov_doc_url",
+      "child1_gov_doc_url",
+      "child2_gov_doc_url",
+      "child3_gov_doc_url",
+    ];
+
+    for (const field of personalFileFields) {
+      if (hasKey(field)) {
+        // client provided a new value (could be [] to clear): remove old files
+        deleteFilesByUrlsMixed(existing[field]);
       }
     }
 
-    // 7) Experience entries & files
-    // Ensure `experience` is always an array
-    const expList = Array.isArray(data.experience) ? data.experience : [];
+    // resume: if the client provided any resume field (resume_url / resume / resume_urls) -> delete old resume files
+    if (hasKey("resume_url") || hasKey("resume") || hasKey("resume_urls")) {
+      deleteFilesByUrlsMixed(existing.resume_url);
+    }
 
-    // Delete old experience rows
-    await conn.execute(queries.UPDATE_EMPLOYEE_EXP, [data.employee_id]);
+    // other_docs: if client provided other_docs or other_docs_urls -> delete old other docs
+    if (hasKey("other_docs") || hasKey("other_docs_urls")) {
+      deleteFilesByUrlsMixed(existing.other_docs);
+    }
 
-    // Re‐insert the experience rows
-    for (let ix = 0; ix < expList.length; ix++) {
-      const exp = expList[ix];
-      const docUrl =
-        Array.isArray(exp.doc_urls) && exp.doc_urls.length
-          ? exp.doc_urls[0]
-          : null;
-      const [expRes] = await conn.execute(queries.ADD_EMPLOYEE_EXP, [
-        data.employee_id,
-        exp.company,
-        exp.role,
-        exp.start_date,
-        exp.end_date,
-        docUrl,
-      ]);
+    // additional_certs: if client sent additional_certs we will delete the rows,
+    // so delete files referenced by existing.additional_certs before deleting rows
+    if (hasKey("additional_certs")) {
+      try {
+        const oldAdditional = tryParseJSON(existing.additional_certs) || [];
+        if (Array.isArray(oldAdditional) && oldAdditional.length) {
+          for (const cert of oldAdditional) {
+            deleteFilesByUrlsMixed(
+              cert && (cert.file_urls || cert.files || cert.file)
+            );
+          }
+        }
+      } catch (e) {
+        console.warn(
+          "[editFullEmployee] could not parse existing.additional_certs",
+          e
+        );
+      }
+    }
 
-      if (Array.isArray(exp.doc_urls)) {
-        // Remove old files
-        await conn.execute(queries.DELETE_EXP_FILES, [data.employee_id, ix]);
-        for (let fileUrl of exp.doc_urls) {
-          await conn.execute(queries.ADD_EXP_FILE, [
-            data.employee_id,
-            ix,
-            fileUrl,
+    // experience: same approach — delete existing experience doc files only if client provided experience
+    if (hasKey("experience")) {
+      try {
+        const oldExp = tryParseJSON(existing.experience) || [];
+        if (Array.isArray(oldExp) && oldExp.length) {
+          for (const ex of oldExp) {
+            deleteFilesByUrlsMixed(ex && (ex.doc_urls || ex.files || ex.doc));
+          }
+        }
+      } catch (e) {
+        console.warn(
+          "[editFullEmployee] could not parse existing.experience",
+          e
+        );
+      }
+    }
+
+    // At this point we've removed old files for fields client is replacing.
+    // Proceed with updates (core/personal/edu/pro/bank/rows) — same as your previous logic.
+
+    // 1) Core update
+    await conn.execute(queries.UPDATE_EMPLOYEE_CORE, [
+      pick("first_name"),
+      pick("last_name"),
+      pick("email"),
+      pick("phone_number"),
+      pick("dob"),
+      eid,
+    ]);
+
+    // 2) Personal - list/order must match your SQL
+    const personalKeys = [
+      "address",
+      "father_name",
+      "mother_name",
+      "gender",
+      "marital_status",
+      "spouse_name",
+      "spouse_dob",
+      "spouse_gov_doc_url",
+      "marriage_date",
+      "aadhaar_number",
+      "aadhaar_doc_url",
+      "pan_number",
+      "pan_doc_url",
+      "passport_number",
+      "passport_doc_url",
+      "driving_license_number",
+      "driving_license_doc_url",
+      "voter_id",
+      "voter_id_doc_url",
+      "uan_number",
+      "pf_number",
+      "esi_number",
+      "photo_url",
+      "alternate_email",
+      "alternate_number",
+      "blood_group",
+      "emergency_name",
+      "emergency_number",
+      "father_dob",
+      "father_gov_doc_url",
+      "mother_dob",
+      "mother_gov_doc_url",
+      "child1_name",
+      "child1_dob",
+      "child1_gov_doc_url",
+      "child2_name",
+      "child2_dob",
+      "child2_gov_doc_url",
+      "child3_name",
+      "child3_dob",
+      "child3_gov_doc_url",
+    ];
+
+    const personalFileSet = new Set(personalFileFields);
+
+    const personalParams = personalKeys.map((k) => {
+      const val = pick(k);
+      if (personalFileSet.has(k)) {
+        return arrayToJsonOrNull(val);
+      }
+      return val !== undefined ? val : null;
+    });
+    personalParams.push(eid);
+    await conn.execute(queries.UPDATE_EMPLOYEE_PERSONAL, personalParams);
+
+    // 3) Education
+    const resolveCertValue = (dbKey, altKeys = []) => {
+      for (const k of [dbKey, ...altKeys]) {
+        if (hasKey(k)) return data[k];
+      }
+      return existing[dbKey];
+    };
+
+    await conn.execute(queries.UPDATE_EMPLOYEE_EDU, [
+      pick("tenth_institution") || null,
+      pick("tenth_year") || null,
+      pick("tenth_board") || null,
+      pick("tenth_score") || null,
+      arrayToJsonOrNull(
+        resolveCertValue("tenth_cert_url", ["tenth_cert", "tenth_cert_urls"])
+      ),
+      pick("twelfth_institution") || null,
+      pick("twelfth_year") || null,
+      pick("twelfth_board") || null,
+      pick("twelfth_score") || null,
+      arrayToJsonOrNull(
+        resolveCertValue("twelfth_cert_url", [
+          "twelfth_cert",
+          "twelfth_cert_urls",
+        ])
+      ),
+      pick("ug_institution") || null,
+      pick("ug_year") || null,
+      pick("ug_board") || null,
+      pick("ug_score") || null,
+      arrayToJsonOrNull(
+        resolveCertValue("ug_cert_url", ["ug_cert", "ug_cert_urls"])
+      ),
+      pick("pg_institution") || null,
+      pick("pg_year") || null,
+      pick("pg_board") || null,
+      pick("pg_score") || null,
+      arrayToJsonOrNull(
+        resolveCertValue("pg_cert_url", ["pg_cert", "pg_cert_urls"])
+      ),
+      eid,
+    ]);
+
+    // 3b) Additional certs
+    if (hasKey("additional_certs")) {
+      await conn.execute(queries.DELETE_EMPLOYEE_ADDITIONAL_CERTS, [eid]);
+      if (
+        Array.isArray(data.additional_certs) &&
+        data.additional_certs.length
+      ) {
+        for (let cert of data.additional_certs) {
+          const fileUrls = cert.file_urls || cert.files || cert.file || null;
+          await conn.execute(queries.ADD_EMPLOYEE_ADDITIONAL_CERT, [
+            eid,
+            cert.name || null,
+            cert.institution || null,
+            cert.year || null,
+            arrayToJsonOrNull(fileUrls),
           ]);
         }
       }
+    } else {
+      console.log("[editFullEmployee] skipping additional_certs (no key)");
+    }
+
+    // 4) Professional (resume)
+    const chosenResume = (() => {
+      if (hasKey("resume_url")) return data.resume_url;
+      if (hasKey("resume")) return data.resume;
+      if (hasKey("resume_urls")) return data.resume_urls;
+      return existing.resume_url;
+    })();
+
+    await conn.execute(queries.UPDATE_EMPLOYEE_PRO, [
+      pick("domain"),
+      pick("employee_type") || null,
+      pick("joining_date") || null,
+      pick("role"),
+      pick("department_id") || null,
+      pick("position") || null,
+      pick("supervisor_id") || null,
+      pick("salary"),
+      arrayToJsonOrNull(chosenResume),
+      eid,
+    ]);
+
+    // 4b) Other docs
+    if (hasKey("other_docs") || hasKey("other_docs_urls")) {
+      if (queries.DELETE_EMPLOYEE_OTHER_DOCS) {
+        await conn.execute(queries.DELETE_EMPLOYEE_OTHER_DOCS, [eid]);
+      }
+      const otherDocsRaw = hasKey("other_docs_urls")
+        ? data.other_docs_urls
+        : hasKey("other_docs")
+        ? data.other_docs
+        : null;
+      const otherDocs = ensureArrayField(otherDocsRaw);
+      if (otherDocs.length) {
+        for (const url of otherDocs) {
+          await conn.execute(queries.ADD_EMPLOYEE_OTHER_DOC, [eid, url]);
+        }
+      }
+    } else {
+      console.log("[editFullEmployee] skipping other_docs (no key)");
+    }
+
+    // 5) Bank
+    const fullName = `${pick("first_name") || existing.first_name || ""} ${
+      pick("last_name") || existing.last_name || ""
+    }`.trim();
+    await conn.execute(queries.UPDATE_EMPLOYEE_BANK, [
+      fullName,
+      pick("bank_name"),
+      pick("account_number"),
+      pick("ifsc_code"),
+      pick("branch_name"),
+      eid,
+    ]);
+
+    // 6) Experience (delete+reinsert only if provided)
+    if (hasKey("experience")) {
+      if (!queries.DELETE_EMPLOYEE_EXP)
+        throw new Error("Missing SQL query: DELETE_EMPLOYEE_EXP");
+      await conn.execute(queries.DELETE_EMPLOYEE_EXP, [eid]);
+
+      const expList = Array.isArray(data.experience) ? data.experience : [];
+      for (const exp of expList) {
+        const docUrls = normalizeToStringArray(
+          exp.doc_urls || exp.files || exp.doc || null
+        );
+        const hasAny =
+          (exp.company && String(exp.company).trim()) ||
+          (exp.role && String(exp.role).trim()) ||
+          (exp.start_date && String(exp.start_date).trim()) ||
+          (exp.end_date && String(exp.end_date).trim()) ||
+          (Array.isArray(docUrls) && docUrls.length);
+        if (!hasAny) continue;
+        await conn.execute(queries.ADD_EMPLOYEE_EXP, [
+          eid,
+          exp.company || null,
+          exp.role || null,
+          exp.start_date || null,
+          exp.end_date || null,
+          arrayToJsonOrNull(docUrls),
+        ]);
+      }
+    } else {
+      console.log("[editFullEmployee] skipping experience (no key)");
     }
 
     await conn.commit();
+    console.log("[editFullEmployee] committed");
   } catch (err) {
     await conn.rollback();
+    console.error("[editFullEmployee] error:", err);
     throw err;
   } finally {
     conn.release();
@@ -452,13 +743,50 @@ exports.editFullEmployee = async (data) => {
 exports.getFullEmployee = async (employeeId) => {
   const [rows] = await db.execute(queries.GET_FULL_EMPLOYEE, [employeeId]);
   if (!rows.length) throw new Error("Not found");
-  return rows[0];
-};
+  const row = rows[0];
 
-// for supervisor dropdown
-exports.listSupervisors = async () => {
-  const [rows] = await db.execute(queries.GET_SUPERVISORS);
-  return rows;
+  row.additional_certs = tryParseJSON(row.additional_certs) || [];
+  row.experience = tryParseJSON(row.experience) || [];
+
+  const fileFields = [
+    "tenth_cert_url",
+    "twelfth_cert_url",
+    "ug_cert_url",
+    "pg_cert_url",
+    "photo_url",
+    "aadhaar_doc_url",
+    "pan_doc_url",
+    "passport_doc_url",
+    "driving_license_doc_url",
+    "voter_id_doc_url",
+    "resume_url",
+    "other_docs", // ensure your SELECT aliases "other_docs" this way
+  ];
+
+  for (const k of fileFields) {
+    if (k in row) row[k] = ensureArrayField(row[k]);
+  }
+
+  // for additional certs: ensure cert.files exists and is flattened
+  if (Array.isArray(row.additional_certs)) {
+    row.additional_certs = row.additional_certs.map((cert) => {
+      if (!cert) return cert;
+      cert.files = ensureArrayField(cert.files || cert.file_urls || cert.file);
+      return cert;
+    });
+  }
+
+  if (Array.isArray(row.experience)) {
+    row.experience = row.experience.map((exp) => {
+      if (!exp) return exp;
+      exp.files = ensureArrayField(
+        exp.files || exp.doc_url || exp.doc_urls || exp.doc
+      );
+      return exp;
+    });
+  }
+
+  return row;
 };
 
 /**
