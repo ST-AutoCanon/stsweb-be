@@ -21,7 +21,7 @@ module.exports = {
   ADD_EMPLOYEE_PERSONAL: `
     INSERT INTO employee_personal (
     employee_id, address, father_name, mother_name,
-    gender, marital_status, spouse_name, spouse_dob, marriage_date,
+    gender, marital_status, spouse_name, spouse_dob, spouse_gov_doc_url, marriage_date,
     aadhaar_number, aadhaar_doc_url, pan_number, pan_doc_url,
     passport_number, passport_doc_url, driving_license_number, 
     driving_license_doc_url, voter_id, voter_id_doc_url, 
@@ -33,7 +33,7 @@ module.exports = {
     child1_name, child1_dob, child1_gov_doc_url,
     child2_name, child2_dob, child2_gov_doc_url,
     child3_name, child3_dob, child3_gov_doc_url
-  ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `,
   UPDATE_EMPLOYEE_PERSONAL: `
     UPDATE employee_personal
@@ -44,6 +44,7 @@ module.exports = {
            marital_status        = ?,
            spouse_name           = ?,
            spouse_dob            = ?,
+           spouse_gov_doc_url    = ?,
            marriage_date         = ?,
            aadhaar_number        = ?,
            aadhaar_doc_url       = ?,
@@ -114,6 +115,16 @@ module.exports = {
      WHERE employee_id  = ?
   `,
 
+  ADD_EMPLOYEE_ADDITIONAL_CERT: `
+  INSERT INTO employee_additional_certs
+    (employee_id, cert_name, institution, year, file_urls)
+  VALUES (?, ?, ?, ?, ?)
+`,
+
+  DELETE_EMPLOYEE_ADDITIONAL_CERTS: `
+  DELETE FROM employee_additional_certs WHERE employee_id = ?
+`,
+
   ADD_EMPLOYEE_PRO: `
     INSERT INTO employee_professional (
       employee_id, domain, employee_type, joining_date, role, department_id,
@@ -140,7 +151,7 @@ module.exports = {
   ) VALUES (?, ?, ?, ?, ?, ?)
 `,
 
-  UPDATE_EMPLOYEE_EXP: `
+  DELETE_EMPLOYEE_EXP: `
   DELETE FROM employee_experience WHERE employee_id = ?;
 `,
 
@@ -181,7 +192,7 @@ SELECT
   -- personal
   p.address, p.father_name, p.mother_name, p.gender,
   p.marital_status, p.spouse_name, DATE_FORMAT(p.spouse_dob, '%Y-%m-%d') AS spouse_dob,
-  DATE_FORMAT(p.marriage_date,'%Y-%m-%d') AS marriage_date,
+  p.spouse_gov_doc_url, DATE_FORMAT(p.marriage_date,'%Y-%m-%d') AS marriage_date,
   p.aadhaar_number, p.aadhaar_doc_url,
   p.pan_number, p.pan_doc_url,
   p.passport_number, p.passport_doc_url,
@@ -202,24 +213,24 @@ SELECT
   ed.ug_institution, ed.ug_year, ed.ug_board, ed.ug_score, ed.ug_cert_url,
   ed.pg_institution, ed.pg_year, ed.pg_board, ed.pg_score, ed.pg_cert_url,
 
-  -- additional certs as JSON array of objects { name, institution, year, files: [...] }
   (
-    SELECT JSON_ARRAYAGG(
-      JSON_OBJECT(
-        'name',    ac.cert_name,
-        'institution', ac.institution,
-        'year',    ac.year,
-        'files',   (
-          SELECT JSON_ARRAYAGG(cf.file_url)
-          FROM employee_cert_files cf
-          WHERE cf.employee_id = ac.employee_id
-            AND cf.cert_idx    = ac.id
-        )
-      )
+  SELECT JSON_ARRAYAGG(
+    JSON_OBJECT(
+      'name', ac.cert_name,
+      'institution', ac.institution,
+      'year', ac.year,
+      'files',
+        CASE
+          WHEN ac.file_urls IS NULL THEN JSON_ARRAY()
+          WHEN JSON_VALID(ac.file_urls) THEN CAST(ac.file_urls AS JSON)
+          ELSE JSON_ARRAY(ac.file_urls) -- fallback for legacy single string
+        END
     )
-    FROM employee_additional_certs ac
-    WHERE ac.employee_id = e.employee_id
-  ) AS additional_certs,
+  )
+  FROM employee_additional_certs ac
+  WHERE ac.employee_id = e.employee_id
+) AS additional_certs,
+
 
   -- professional
   pr.domain, pr.employee_type,
@@ -232,29 +243,29 @@ SELECT
   -- bank
   bd.bank_name, bd.account_number, bd.ifsc_code, bd.branch_name,
 
-  -- experience as JSON array of objects { company, role, dates..., files: [...] }
   (
-    SELECT JSON_ARRAYAGG(
-      JSON_OBJECT(
-        'company', exp.company,
-        'role',    exp.designation,
-        'start_date', DATE_FORMAT(exp.start_date,'%Y-%m-%d'),
-        'end_date',   DATE_FORMAT(exp.end_date,'%Y-%m-%d'),
-        'files', (
-          SELECT JSON_ARRAYAGG(ef.file_url)
-          FROM employee_exp_files ef
-          WHERE ef.employee_id = exp.employee_id
-            AND ef.exp_idx     = exp.exp_idx
-        )
-      )
+  SELECT JSON_ARRAYAGG(
+    JSON_OBJECT(
+      'company', exp.company,
+      'role',    exp.designation,
+      'start_date', DATE_FORMAT(exp.start_date,'%Y-%m-%d'),
+      'end_date',   DATE_FORMAT(exp.end_date,'%Y-%m-%d'),
+      'files',
+        CASE
+          WHEN exp.doc_url IS NULL THEN JSON_ARRAY()
+          WHEN JSON_VALID(exp.doc_url) THEN CAST(exp.doc_url AS JSON)
+          ELSE JSON_ARRAY(exp.doc_url)
+        END
     )
-    FROM (
-      SELECT employee_id, company, designation, start_date, end_date,
-             ROW_NUMBER() OVER (PARTITION BY employee_id ORDER BY start_date) - 1 AS exp_idx
-      FROM employee_experience
-      WHERE employee_id = e.employee_id
-    ) exp
-  ) AS experience,
+  )
+  FROM (
+  SELECT employee_id, company, designation, start_date, end_date, doc_url
+  FROM employee_experience
+  WHERE employee_id = e.employee_id
+  ORDER BY start_date
+) exp
+) AS experience,
+
 
   -- other docs
   (
@@ -316,7 +327,6 @@ SELECT employee_id
     e.email,
     DATE_FORMAT(e.dob, '%Y-%m-%d') AS dob,
     e.phone_number,
-    DATE_FORMAT(e.created_at, '%Y-%m-%d') AS joining_date,
     e.status,
 
     p.address,
@@ -325,6 +335,8 @@ SELECT employee_id
     p.gender,
     p.marital_status,
     p.spouse_name,
+    DATE_FORMAT(p.spouse_dob, '%Y-%m-%d') AS spouse_dob,
+    p.spouse_gov_doc_url,
     DATE_FORMAT(p.marriage_date, '%Y-%m-%d') AS marriage_date,
     p.aadhaar_number, p.aadhaar_doc_url,
   p.pan_number, p.pan_doc_url,
@@ -362,8 +374,28 @@ SELECT employee_id
     ed.pg_score,
     ed.pg_cert_url,
 
+    (
+  SELECT JSON_ARRAYAGG(
+    JSON_OBJECT(
+      'name', ac.cert_name,
+      'institution', ac.institution,
+      'year', ac.year,
+      'files',
+        CASE
+          WHEN ac.file_urls IS NULL THEN JSON_ARRAY()
+          WHEN JSON_VALID(ac.file_urls) THEN CAST(ac.file_urls AS JSON)
+          ELSE JSON_ARRAY(ac.file_urls) -- fallback for legacy single string
+        END
+    )
+  )
+  FROM employee_additional_certs ac
+  WHERE ac.employee_id = e.employee_id
+) AS additional_certs,
+
+
     pr.domain,
     pr.employee_type,
+    DATE_FORMAT(pr.joining_date,'%Y-%m-%d') AS joining_date,
     pr.role,
     d.name AS department,
     pr.position,
@@ -395,26 +427,32 @@ SELECT employee_id
     ON pr.supervisor_id = sup.employee_id
 
   LEFT JOIN (
-    SELECT employee_id,
-           JSON_ARRAYAGG(
-             JSON_OBJECT(
-               'company',       company,
-               'designation',   designation,
-               'start_date',    DATE_FORMAT(start_date, '%Y-%m-%d'),
-               'end_date',      DATE_FORMAT(end_date, '%Y-%m-%d'),
-               'doc_url',       doc_url
-             )
-           ) AS exp_json
-    FROM employee_experience
-    GROUP BY employee_id
-  ) exp ON e.employee_id = exp.employee_id
+  SELECT employee_id,
+         JSON_ARRAYAGG(
+           JSON_OBJECT(
+             'company', company,
+             'designation', designation,
+             'start_date', DATE_FORMAT(start_date, '%Y-%m-%d'),
+             'end_date', DATE_FORMAT(end_date, '%Y-%m-%d'),
+             'doc_url',
+               CASE
+                 WHEN doc_url IS NULL THEN JSON_ARRAY()
+                 WHEN JSON_VALID(doc_url) THEN CAST(doc_url AS JSON)
+                 ELSE JSON_ARRAY(doc_url)
+               END
+           )
+         ) AS exp_json
+  FROM employee_experience
+  GROUP BY employee_id
+) exp ON e.employee_id = exp.employee_id
 
-  LEFT JOIN (
-    SELECT employee_id,
-           JSON_ARRAYAGG(other_doc_url) AS docs_json
-    FROM employee_documents
-    GROUP BY employee_id
-  ) docs ON e.employee_id = docs.employee_id
+LEFT JOIN (
+  SELECT employee_id,
+         JSON_ARRAYAGG(other_doc_url) AS docs_json
+  FROM employee_documents
+  GROUP BY employee_id
+) docs ON e.employee_id = docs.employee_id
+
 
   WHERE 1=1
 `,
@@ -426,7 +464,6 @@ SELECT employee_id
     e.email,
     DATE_FORMAT(e.dob, '%Y-%m-%d')            AS dob,
     e.phone_number,
-    DATE_FORMAT(e.created_at, '%Y-%m-%d')     AS joining_date,
     e.status,
 
     p.address,
@@ -435,6 +472,8 @@ SELECT employee_id
     p.gender,
     p.marital_status,
     p.spouse_name,
+    DATE_FORMAT(p.spouse_dob, '%Y-%m-%d') AS spouse_dob,
+    p.spouse_gov_doc_url,
     DATE_FORMAT(p.marriage_date, '%Y-%m-%d')  AS marriage_date,
     p.aadhaar_number, p.aadhaar_doc_url,
   p.pan_number, p.pan_doc_url,
@@ -472,8 +511,27 @@ SELECT employee_id
     ed.pg_score,
     ed.pg_cert_url,
 
+    (
+  SELECT JSON_ARRAYAGG(
+    JSON_OBJECT(
+      'name', ac.cert_name,
+      'institution', ac.institution,
+      'year', ac.year,
+      'files',
+        CASE
+          WHEN ac.file_urls IS NULL THEN JSON_ARRAY()
+          WHEN JSON_VALID(ac.file_urls) THEN CAST(ac.file_urls AS JSON)
+          ELSE JSON_ARRAY(ac.file_urls) -- fallback for legacy single string
+        END
+    )
+  )
+  FROM employee_additional_certs ac
+  WHERE ac.employee_id = e.employee_id
+) AS additional_certs,
+
     pr.domain,
     pr.employee_type,
+    DATE_FORMAT(pr.joining_date,'%Y-%m-%d') AS joining_date,
     pr.role,
     d.name AS department,
     pr.position,
@@ -499,26 +557,32 @@ SELECT employee_id
   LEFT JOIN employees             sup ON pr.supervisor_id = sup.employee_id
 
   LEFT JOIN (
-    SELECT employee_id,
-           JSON_ARRAYAGG(
-             JSON_OBJECT(
-               'company',     company,
-               'designation', designation,
-               'start_date',  DATE_FORMAT(start_date, '%Y-%m-%d'),
-               'end_date',    DATE_FORMAT(end_date,   '%Y-%m-%d'),
-               'doc_url',     doc_url
-             )
-           ) AS exp_json
-    FROM employee_experience
-    GROUP BY employee_id
-  ) exp  ON e.employee_id = exp.employee_id
+  SELECT employee_id,
+         JSON_ARRAYAGG(
+           JSON_OBJECT(
+             'company', company,
+             'designation', designation,
+             'start_date', DATE_FORMAT(start_date, '%Y-%m-%d'),
+             'end_date', DATE_FORMAT(end_date, '%Y-%m-%d'),
+             'doc_url',
+               CASE
+                 WHEN doc_url IS NULL THEN JSON_ARRAY()
+                 WHEN JSON_VALID(doc_url) THEN CAST(doc_url AS JSON)
+                 ELSE JSON_ARRAY(doc_url)
+               END
+           )
+         ) AS exp_json
+  FROM employee_experience
+  GROUP BY employee_id
+) exp ON e.employee_id = exp.employee_id
 
-  LEFT JOIN (
-    SELECT employee_id,
-           JSON_ARRAYAGG(other_doc_url) AS docs_json
-    FROM employee_documents
-    GROUP BY employee_id
-  ) docs ON e.employee_id = docs.employee_id
+LEFT JOIN (
+  SELECT employee_id,
+         JSON_ARRAYAGG(other_doc_url) AS docs_json
+  FROM employee_documents
+  GROUP BY employee_id
+) docs ON e.employee_id = docs.employee_id
+
 
   WHERE (
     e.first_name    LIKE ? OR
@@ -607,28 +671,6 @@ SELECT employee_id
   ORDER BY pos.\`rank\` DESC
 `,
 
-  ADD_EMPLOYEE_ADDITIONAL_CERT: `
-  INSERT INTO employee_additional_certs
-    (employee_id, cert_name, institution, year, file_urls)
-  VALUES (?, ?, ?, ?, ?)
-`,
-
-  ADD_CERT_FILE: `
-INSERT INTO employee_cert_files (employee_id, cert_idx, file_url)
-VALUES (?, ?, ?)
-`,
-  ADD_EXP_FILE: `
-INSERT INTO employee_exp_files (employee_id, exp_idx, file_url)
-VALUES (?, ?, ?)
-`,
-  DELETE_CERT_FILES: `
-  DELETE FROM employee_cert_files
-   WHERE employee_id = ?
-`,
-  DELETE_EXP_FILES: `
-  DELETE FROM employee_exp_files
-   WHERE employee_id = ? AND exp_idx = ?
-`,
   UPDATE_SUPERVISOR_ASSIGNMENT_END: `
   UPDATE supervisor_assignments
      SET end_date = ?

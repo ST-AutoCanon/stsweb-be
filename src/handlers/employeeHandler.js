@@ -104,11 +104,21 @@ exports.bulkAddEmployees = async (req, res) => {
 exports.createFullEmployee = async (req, res) => {
   console.log("[createFullEmployee] ⇒ start");
   try {
-    // 1) flat-copy body
     const data = { ...req.body };
-    console.log(data);
-    const raw = req.body;
-    const additionalCerts = [];
+    const raw = req.body || {};
+
+    // --- parse additional_certs & experience (same as before) ---
+    let additionalCerts = [];
+    if (raw.additional_certs) {
+      try {
+        additionalCerts =
+          typeof raw.additional_certs === "string"
+            ? JSON.parse(raw.additional_certs)
+            : raw.additional_certs;
+      } catch (e) {
+        additionalCerts = [];
+      }
+    }
 
     for (let key of Object.keys(raw)) {
       const m = key.match(
@@ -120,10 +130,32 @@ exports.createFullEmployee = async (req, res) => {
       additionalCerts[idx] = additionalCerts[idx] || {};
       additionalCerts[idx][field] = raw[key];
     }
+    data.additional_certs = (additionalCerts || []).filter(Boolean);
 
-    data.additional_certs = additionalCerts.filter((c) => c);
+    let expList = [];
+    if (raw.experience) {
+      try {
+        expList =
+          typeof raw.experience === "string"
+            ? JSON.parse(raw.experience)
+            : raw.experience;
+      } catch (e) {
+        expList = [];
+      }
+    }
+    for (let key of Object.keys(raw)) {
+      const m = key.match(
+        /^experience\[(\d+)\]\[(company|role|start_date|end_date)\]$/
+      );
+      if (!m) continue;
+      const idx = Number(m[1]);
+      const field = m[2];
+      expList[idx] = expList[idx] || {};
+      expList[idx][field] = raw[key];
+    }
+    data.experience = (expList || []).filter(Boolean);
 
-    // 1) email uniqueness
+    // --- validations (same as before) ---
     const [emailRows] = await db.execute(queries.CHECK_EMAIL, [data.email]);
     if (emailRows.length) {
       return res
@@ -136,13 +168,11 @@ exports.createFullEmployee = async (req, res) => {
         );
     }
 
-    // 2) aadhar / pan uniqueness
     const [persRows] = await db.execute(queries.CHECK_PERSONAL_DUP, [
       data.aadhaar_number,
       data.pan_number,
     ]);
     if (persRows.length) {
-      // determine which
       const dup = persRows[0];
       const field =
         dup.aadhaar_number === data.aadhaar_number ? "Aadhaar" : "PAN";
@@ -156,26 +186,19 @@ exports.createFullEmployee = async (req, res) => {
         );
     }
 
-    // 2) reorganize files into a map by fieldname
+    // --- file parsing (same as before) ---
     let filesByField = {};
-
     if (Array.isArray(req.files)) {
-      // upload.any() case
       for (let f of req.files) {
         filesByField[f.fieldname] = filesByField[f.fieldname] || [];
         filesByField[f.fieldname].push(f);
       }
     } else if (typeof req.files === "object") {
-      // upload.fields() case: req.files = { photo: [File], aadhaar_doc: [File], … }
       for (let [fieldname, fileArray] of Object.entries(req.files)) {
         filesByField[fieldname] = fileArray;
       }
     }
 
-    // 3) derive base URL folder
-    const safeEmail = data.email.replace(/[^a-zA-Z0-9.@_-]/g, "_");
-
-    // 4) list of your 1‑to‑1 fields + their target data keys
     const simpleMap = {
       photo: "photo_url",
       aadhaar_doc: "aadhaar_doc_url",
@@ -194,15 +217,10 @@ exports.createFullEmployee = async (req, res) => {
     for (let [field, dataKey] of Object.entries(simpleMap)) {
       const files = filesByField[field] || [];
       if (!files.length) continue;
-
-      if (field === "other_docs") {
-        data[dataKey] = files.map((f) => getWebPath(f.path));
-      } else {
-        data[dataKey] = getWebPath(files[0].path);
-      }
+      data[dataKey] = files.map((f) => getWebPath(f.path));
     }
 
-    // 5) additional_certs
+    // additional_certs: attach uploaded file urls
     if (Array.isArray(data.additional_certs)) {
       data.additional_certs = data.additional_certs.map((cert, idx) => {
         const key = `additional_certs[${idx}][file]`;
@@ -212,7 +230,7 @@ exports.createFullEmployee = async (req, res) => {
       });
     }
 
-    // 6) experience
+    // experience: attach uploaded doc urls
     if (Array.isArray(data.experience)) {
       data.experience = data.experience.map((exp, idx) => {
         const key = `experience[${idx}][doc]`;
@@ -222,7 +240,7 @@ exports.createFullEmployee = async (req, res) => {
       });
     }
 
-    // 7) family docs
+    // family docs
     for (let side of [
       "father",
       "mother",
@@ -234,13 +252,46 @@ exports.createFullEmployee = async (req, res) => {
       const field = `${side}_gov_doc`;
       const urlKey = `${side}_gov_doc_url`;
       const files = filesByField[field] || [];
-      data[urlKey] = files.map((f) => getWebPath(f.path));
+      if (files.length) data[urlKey] = files.map((f) => getWebPath(f.path));
+      // if no files uploaded and client didn't send urlKey, we leave it undefined
     }
 
     // 8) call service
     console.log("[createFullEmployee] calling service.addFullEmployee");
     const { employee_id } = await employeeService.addFullEmployee(data);
     console.log("[createFullEmployee] ⇒ success", employee_id);
+
+    // ---------------------------
+    // Send reset email from controller (more reliable visibility)
+    // ---------------------------
+    try {
+      console.log(
+        "[createFullEmployee] attempting to send reset email to:",
+        data.email
+      );
+      // ensure env values exist for better debug
+      if (!process.env.SENDGRID_API_KEY) {
+        console.warn(
+          "[createFullEmployee] SENDGRID_API_KEY missing — skipping email send"
+        );
+      } else if (!process.env.SENDGRID_SENDER_EMAIL) {
+        console.warn(
+          "[createFullEmployee] SENDGRID_SENDER_EMAIL missing — skipping email send"
+        );
+      } else {
+        await sendResetEmail(
+          data.email,
+          `${data.first_name} ${data.last_name}`
+        );
+        console.log("[createFullEmployee] reset email sent");
+      }
+    } catch (mailErr) {
+      // log full error so you can see why it failed (DB save error, sendgrid error, etc)
+      console.warn(
+        "[createFullEmployee] warning: reset-email failed — not rolling back:",
+        mailErr
+      );
+    }
 
     return res.status(201).json(
       ErrorHandler.generateSuccessResponse(201, "Employee created.", {
@@ -265,11 +316,17 @@ exports.createFullEmployee = async (req, res) => {
 exports.updateFullEmployee = async (req, res) => {
   console.log("[updateFullEmployee] ⇒ start");
   try {
-    // 1) pull in path param + body
-    const data = { employee_id: req.params.employeeId, ...req.body };
-    console.log("[updateFullEmployee] raw data:", data);
-    console.log("👉 RAW req.files:", JSON.stringify(req.files, null, 2));
+    // raw request body and initial data object (include path param)
+    const raw = req.body || {};
+    const data = { employee_id: req.params.employeeId, ...raw };
 
+    console.log(
+      "[updateFullEmployee] incoming raw body keys:",
+      Object.keys(raw)
+    );
+    console.log("👉 RAW req.files:", JSON.stringify(req.files || {}, null, 2));
+
+    // normalize date-time strings to date-only if needed
     [
       "dob",
       "father_dob",
@@ -286,6 +343,10 @@ exports.updateFullEmployee = async (req, res) => {
       }
     });
 
+    // helper to detect if client explicitly provided a key in the request body
+    const hasKey = (k) => Object.prototype.hasOwnProperty.call(raw, k);
+
+    // email uniqueness check
     const [emailRows] = await db.execute(queries.CHECK_EMAIL_UPDATE, [
       data.email,
       data.employee_id,
@@ -301,7 +362,7 @@ exports.updateFullEmployee = async (req, res) => {
         );
     }
 
-    // 2) aadhar / pan uniqueness (excluding self)
+    // aadhar / pan uniqueness (excluding self)
     const [persRows] = await db.execute(queries.CHECK_PERSONAL_DUP_UPDATE, [
       data.aadhaar_number,
       data.pan_number,
@@ -320,8 +381,7 @@ exports.updateFullEmployee = async (req, res) => {
         );
     }
 
-    console.log("👉 RAW req.files:", JSON.stringify(req.files, null, 2));
-
+    // Build filesByField from req.files (supports upload.any() and upload.fields() shapes)
     let filesByField = {};
     if (Array.isArray(req.files)) {
       // upload.any()
@@ -329,16 +389,18 @@ exports.updateFullEmployee = async (req, res) => {
         filesByField[f.fieldname] = filesByField[f.fieldname] || [];
         filesByField[f.fieldname].push(f);
       }
-    } else if (typeof req.files === "object") {
+    } else if (typeof req.files === "object" && req.files !== null) {
       // upload.fields()
       for (let [field, arr] of Object.entries(req.files)) {
         filesByField[field] = arr;
       }
     }
+    console.log(
+      "[updateFullEmployee] filesByField keys:",
+      Object.keys(filesByField)
+    );
 
-    const safeEmail = data.email;
-
-    // 4) your 1‑to‑1 file fields → target keys
+    // Map of single file inputs -> DB url keys
     const simpleMap = {
       photo: "photo_url",
       aadhaar_doc: "aadhaar_doc_url",
@@ -354,38 +416,89 @@ exports.updateFullEmployee = async (req, res) => {
       other_docs: "other_docs_urls",
     };
 
+    // Attach URLs for simple fields only if files were uploaded OR the client explicitly sent the url key
     for (let [field, dataKey] of Object.entries(simpleMap)) {
       const files = filesByField[field] || [];
-      if (!files.length) continue;
-
-      if (field === "other_docs") {
+      if (files.length) {
         data[dataKey] = files.map((f) => getWebPath(f.path));
+      } else if (hasKey(dataKey)) {
+        // client explicitly provided the url key (could be "[]" or a JSON string) — respect it
+        data[dataKey] = raw[dataKey];
       } else {
-        data[dataKey] = getWebPath(files[0].path);
+        // DON'T set the key (leave undefined) so the service keeps existing DB value
+        delete data[dataKey];
       }
     }
 
-    // 5) additional_certs
-    if (Array.isArray(data.additional_certs)) {
-      data.additional_certs = data.additional_certs.map((cert, idx) => {
+    // Parse and attach additional_certs only if client provided it
+    if (hasKey("additional_certs")) {
+      let additionalCerts = [];
+      if (raw.additional_certs) {
+        try {
+          additionalCerts =
+            typeof raw.additional_certs === "string"
+              ? JSON.parse(raw.additional_certs)
+              : raw.additional_certs;
+        } catch (e) {
+          additionalCerts = [];
+        }
+      }
+      // also handle form-style keys additional_certs[0][name] etc.
+      for (let key of Object.keys(raw)) {
+        const m = key.match(
+          /^additional_certs\[(\d+)\]\[(name|year|institution)\]$/
+        );
+        if (!m) continue;
+        const idx = Number(m[1]);
+        const field = m[2];
+        additionalCerts[idx] = additionalCerts[idx] || {};
+        additionalCerts[idx][field] = raw[key];
+      }
+      // attach uploaded files for each cert if present
+      data.additional_certs = (additionalCerts || []).map((cert, idx) => {
         const key = `additional_certs[${idx}][file]`;
         const files = filesByField[key] || [];
-        cert.file_urls = files.map((f) => getWebPath(f.path));
+        if (files.length) cert.file_urls = files.map((f) => getWebPath(f.path));
         return cert;
       });
+    } else {
+      delete data.additional_certs; // leave undefined so service won't delete existing rows
     }
 
-    // 6) experience
-    if (Array.isArray(data.experience)) {
-      data.experience = data.experience.map((exp, idx) => {
+    // Parse and attach experience only if client provided it
+    if (hasKey("experience")) {
+      let expList = [];
+      if (raw.experience) {
+        try {
+          expList =
+            typeof raw.experience === "string"
+              ? JSON.parse(raw.experience)
+              : raw.experience;
+        } catch (e) {
+          expList = [];
+        }
+      }
+      for (let key of Object.keys(raw)) {
+        const m = key.match(
+          /^experience\[(\d+)\]\[(company|role|start_date|end_date)\]$/
+        );
+        if (!m) continue;
+        const idx = Number(m[1]);
+        const field = m[2];
+        expList[idx] = expList[idx] || {};
+        expList[idx][field] = raw[key];
+      }
+      data.experience = (expList || []).map((exp, idx) => {
         const key = `experience[${idx}][doc]`;
         const files = filesByField[key] || [];
-        exp.doc_urls = files.map((f) => getWebPath(f.path));
+        if (files.length) exp.doc_urls = files.map((f) => getWebPath(f.path));
         return exp;
       });
+    } else {
+      delete data.experience;
     }
 
-    // 7) family docs
+    // Family gov docs: attach only if files uploaded OR client explicitly sent the url key
     for (let side of [
       "father",
       "mother",
@@ -397,9 +510,23 @@ exports.updateFullEmployee = async (req, res) => {
       const field = `${side}_gov_doc`;
       const urlKey = `${side}_gov_doc_url`;
       const files = filesByField[field] || [];
-      data[urlKey] = files.map((f) => getWebPath(f.path));
+      if (files.length) {
+        data[urlKey] = files.map((f) => getWebPath(f.path));
+      } else if (hasKey(urlKey)) {
+        // explicit from client (even if empty array) — respect it
+        data[urlKey] = raw[urlKey];
+      } else {
+        // leave undefined so service retains existing DB values
+        delete data[urlKey];
+      }
     }
-    // 8) call your service
+
+    console.log(
+      "[updateFullEmployee] final data keys to pass to service:",
+      Object.keys(data)
+    );
+
+    // Call service
     console.log("[updateFullEmployee] calling service.editFullEmployee");
     await employeeService.editFullEmployee(data);
 
@@ -443,31 +570,6 @@ exports.getFullEmployee = async (req, res) => {
           404,
           err.message || "Employee not found."
         )
-      );
-  }
-};
-
-/**
- * List all supervisors (for dropdowns).
- */
-exports.listSupervisors = async (req, res) => {
-  try {
-    const supervisors = await employeeService.listSupervisors();
-    return res
-      .status(200)
-      .json(
-        ErrorHandler.generateSuccessResponse(
-          200,
-          "Supervisors fetched.",
-          supervisors
-        )
-      );
-  } catch (err) {
-    console.error("listSupervisors error:", err);
-    return res
-      .status(500)
-      .json(
-        ErrorHandler.generateErrorResponse(500, "Failed to fetch supervisors.")
       );
   }
 };
