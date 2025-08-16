@@ -279,17 +279,28 @@ ADD_OVERTIME_DETAILS_REJECTED: `
   FROM overtime_details
   ORDER BY work_date DESC
 `,
- GET_EMPLOYEE_LOP_DAYS_FOR_CURRENT_PERIOD: `
- SELECT 
-    lq.employee_id,
-    SUM(lp.emp_lop) AS emp_lop
-FROM sukalpadata.leavequeries lq
-LEFT JOIN sukalpadata.leave_policy lp ON lq.leave_type = lp.leave_type
-WHERE lq.status = 'Approved'
-    AND lq.start_date >= DATE_FORMAT(CURDATE() - INTERVAL 1 MONTH, '%Y-%m-25')
-    AND lq.start_date < DATE_FORMAT(CURDATE(), '%Y-%m-26')
-GROUP BY lq.employee_id;
-  `
+GET_EMPLOYEE_LOP_DAYS_FOR_CURRENT_PERIOD :`
+  SELECT 
+    employee_id,
+    lop
+  FROM sukalpadata.employee_monthly_lop
+  WHERE 
+    (
+      CASE 
+        WHEN DAY(CURDATE()) < 26 
+          THEN month = MONTH(CURDATE() - INTERVAL 1 MONTH) 
+        ELSE month = MONTH(CURDATE())
+      END
+    )
+    AND 
+    (
+      CASE 
+        WHEN DAY(CURDATE()) < 26 
+          THEN year = YEAR(CURDATE() - INTERVAL 1 MONTH) 
+        ELSE year = YEAR(CURDATE())
+      END
+    );
+`
 
   ,
 CHECK_EMPLOYEE_ASSIGNMENT: `
