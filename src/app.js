@@ -72,6 +72,10 @@ const compensationRoutes = require("./routes/compensationRoutes");
 const assignCompensationRoutes = require("./routes/assignCompensationRoute");
 const employeeRoutesforsalarybreakup = require("./routes/compensationRoutes");
 const overtimeRoutes = require("./routes/assignCompensationRoute");
+const overtimeSummaryRoutes = require("./routes/overtimeSummaryRoutes");
+const employeeProjectsRoute = require("./routes/employeeProjectsRoute");
+const lossofPayCalculationRoutes = require("./routes/lossofPayCalculationRoutes");
+
 
 const app = express();
 const server = http.createServer(app);
@@ -219,6 +223,11 @@ app.get("/", (req, res) => {
 });
 app.use("/api/templates", letterheadTemplateRoutes);
 
+
+//lossof pay and employee project names 
+app.use("/api", employeeProjectsRoute);
+app.use("/api/lop", lossofPayCalculationRoutes);
+
 //
 
 //compensation
@@ -227,6 +236,7 @@ app.use("/api/compensation", assignCompensationRoutes);
 app.use("/api", employeeRoutesforsalarybreakup);
 
 app.use("/api/overtime", overtimeRoutes);
+app.use("/api/overtime-summary", overtimeSummaryRoutes);
 
 app.use("/api", payrollRoutes);
 const io = new Server(server, {

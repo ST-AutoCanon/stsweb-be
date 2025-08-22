@@ -15,35 +15,7 @@ const {
   getEmployeeLopDetailsForCurrentPeriod
 } = require("../services/assign_compensations");
 
-// async function checkEmployeeAssignmentHandler(req, res) {
-//   try {
-//     const { employeeId } = req.body;
 
-//     if (!employeeId) {
-//       return res.status(400).json({
-//         success: false,
-//         error: "Missing required field: employeeId"
-//       });
-//     }
-
-//     const result = await checkEmployeeAssignment(employeeId);
-
-//     res.status(200).json({
-//       success: true,
-//       message: result.hasAssignment 
-//         ? `Employee ${employeeId} has existing assignments`
-//         : `No assignments found for employee ${employeeId}`,
-//       data: result
-//     });
-//   } catch (error) {
-//     console.error("❌ Error checking employee assignment:", error);
-//     res.status(500).json({
-//       success: false,
-//       error: "Failed to check employee assignment",
-//       details: error.message
-//     });
-//   }
-// }
 async function checkEmployeeAssignmentHandler(req, res) {
   try {
     console.log("Received req.body:", req.body); // Debug log
