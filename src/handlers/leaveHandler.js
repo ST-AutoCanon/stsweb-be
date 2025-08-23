@@ -47,16 +47,32 @@ class LeaveHandler {
         );
     }
   }
-
-  /**
-   * Approve or reject a leave request.
-   */
   static async updateLeaveRequest(req, res) {
     try {
       const { leaveId } = req.params;
-      const { status, comments } = req.body;
+      const {
+        status,
+        comments,
+        compensated_days = 0,
+        deducted_days = 0,
+        loss_of_pay_days = 0,
+        preserved_leave_days = null,
+      } = req.body;
 
+      console.log("[LeaveHandler.updateLeaveRequest] ENTER handler");
+      console.log("[LeaveHandler.updateLeaveRequest] params.leaveId:", leaveId);
+      console.log("[LeaveHandler.updateLeaveRequest] raw body:", req.body);
+
+      // Basic validation
+      console.log(
+        "[LeaveHandler.updateLeaveRequest] validating status:",
+        status
+      );
       if (!["Approved", "Rejected"].includes(status)) {
+        console.log(
+          "[LeaveHandler.updateLeaveRequest] VALIDATION FAILED - invalid status:",
+          status
+        );
         return res
           .status(400)
           .json(
@@ -66,8 +82,15 @@ class LeaveHandler {
             )
           );
       }
+      console.log("[LeaveHandler.updateLeaveRequest] status validation passed");
 
+      console.log(
+        "[LeaveHandler.updateLeaveRequest] validating rejection comments (if rejected)"
+      );
       if (status === "Rejected" && !comments) {
+        console.log(
+          "[LeaveHandler.updateLeaveRequest] VALIDATION FAILED - rejection without comments"
+        );
         return res
           .status(400)
           .json(
@@ -77,23 +100,78 @@ class LeaveHandler {
             )
           );
       }
+      if (status === "Rejected") {
+        console.log(
+          "[LeaveHandler.updateLeaveRequest] rejection reason provided:",
+          comments
+        );
+      }
 
-      await LeaveService.updateLeaveRequest({
+      // actor/admin id for audit (if you have auth middleware that sets req.user)
+      const actorId =
+        (req.body && (req.body.actorId ?? req.body.actor)) ??
+        (req.user && (req.user.id ?? req.user.employee_id)) ??
+        null;
+
+      // Debug log so you can see what was received
+      console.log(
+        "[LeaveHandler.updateLeaveRequest] actorId resolved from request/auth:",
+        actorId
+      );
+
+      // build payload for service
+      const payload = {
         leaveId,
         status,
         comments: comments || null,
-      });
+        compensated_days: Number(compensated_days) || 0,
+        deducted_days: Number(deducted_days) || 0,
+        loss_of_pay_days: Number(loss_of_pay_days) || 0,
+        preserved_leave_days:
+          preserved_leave_days === null ? null : Number(preserved_leave_days),
+        actorId,
+      };
+
+      console.log(
+        "[LeaveHandler.updateLeaveRequest] calling LeaveService.updateLeaveRequest with payload:",
+        payload
+      );
+
+      await LeaveService.updateLeaveRequest(payload);
+
+      console.log(
+        "[LeaveHandler.updateLeaveRequest] LeaveService.updateLeaveRequest resolved successfully for leaveId:",
+        leaveId
+      );
+
+      const message = `Leave request ${String(
+        status
+      ).toLowerCase()} successfully.`;
+      console.log(
+        "[LeaveHandler.updateLeaveRequest] sending success response:",
+        message
+      );
 
       return res
         .status(200)
-        .json(
-          ErrorHandler.generateSuccessResponse(
-            200,
-            `Leave request ${status.toLowerCase()} successfully.`
-          )
-        );
+        .json(ErrorHandler.generateSuccessResponse(200, message));
     } catch (err) {
-      console.error("Error in LeaveHandler.updateLeaveRequest:", err);
+      console.error("[LeaveHandler.updateLeaveRequest] Caught error:", err);
+
+      // If service threw a controlled error with code/message, return 400
+      if (err && err.isBadRequest) {
+        console.log(
+          "[LeaveHandler.updateLeaveRequest] Returning 400 due to controlled error:",
+          err.message
+        );
+        return res
+          .status(400)
+          .json(ErrorHandler.generateErrorResponse(400, err.message));
+      }
+
+      console.log(
+        "[LeaveHandler.updateLeaveRequest] Returning 500 - internal server error"
+      );
       return res
         .status(500)
         .json(

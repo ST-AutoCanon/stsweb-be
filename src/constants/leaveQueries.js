@@ -145,4 +145,63 @@ module.exports = {
       ON pr.department_id = d.id
     WHERE 1=1;  -- add dynamic filters (e.g. department)
   `,
+
+  GET_LEAVE_BY_ID: `
+    SELECT
+      lq.*,
+      CONCAT(e.first_name, ' ', e.last_name) AS name
+    FROM leavequeries lq
+    JOIN employees e
+      ON lq.employee_id = e.employee_id
+    WHERE lq.id = ? AND lq.employee_id = ?;
+  `,
+
+  // NEW: fetch by leave id only
+  GET_LEAVE_BY_LEAVEID: `
+    SELECT *
+    FROM leavequeries
+    WHERE id = ?;
+  `,
+
+  // Updated: store the split fields into leavequeries so we have a single source of truth
+  UPDATE_LEAVE_STATUS_EXTENDED: `
+    UPDATE leavequeries
+    SET status = ?,
+        comments = ?,
+        compensated_days = ?,
+        deducted_days = ?,
+        loss_of_pay_days = ?,
+        preserved_leave_days = ?,
+        updated_at = NOW()
+    WHERE id = ?;
+  `,
+
+  // Adjust leave balance (deduct days) - assumes an employee_leave_balances table with (employee_id, leave_type, remaining)
+  ADJUST_LEAVE_BALANCE: `
+    UPDATE employee_leave_balances
+    SET remaining = GREATEST(0, remaining - ?)
+    WHERE employee_id = ? AND leave_type = ?;
+  `,
+
+  // Insert audit record for traceability
+  INSERT_LEAVE_AUDIT: `
+    INSERT INTO leave_audit (
+      leave_id,
+      actor_id,
+      action,
+      details,
+      created_at
+    ) VALUES (?, ?, ?, ?, NOW());
+  `,
+
+  // Insert LoP record for payroll (basic)
+  INSERT_LOP_RECORD: `
+    INSERT INTO lop_records (
+      employee_id,
+      leave_id,
+      lop_days,
+      reason,
+      created_at
+    ) VALUES (?, ?, ?, ?, NOW());
+  `,
 };
