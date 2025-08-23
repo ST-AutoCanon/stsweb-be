@@ -6,6 +6,23 @@ require("dotenv").config();
 const path = require("path");
 const session = require("express-session");
 const { Server } = require("socket.io");
+const cron = require("node-cron");
+const policyNotificationService = require("./services/policyNotificationService");
+cron.schedule(
+  "25 10 * * *",
+  async () => {
+    try {
+      await policyNotificationService.sendPolicyEndNotifications(10);
+      await policyNotificationService.sendPolicyEndNotifications(5);
+      console.log("[cron] policy end alerts executed at 17:22 Asia/Kolkata");
+    } catch (err) {
+      console.error("[cron] policy alert error:", err);
+    }
+  },
+  {
+    timezone: "Asia/Kolkata",
+  }
+);
 
 const EmployeeQueries = require("./services/employeeQueries");
 const chatService = require("./services/chatService");
@@ -75,7 +92,6 @@ const overtimeRoutes = require("./routes/assignCompensationRoute");
 const overtimeSummaryRoutes = require("./routes/overtimeSummaryRoutes");
 const employeeProjectsRoute = require("./routes/employeeProjectsRoute");
 const lossofPayCalculationRoutes = require("./routes/lossofPayCalculationRoutes");
-
 
 const app = express();
 const server = http.createServer(app);
@@ -223,8 +239,7 @@ app.get("/", (req, res) => {
 });
 app.use("/api/templates", letterheadTemplateRoutes);
 
-
-//lossof pay and employee project names 
+//lossof pay and employee project names
 app.use("/api", employeeProjectsRoute);
 app.use("/api/lop", lossofPayCalculationRoutes);
 

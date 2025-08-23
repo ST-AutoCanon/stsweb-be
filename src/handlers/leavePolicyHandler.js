@@ -1,20 +1,22 @@
+// src/handlers/leavePolicyHandler.js
 const LeavePolicyService = require("../services/leavePolicyService");
 const ErrorHandler = require("../utils/errorHandler");
 
 class LeavePolicyHandler {
-  /**
-   * GET /api/leave-policies
-   */
   static async getAllPolicies(req, res) {
     try {
       const policies = await LeavePolicyService.getAllPolicies();
-      return res.status(200).json({
-        success: true,
-        statusCode: 200,
-        data: policies,
-      });
+      return res
+        .status(200)
+        .json(
+          ErrorHandler.generateSuccessResponse(
+            200,
+            "Policies fetched.",
+            policies
+          )
+        );
     } catch (err) {
-      console.error(err);
+      console.error("getAllPolicies:", err);
       return res
         .status(500)
         .json(
@@ -23,9 +25,6 @@ class LeavePolicyHandler {
     }
   }
 
-  /**
-   * POST /api/leave-policies
-   */
   static async createPolicy(req, res) {
     try {
       const { period, year_start, year_end, leave_settings } = req.body;
@@ -63,7 +62,7 @@ class LeavePolicyHandler {
           )
         );
     } catch (err) {
-      console.error(err);
+      console.error("createPolicy:", err);
       return res
         .status(500)
         .json(
@@ -72,48 +71,6 @@ class LeavePolicyHandler {
     }
   }
 
-  static async getMonthlyLOPHandler(req, res) {
-    try {
-      const { employeeId } = req.params;
-      if (!employeeId) {
-        return res
-          .status(400)
-          .json(
-            ErrorHandler.generateErrorResponse(400, "Employee ID is required.")
-          );
-      }
-      const { month, year } = req.query;
-      const now = new Date();
-      const selectedMonth = month ? parseInt(month, 10) : now.getMonth() + 1;
-      const selectedYear = year ? parseInt(year, 10) : now.getFullYear();
-
-      const data = await LeavePolicyService.getMonthlyLOP(
-        employeeId,
-        selectedMonth,
-        selectedYear
-      );
-      return res
-        .status(200)
-        .json(
-          ErrorHandler.generateSuccessResponse(
-            200,
-            "Monthly LOP fetched.",
-            data
-          )
-        );
-    } catch (err) {
-      console.error(err);
-      return res
-        .status(500)
-        .json(
-          ErrorHandler.generateErrorResponse(500, "Internal server error.")
-        );
-    }
-  }
-
-  /**
-   * PUT /api/leave-policies/:id
-   */
   static async updatePolicy(req, res) {
     try {
       const { id } = req.params;
@@ -147,7 +104,7 @@ class LeavePolicyHandler {
         .status(200)
         .json(ErrorHandler.generateSuccessResponse(200, "Policy updated."));
     } catch (err) {
-      console.error(err);
+      console.error("updatePolicy:", err);
       return res
         .status(500)
         .json(
@@ -156,9 +113,6 @@ class LeavePolicyHandler {
     }
   }
 
-  /**
-   * DELETE /api/leave-policies/:id
-   */
   static async deletePolicy(req, res) {
     try {
       const { id } = req.params;
@@ -172,7 +126,7 @@ class LeavePolicyHandler {
         .status(200)
         .json(ErrorHandler.generateSuccessResponse(200, "Policy deleted."));
     } catch (err) {
-      console.error(err);
+      console.error("deletePolicy:", err);
       return res
         .status(500)
         .json(
@@ -181,9 +135,6 @@ class LeavePolicyHandler {
     }
   }
 
-  /**
-   * GET /api/leave-policies/employee/:employeeId/leave-balance
-   */
   static async getLeaveBalanceHandler(req, res) {
     try {
       const { employeeId } = req.params;
@@ -205,7 +156,97 @@ class LeavePolicyHandler {
           )
         );
     } catch (err) {
-      console.error(err);
+      console.error("getLeaveBalanceHandler:", err);
+      return res
+        .status(500)
+        .json(
+          ErrorHandler.generateErrorResponse(500, "Internal server error.")
+        );
+    }
+  }
+
+  static async getMonthlyLOPHandler(req, res) {
+    try {
+      const { employeeId } = req.params;
+      if (!employeeId) {
+        return res
+          .status(400)
+          .json(
+            ErrorHandler.generateErrorResponse(400, "Employee ID is required.")
+          );
+      }
+
+      const now = new Date();
+      const month = req.query.month
+        ? parseInt(req.query.month, 10)
+        : now.getMonth() + 1;
+      const year = req.query.year
+        ? parseInt(req.query.year, 10)
+        : now.getFullYear();
+
+      const data = await LeavePolicyService.getMonthlyLOP(
+        employeeId,
+        month,
+        year
+      );
+
+      return res
+        .status(200)
+        .json(
+          ErrorHandler.generateSuccessResponse(
+            200,
+            "Monthly LOP fetched.",
+            data
+          )
+        );
+    } catch (err) {
+      console.error("getMonthlyLOPHandler:", err);
+      return res
+        .status(500)
+        .json(
+          ErrorHandler.generateErrorResponse(500, "Internal server error.")
+        );
+    }
+  }
+
+  static async computeMonthlyLOPHandler(req, res) {
+    try {
+      const { employeeId } = req.params;
+      if (!employeeId) {
+        return res
+          .status(400)
+          .json(
+            ErrorHandler.generateErrorResponse(400, "Employee ID is required.")
+          );
+      }
+
+      const now = new Date();
+      const month =
+        req.body?.month || req.query?.month
+          ? parseInt(req.body?.month || req.query?.month, 10)
+          : now.getMonth() + 1;
+      const year =
+        req.body?.year || req.query?.year
+          ? parseInt(req.body?.year || req.query?.year, 10)
+          : now.getFullYear();
+
+      const data = await LeavePolicyService.computeAndStoreMonthlyLOP(
+        employeeId,
+        month,
+        year
+      );
+
+      return res
+        .status(200)
+        .json(
+          ErrorHandler.generateSuccessResponse(
+            200,
+            "Monthly LOP computed & stored.",
+            data
+          )
+        );
+    } catch (err) {
+      console.error("computeMonthlyLOPHandler:", err);
       return res
         .status(500)
         .json(
