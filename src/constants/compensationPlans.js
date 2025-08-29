@@ -7,6 +7,9 @@ const INSERT_COMPENSATION_WORKING_DAYS = `
   INSERT INTO compensation_working_days (compensation_plan_id, sunday, monday, tuesday, wednesday, thursday, friday, saturday)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 `;
+////
+
+//
 
 //compensationplans
 
