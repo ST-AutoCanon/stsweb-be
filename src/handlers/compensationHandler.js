@@ -12,6 +12,9 @@ const {
 } = require("../services/compensationService");
 
 // Add compensation record
+///////
+
+///
 const addCompensationHandler = async (req, res) => {
   try {
     const { compensationPlanName, formData } = req.body;

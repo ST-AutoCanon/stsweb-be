@@ -7,11 +7,17 @@ const INSERT_COMPENSATION_WORKING_DAYS = `
   INSERT INTO compensation_working_days (compensation_plan_id, sunday, monday, tuesday, wednesday, thursday, friday, saturday)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 `;
+////
+
+//
+
+//compensationplans
 
 const GET_ALL_COMPENSATION_PLANS = `
   SELECT * FROM compensation_plans;
 `;
 
+//compensationp plan by id
 const GET_COMPENSATION_PLAN_BY_ID = `
   SELECT * FROM compensation_plans WHERE id = ?;
 `;
@@ -47,11 +53,7 @@ const DELETE_COMPENSATION_WORKING_DAYS = `
   DELETE FROM compensation_working_days WHERE compensation_plan_id = ?;
 `;
 
-// const GET_ALL_EMPLOYEE_FULL_NAMES = `
-//   SELECT employee_id, CONCAT(first_name, ' ', last_name) AS full_name
-//   FROM employees
-//   ORDER BY first_name ASC;
-// `;
+
 const GET_ALL_EMPLOYEE_FULL_NAMES = `
   SELECT employee_id, CONCAT_WS(' ', first_name, last_name) AS full_name
   FROM employees
