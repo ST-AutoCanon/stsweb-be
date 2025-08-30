@@ -7,7 +7,7 @@ module.exports = {
     FROM leavequeries lq
     JOIN employees e
       ON lq.employee_id = e.employee_id
-    WHERE lq.id = ? AND lq.employee_id = ?;
+    WHERE lq.id = ? AND lq.employee_id = ?
   `,
 
   // Update leave request if still pending
@@ -18,13 +18,13 @@ module.exports = {
         H_F_day    = ?,
         reason     = ?,
         leave_type = ?
-    WHERE id = ? AND employee_id = ?;
+    WHERE id = ? AND employee_id = ?
   `,
 
   // Delete leave request (cancel) if still pending
   DELETE_LEAVE_REQUEST: `
     DELETE FROM leavequeries
-    WHERE id = ? AND employee_id = ?;
+    WHERE id = ? AND employee_id = ?
   `,
 
   // Insert new leave request
@@ -32,7 +32,7 @@ module.exports = {
     INSERT INTO leavequeries (
       employee_id, start_date, end_date,
       H_F_day, reason, leave_type
-    ) VALUES (?, ?, ?, ?, ?, ?);
+    ) VALUES (?, ?, ?, ?, ?, ?)
   `,
 
   // Select all leave requests for a given employee
@@ -43,7 +43,7 @@ module.exports = {
     FROM leavequeries lq
     JOIN employees e
       ON lq.employee_id = e.employee_id
-    WHERE lq.employee_id = ?;
+    WHERE lq.employee_id = ?
   `,
 
   // Admin view: fetch all leave queries with department
@@ -96,7 +96,7 @@ module.exports = {
       lq.employee_id LIKE ? OR
       lq.reason LIKE ? OR
       CONCAT(e.first_name, ' ', e.last_name) LIKE ?
-    );
+    )
   `,
 
   // Query to update the status of a leave request
@@ -104,12 +104,12 @@ module.exports = {
     UPDATE leavequeries
     SET status   = ?,
         comments = ?
-    WHERE id = ?;
+    WHERE id = ?
   `,
 
   // Team lead helper: fetch employee details
   GET_EMPLOYEE_BY_ID: `
-    SELECT * FROM employees WHERE employee_id = ?;
+    SELECT * FROM employees WHERE employee_id = ?
   `,
 
   // Team lead helper: fetch employee list for department
@@ -118,10 +118,10 @@ module.exports = {
     FROM employees e
     JOIN employee_professional pr
       ON e.employee_id = pr.employee_id
-    WHERE pr.department_id = ?;
+    WHERE pr.department_id = ?
   `,
 
-  // Team lead view: leave queries for team
+  // Team lead view: leave queries for team (base — add dynamic filters in code)
   GET_LEAVE_QUERIES_FOR_TEAM: `
     SELECT
       lq.id AS leave_id,
@@ -143,24 +143,14 @@ module.exports = {
       ON e.employee_id = pr.employee_id
     LEFT JOIN departments d
       ON pr.department_id = d.id
-    WHERE 1=1;  -- add dynamic filters (e.g. department)
-  `,
-
-  GET_LEAVE_BY_ID: `
-    SELECT
-      lq.*,
-      CONCAT(e.first_name, ' ', e.last_name) AS name
-    FROM leavequeries lq
-    JOIN employees e
-      ON lq.employee_id = e.employee_id
-    WHERE lq.id = ? AND lq.employee_id = ?;
+    WHERE 1=1
   `,
 
   // NEW: fetch by leave id only
   GET_LEAVE_BY_LEAVEID: `
     SELECT *
     FROM leavequeries
-    WHERE id = ?;
+    WHERE id = ?
   `,
 
   // Updated: store the split fields into leavequeries so we have a single source of truth
@@ -173,14 +163,14 @@ module.exports = {
         loss_of_pay_days = ?,
         preserved_leave_days = ?,
         updated_at = NOW()
-    WHERE id = ?;
+    WHERE id = ?
   `,
 
-  // Adjust leave balance (deduct days) - assumes an employee_leave_balances table with (employee_id, leave_type, remaining)
+  // Adjust leave balance (deduct days)
   ADJUST_LEAVE_BALANCE: `
     UPDATE employee_leave_balances
     SET remaining = GREATEST(0, remaining - ?)
-    WHERE employee_id = ? AND leave_type = ?;
+    WHERE employee_id = ? AND leave_type = ?
   `,
 
   // Insert audit record for traceability
@@ -191,7 +181,7 @@ module.exports = {
       action,
       details,
       created_at
-    ) VALUES (?, ?, ?, ?, NOW());
+    ) VALUES (?, ?, ?, ?, NOW())
   `,
 
   // Insert LoP record for payroll (basic)
@@ -202,6 +192,21 @@ module.exports = {
       lop_days,
       reason,
       created_at
-    ) VALUES (?, ?, ?, ?, NOW());
+    ) VALUES (?, ?, ?, ?, NOW())
+  `,
+  GET_EMP_PROF_BY_ID: `
+    SELECT *
+    FROM employee_professional
+    WHERE employee_id = ?
+    LIMIT 1
+  `,
+
+  // Get employees who have a given supervisor_id
+  GET_EMPLOYEES_BY_SUPERVISOR: `
+    SELECT e.employee_id
+    FROM employees e
+    JOIN employee_professional pr
+      ON e.employee_id = pr.employee_id
+    WHERE pr.supervisor_id = ?
   `,
 };

@@ -101,12 +101,8 @@ const getLeaveQueries = async (filters = {}) => {
     throw new Error("Failed to fetch leave queries.");
   }
 };
-// Replace the existing updateLeaveRequest implementation with this.
 
-// Replace your existing updateLeaveRequest with this implementation
-
-// Fully replace updateLeaveRequest with this implementation
-
+// ---- updateLeaveRequest (unchanged from your previous robust implementation) ----
 const updateLeaveRequest = async (payload) => {
   const {
     leaveId,
@@ -525,24 +521,87 @@ const getLeaveRequests = async (
   to_date = null
 ) => {
   try {
-    let query = queries.SELECT_LEAVE_REQUESTS; // Query already includes WHERE employee_id = ?
-    const params = [employeeId];
+    // get base query (defensive: strip trailing semicolon)
+    let baseQuery = (
+      queries.SELECT_LEAVE_REQUESTS ||
+      `
+      SELECT
+        lq.id,
+        lq.employee_id,
+        lq.leave_type,
+        lq.start_date,
+        lq.end_date,
+        lq.H_F_day,
+        lq.reason,
+        lq.status,
+        lq.comments,
+        lq.created_at
+      FROM leavequeries lq
+    `
+    )
+      .trim()
+      .replace(/;$/, ""); // <-- remove any trailing semicolon
+
+    // detect if baseQuery already has WHERE and whether it already contains employee_id = ?
+    const hasWhere = /\bwhere\b/i.test(baseQuery);
+    const baseHasEmployeeCondition = /\b(lq\.)?employee_id\s*=\s*\?/i.test(
+      baseQuery
+    );
+
+    // initial params must include placeholders already present in baseQuery (e.g. employee_id = ?)
+    const initialParams = [];
+    if (baseHasEmployeeCondition && employeeId) {
+      initialParams.push(employeeId);
+    }
+
+    // build additional filter conditions (these will be appended)
+    const filterConditions = [];
+    const filterParams = [];
+
+    if (!baseHasEmployeeCondition && employeeId) {
+      // we need to add employee filter if baseQuery doesn't have it
+      filterConditions.push("lq.employee_id = ?");
+      filterParams.push(employeeId);
+    }
+
     if (from_date) {
-      query += " AND start_date >= ?";
-      params.push(from_date);
+      filterConditions.push("lq.start_date >= ?");
+      filterParams.push(from_date);
     }
     if (to_date) {
-      query += " AND end_date <= ?";
-      params.push(to_date);
+      filterConditions.push("lq.end_date <= ?");
+      filterParams.push(to_date);
     }
-    const [rows] = await db.execute(query, params);
+
+    // append WHERE / AND correctly
+    let finalQuery = baseQuery;
+    if (filterConditions.length) {
+      if (hasWhere) {
+        finalQuery += " AND " + filterConditions.join(" AND ");
+      } else {
+        finalQuery += " WHERE " + filterConditions.join(" AND ");
+      }
+    }
+
+    // ensure ORDER BY present (append if not already)
+    if (!/\border\s+by\b/i.test(finalQuery)) {
+      finalQuery += " ORDER BY lq.created_at DESC";
+    }
+
+    const finalParams = initialParams.concat(filterParams);
+
+    console.log("[getLeaveRequests] SQL:", finalQuery, "params:", finalParams);
+
+    const [rows] = await db.execute(finalQuery, finalParams);
+
     rows.forEach((row) => {
       row.start_date = toLocalDateString(row.start_date);
       row.end_date = toLocalDateString(row.end_date);
     });
+
     return rows;
   } catch (err) {
-    console.error("Error retrieving leave requests:", err.message);
+    console.error("Error retrieving leave requests:", err.message || err);
     throw new Error("Failed to retrieve leave requests.");
   }
 };
@@ -640,73 +699,146 @@ const cancelLeaveRequest = async (leaveId, employeeId) => {
   }
 };
 
-const constructWhereClause = (filters, employeeIds) => {
-  const { status, search, from_date, to_date } = filters;
+/**
+ * constructWhereClause
+ * - filters: { status, search, from_date, to_date }
+ * - employeeIds: array of employee ids to limit to (team)
+ * - tableAlias: alias to use for leavequeries table (default 'lq')
+ *
+ * IMPORTANT: use the correct alias for employees joined in the query (we use alias `e`).
+ */
+const constructWhereClause = (
+  filters = {},
+  employeeIds = [],
+  tableAlias = "lq"
+) => {
+  const { status, search, from_date, to_date } = filters || {};
   const whereConditions = [];
   const params = [];
+
   if (status) {
-    whereConditions.push("leavequeries.status = ?");
+    whereConditions.push(`${tableAlias}.status = ?`);
     params.push(status);
   }
+
   if (search) {
-    whereConditions.push(`
-      (leavequeries.employee_id LIKE ? OR 
-       leavequeries.reason LIKE ? OR 
-       CONCAT(employees.first_name, ' ', employees.last_name) LIKE ?)
-    `);
+    // NOTE: the employees table in our SELECT is joined as alias `e` in team query strings,
+    // so use alias `e` here (not the literal 'employees') to avoid unknown column errors.
+    whereConditions.push(
+      `(${tableAlias}.employee_id LIKE ? OR ${tableAlias}.reason LIKE ? OR CONCAT(e.first_name, ' ', e.last_name) LIKE ?)`
+    );
     params.push(`%${search}%`, `%${search}%`, `%${search}%`);
   }
+
   if (from_date) {
-    whereConditions.push("leavequeries.start_date >= ?");
+    whereConditions.push(`${tableAlias}.start_date >= ?`);
     params.push(from_date);
   }
   if (to_date) {
-    whereConditions.push("leavequeries.end_date <= ?");
+    whereConditions.push(`${tableAlias}.end_date <= ?`);
     params.push(to_date);
   }
-  if (employeeIds.length > 0) {
-    whereConditions.push(
-      `leavequeries.employee_id IN (${employeeIds.map(() => "?").join(", ")})`
-    );
-    params.push(...employeeIds);
+
+  // employeeIds handling:
+  if (Array.isArray(employeeIds)) {
+    if (employeeIds.length > 0) {
+      whereConditions.push(
+        `${tableAlias}.employee_id IN (${employeeIds
+          .map(() => "?")
+          .join(", ")})`
+      );
+      params.push(...employeeIds);
+    } else if (employeeIds.length === 0) {
+      // caller explicitly passed empty array -> return no rows
+      // append an always-false condition rather than generating IN ()
+      whereConditions.push("1=0");
+    }
   }
+
   return { whereConditions, params };
 };
 
 const getLeaveQueriesForTeamLead = async (filters = {}, teamLeadId) => {
   try {
-    const [teamLead] = await db.execute(queries.GET_EMPLOYEE_BY_ID, [
+    const [profRows] = await db.execute(queries.GET_EMP_PROF_BY_ID, [
       teamLeadId,
     ]);
-    if (teamLead.length === 0) {
-      throw new Error("Team lead not found.");
+    if (!profRows || profRows.length === 0) {
+      throw new Error("Team lead professional profile not found.");
     }
-    const departmentId = teamLead[0].department_id;
-    const [teamMembers] = await db.execute(
-      queries.GET_EMPLOYEES_BY_DEPARTMENT,
-      [departmentId]
-    );
-    if (teamMembers.length === 0) {
-      throw new Error("No team members found in the same department.");
+    const prof = profRows[0];
+
+    // role normalization + hierarchy sets
+    const roleName = (prof.role || "").toString().trim().toLowerCase();
+    const supervisorOrAbove = new Set([
+      "supervisor",
+      "manager",
+      "admin",
+      "ceo",
+      "super admin",
+    ]);
+    const managerOrAbove = new Set(["manager", "admin", "ceo", "super admin"]);
+
+    const employeeIdSet = new Set();
+
+    // 1) direct reports (supervisor_id)
+    if (supervisorOrAbove.has(roleName)) {
+      const [directRows] = await db.execute(
+        queries.GET_EMPLOYEES_BY_SUPERVISOR,
+        [teamLeadId]
+      );
+      (directRows || []).forEach((r) => {
+        if (r && r.employee_id) employeeIdSet.add(r.employee_id);
+      });
     }
-    const employeeIds = teamMembers
-      .map((member) => member.employee_id)
-      .filter((id) => id !== teamLead[0].employee_id);
+
+    // 2) department members (manager and above)
+    if (managerOrAbove.has(roleName) && prof.department_id) {
+      try {
+        const [deptRows] = await db.execute(
+          queries.GET_EMPLOYEES_BY_DEPARTMENT,
+          [prof.department_id]
+        );
+        (deptRows || []).forEach((r) => {
+          if (r && r.employee_id) employeeIdSet.add(r.employee_id);
+        });
+      } catch (err) {
+        console.warn(
+          "Warning: failed to fetch department employees:",
+          err && err.message ? err.message : err
+        );
+      }
+    }
+
+    const employeeIds = Array.from(employeeIdSet);
+
+    // Use table alias 'lq' because GET_LEAVE_QUERIES_FOR_TEAM selects FROM leavequeries lq
     const { whereConditions, params } = constructWhereClause(
       filters,
-      employeeIds
+      employeeIds,
+      "lq"
     );
+
+    // Compose final query
     const query =
       queries.GET_LEAVE_QUERIES_FOR_TEAM +
       (whereConditions.length ? " AND " + whereConditions.join(" AND ") : "");
+
+    console.log("[getLeaveQueriesForTeamLead] SQL:", query, "params:", params);
+
     const [rows] = await db.execute(query, params);
+
     rows.forEach((row) => {
       row.start_date = toLocalDateString(row.start_date);
       row.end_date = toLocalDateString(row.end_date);
     });
+
     return rows;
   } catch (err) {
-    console.error("Error fetching leave queries for team lead:", err.message);
+    console.error(
+      "Error fetching leave queries for team lead:",
+      err && err.message ? err.message : err
+    );
     throw new Error("Failed to fetch leave queries for team lead.");
   }
 };
