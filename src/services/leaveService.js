@@ -842,7 +842,7 @@ const getLeaveQueriesForTeamLead = async (filters = {}, teamLeadId) => {
     throw new Error("Failed to fetch leave queries for team lead.");
   }
 };
-
+// getLeaveQueries;
 module.exports = {
   getLeaveQueries,
   updateLeaveRequest,
