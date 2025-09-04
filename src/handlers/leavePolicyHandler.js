@@ -3,6 +3,60 @@ const LeavePolicyService = require("../services/leavePolicyService");
 const ErrorHandler = require("../utils/errorHandler");
 
 class LeavePolicyHandler {
+  static async autoExtendHandler(req, res) {
+    try {
+      const actorFromHeader = req.headers["x-employee-id"];
+      const actorId = actorFromHeader || req.body?.actorId || "system";
+      const extensionDays = Number(req.body?.extensionDays) || 90;
+
+      const created = await LeavePolicyService.autoExtendRecentPolicies(
+        extensionDays,
+        actorId
+      );
+
+      return res.json({
+        success: true,
+        created,
+        message:
+          created.length > 0
+            ? `${created.length} policy(ies) auto-extended by ${extensionDays} day(s).`
+            : "No policies needed auto-extension.",
+      });
+    } catch (err) {
+      console.error("[autoExtendHandler] error:", err);
+      return res
+        .status(500)
+        .json({ success: false, message: "Failed to auto-extend policies." });
+    }
+  }
+
+  static async autoExtendHandler(req, res) {
+    try {
+      const actorFromHeader = req.headers["x-employee-id"];
+      const actorId = actorFromHeader || req.body?.actorId || "system";
+      const extensionDays = Number(req.body?.extensionDays) || 90;
+
+      const created = await LeavePolicyService.autoExtendRecentPolicies(
+        extensionDays,
+        actorId
+      );
+
+      return res.json({
+        success: true,
+        created,
+        message:
+          created.length > 0
+            ? `${created.length} policy(ies) auto-extended by ${extensionDays} day(s).`
+            : "No policies needed auto-extension.",
+      });
+    } catch (err) {
+      console.error("[autoExtendHandler] error:", err);
+      return res
+        .status(500)
+        .json({ success: false, message: "Failed to auto-extend policies." });
+    }
+  }
+
   static async getAllPolicies(req, res) {
     try {
       const policies = await LeavePolicyService.getAllPolicies();
@@ -17,11 +71,7 @@ class LeavePolicyHandler {
         );
     } catch (err) {
       console.error("getAllPolicies:", err);
-      return res
-        .status(500)
-        .json(
-          ErrorHandler.generateErrorResponse(500, "Internal server error.")
-        );
+      return internalError(res, "getAllPolicies");
     }
   }
 
@@ -256,4 +306,31 @@ class LeavePolicyHandler {
   }
 }
 
+exports.autoExtendHandler = async (req, res) => {
+  try {
+    // actorId: prefer header x-employee-id, fallback to body.actorId or "system"
+    const actorFromHeader = req.headers["x-employee-id"];
+    const actorId = actorFromHeader || req.body?.actorId || "system";
+    const extensionDays = Number(req.body?.extensionDays) || 90;
+
+    const created = await LeavePolicyService.autoExtendRecentPolicies(
+      extensionDays,
+      actorId
+    );
+
+    return res.json({
+      success: true,
+      created,
+      message:
+        created.length > 0
+          ? `${created.length} policy(ies) auto-extended by ${extensionDays} day(s).`
+          : "No policies needed auto-extension.",
+    });
+  } catch (err) {
+    console.error("[autoExtendHandler] error:", err);
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to auto-extend policies." });
+  }
+};
 module.exports = LeavePolicyHandler;

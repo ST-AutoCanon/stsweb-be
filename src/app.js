@@ -9,7 +9,7 @@ const { Server } = require("socket.io");
 const cron = require("node-cron");
 const policyNotificationService = require("./services/policyNotificationService");
 cron.schedule(
-  "25 10 * * *",
+  "14 00 * * *",
   async () => {
     try {
       await policyNotificationService.sendPolicyEndNotifications(10);
@@ -172,6 +172,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use("/", holidayRoutes);
 app.use("/", loginRoutes);
 app.use("/", leaveRoutes);
+
 app.use("/", projects);
 app.use("/", invoices);
 app.use("/", employeeRoutes);

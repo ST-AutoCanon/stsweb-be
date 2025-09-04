@@ -481,6 +481,105 @@ const getLeaveBalance = async (employeeId) => {
   return result;
 };
 
+async function autoExtendRecentPolicies(
+  extensionDays = 90,
+  actorId = "system"
+) {
+  if (!Number.isFinite(Number(extensionDays)) || extensionDays <= 0) {
+    extensionDays = 90;
+  }
+  const created = [];
+  try {
+    // fetch all policies (re-uses your getAll query)
+    const [policies] = await db.execute(queries.getAll);
+    const today = new Date();
+    const msWindow = extensionDays * 24 * 60 * 60 * 1000;
+
+    for (const p of policies) {
+      try {
+        // p.year_end is already formatted as YYYY-MM-DD by the query
+        if (!p.year_end) continue;
+        const origEnd = new Date(p.year_end + "T00:00:00"); // local midnight
+        if (isNaN(origEnd.getTime())) continue;
+
+        // If policy still active (end >= today) skip
+        if (origEnd >= today) continue;
+
+        const elapsed = today.getTime() - origEnd.getTime();
+        // Only extend if within extension window
+        if (elapsed > msWindow) continue;
+
+        // compute new end date = origEnd + extensionDays
+        const newEndDate = new Date(origEnd.getTime() + msWindow);
+        const newEndStr = newEndDate.toISOString().split("T")[0];
+
+        // Avoid duplicate auto-extensions: if there's already a policy
+        // with same year_start and year_end >= newEndDate, skip
+        const duplicate = policies.some((q) => {
+          if (!q.year_start || !q.year_end) return false;
+          return (
+            String(q.year_start) === String(p.year_start) &&
+            new Date(q.year_end + "T00:00:00") >= newEndDate
+          );
+        });
+        if (duplicate) continue;
+
+        // Create new policy row (period annotated)
+        const newPeriod = `${p.period} (auto-extended)`;
+        const leaveSettingsJson =
+          typeof p.leave_settings === "string"
+            ? p.leave_settings
+            : JSON.stringify(p.leave_settings || []);
+        const [res] = await db.execute(queries.create, [
+          newPeriod,
+          p.year_start,
+          newEndStr,
+          leaveSettingsJson,
+        ]);
+
+        const newPolicyId = res && res.insertId ? res.insertId : null;
+
+        // Insert audit record into leave_audit.
+        // Use leave_id = NULL because this audit is about policies (not a specific leave).
+        const details = {
+          type: "policy_auto_extension",
+          originalPolicyId: p.id,
+          newPolicyId,
+          originalYearEnd: p.year_end,
+          newYearEnd: newEndStr,
+          extensionDays: Number(extensionDays),
+          createdAt: new Date().toISOString(),
+        };
+
+        // queries.INSERT_LEAVE_AUDIT expects [leave_id, actor_id, action, details]
+        await db.execute(queries.INSERT_LEAVE_AUDIT, [
+          null,
+          actorId || "system",
+          "policy_auto_extended",
+          JSON.stringify(details),
+        ]);
+
+        created.push({
+          originalPolicyId: p.id,
+          newPolicyId,
+          newYearEnd: newEndStr,
+        });
+      } catch (innerErr) {
+        // log and continue with other policies
+        console.warn(
+          "[autoExtendRecentPolicies] failed to extend policy id:",
+          p && p.id,
+          innerErr && innerErr.message
+        );
+      }
+    }
+    return created;
+  } catch (err) {
+    console.error("[autoExtendRecentPolicies] unexpected error:", err);
+    throw err;
+  }
+}
+
 module.exports = {
   getAllPolicies,
   createPolicy,
@@ -494,4 +593,5 @@ module.exports = {
   getUsedLeavesInPeriod,
   computeEarnedLeavesFromWorked,
   getEmployeeCarryForwards,
+  autoExtendRecentPolicies,
 };
