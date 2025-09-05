@@ -17,10 +17,6 @@ class LeavePolicyHandler {
       return res.json({
         success: true,
         created,
-        message:
-          created.length > 0
-            ? `${created.length} policy(ies) auto-extended by ${extensionDays} day(s).`
-            : "No policies needed auto-extension.",
       });
     } catch (err) {
       console.error("[autoExtendHandler] error:", err);
@@ -44,10 +40,6 @@ class LeavePolicyHandler {
       return res.json({
         success: true,
         created,
-        message:
-          created.length > 0
-            ? `${created.length} policy(ies) auto-extended by ${extensionDays} day(s).`
-            : "No policies needed auto-extension.",
       });
     } catch (err) {
       console.error("[autoExtendHandler] error:", err);
@@ -321,10 +313,6 @@ exports.autoExtendHandler = async (req, res) => {
     return res.json({
       success: true,
       created,
-      message:
-        created.length > 0
-          ? `${created.length} policy(ies) auto-extended by ${extensionDays} day(s).`
-          : "No policies needed auto-extension.",
     });
   } catch (err) {
     console.error("[autoExtendHandler] error:", err);

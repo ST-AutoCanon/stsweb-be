@@ -1,9 +1,10 @@
+// src/services/leavePolicyService.js
 const db = require("../config");
 const queries = require("../constants/leavePolicyQueries");
 const dayjs = require("dayjs");
 
 /**
- * Safely parse the `leave_settings` column.
+ * Safely parse JSON leave_settings column into Array.
  */
 function safeParseSettings(raw) {
   if (!raw) return [];
@@ -18,11 +19,41 @@ function safeParseSettings(raw) {
 }
 
 /**
- * Fetch per-employee carry-forward rows for a given year and return a
- * normalized map where keys are lowercased & trimmed leave_type values.
- *
- * Returns: { <leave_type_lower>: <amount>, ... }
+ * Parse a date-like value into a local Date at midnight (no timezone shift).
+ * Accepts Date, ISO strings, or 'YYYY-MM-DD' strings.
+ * Returns null if invalid.
  */
+function parseLocalDate(dateInput) {
+  if (!dateInput && dateInput !== 0) return null;
+  if (dateInput instanceof Date && !isNaN(dateInput.getTime())) {
+    return new Date(
+      dateInput.getFullYear(),
+      dateInput.getMonth(),
+      dateInput.getDate()
+    );
+  }
+  const s = String(dateInput).trim();
+  // YYYY-MM-DD common case
+  const parts = s.split("-");
+  if (parts.length === 3 && /^[0-9]{4}$/.test(parts[0])) {
+    const [y, m, d] = parts;
+    const Y = Number(y),
+      M = Number(m) - 1,
+      D = Number(d);
+    if (!Number.isNaN(Y) && !Number.isNaN(M) && !Number.isNaN(D)) {
+      return new Date(Y, M, D);
+    }
+  }
+  // fallback to Date constructor (may parse ISO)
+  const parsed = new Date(s);
+  if (!isNaN(parsed.getTime())) {
+    return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  }
+  return null;
+}
+
+/* ------------------ helpers for leave balances / LOP (unchanged logic) ------------------ */
+
 async function getEmployeeCarryForwards(employeeId, year) {
   if (!employeeId) return {};
   try {
@@ -31,13 +62,10 @@ async function getEmployeeCarryForwards(employeeId, year) {
       year,
     ]);
     const map = {};
-    if (Array.isArray(rows)) {
-      rows.forEach((r) => {
-        if (!r || r.leave_type == null) return;
-        const key = String(r.leave_type).trim().toLowerCase();
-        map[key] = Number(r.amount || 0);
-      });
-    }
+    (rows || []).forEach((r) => {
+      if (!r || r.leave_type == null) return;
+      map[String(r.leave_type).trim().toLowerCase()] = Number(r.amount || 0);
+    });
     return map;
   } catch (err) {
     console.error("getEmployeeCarryForwards error:", err);
@@ -45,21 +73,14 @@ async function getEmployeeCarryForwards(employeeId, year) {
   }
 }
 
-/**
- * Return all leave policies, with `leave_settings` parsed.
- */
 const getAllPolicies = async () => {
   const [rows] = await db.execute(queries.getAll);
-  return rows.map((r) => ({
+  return (rows || []).map((r) => ({
     ...r,
     leave_settings: safeParseSettings(r.leave_settings),
   }));
 };
 
-/**
- * Insert a new policy and return the inserted row,
- * parsing its `leave_settings` safely.
- */
 const createPolicy = async ({
   period,
   year_start,
@@ -72,10 +93,9 @@ const createPolicy = async ({
     year_end,
     JSON.stringify(leave_settings),
   ]);
-
   const [newRows] = await db.execute(queries.getById, [result.insertId]);
   const policy = newRows[0];
-  policy.leave_settings = safeParseSettings(policy.leave_settings);
+  if (policy) policy.leave_settings = safeParseSettings(policy.leave_settings);
   return policy;
 };
 
@@ -96,9 +116,8 @@ const deletePolicy = async (id) => {
   await db.execute(queries.remove, [id]);
 };
 
-/**
- * Get worked days for employee between two dates (inclusive).
- */
+/* ------------------ LOP / monthly helpers (kept same as your working code) ------------------ */
+
 async function getWorkedDays(employeeId, periodStart, periodEnd) {
   const [rows] = await db.execute(queries.GET_WORKED_DAYS, [
     employeeId,
@@ -107,8 +126,8 @@ async function getWorkedDays(employeeId, periodStart, periodEnd) {
   ]);
   return Number(rows[0]?.worked_days || 0);
 }
+
 const getUsedLeavesInPeriod = async (employeeId, periodStart, periodEnd) => {
-  // params ordering matches the query: employeeId, start, end, start, end, start, end
   const params = [
     employeeId,
     periodStart,
@@ -118,25 +137,23 @@ const getUsedLeavesInPeriod = async (employeeId, periodStart, periodEnd) => {
     periodStart,
     periodEnd,
   ];
-
   try {
     const [rows] = await db.execute(queries.GET_USED_LEAVES_IN_PERIOD, params);
-    // rows: [{ leave_type: 'casual', used: 2 }, ...]
     const map = {};
-    (rows || []).forEach((r) => {
-      const key = String(r.leave_type || "")
-        .trim()
-        .toLowerCase();
-      // ensure numeric (could be decimal)
-      map[key] = Number(r.used || 0);
-    });
+    (rows || []).forEach(
+      (r) =>
+        (map[
+          String(r.leave_type || "")
+            .trim()
+            .toLowerCase()
+        ] = Number(r.used || 0))
+    );
     return map;
   } catch (err) {
     console.error(
       "getUsedLeavesInPeriod failed:",
       err && err.message ? err.message : err
     );
-    // return empty map so higher-level logic treats used as 0
     return {};
   }
 };
@@ -148,82 +165,45 @@ function computeEarnedLeavesFromWorked(
 ) {
   if (!workingDaysRequired || Number(workingDaysRequired) <= 0) return 0;
   if (!earnedLeavesGrant || Number(earnedLeavesGrant) <= 0) return 0;
-  console.log("worked days", workedDays);
-  console.log("working days required", workingDaysRequired);
   const ratio = Number(workedDays) / Number(workingDaysRequired);
   if (!isFinite(ratio) || ratio <= 0) return 0;
-  console.log("ratio", ratio);
-  const value = ratio * Number(earnedLeavesGrant);
-  return Number(value.toFixed(1)); // change decimal places as needed
+  return Number((ratio * Number(earnedLeavesGrant)).toFixed(1));
 }
-async function computeAndStoreMonthlyLOP(employeeId, month, year) {
-  console.log(
-    `[computeAndStoreMonthlyLOP] START employee=${employeeId} month=${month} year=${year}`
-  );
 
+async function computeAndStoreMonthlyLOP(employeeId, month, year) {
+  console.log(`[computeAndStoreMonthlyLOP] ${employeeId} ${month}-${year}`);
   if (!employeeId) throw new Error("employeeId required");
   const m = Number(month);
   const y = Number(year);
-
-  if (!Number.isFinite(m) || m < 1 || m > 12 || !Number.isFinite(y)) {
-    throw new Error("Invalid month/year passed to computeAndStoreMonthlyLOP");
-  }
-
+  if (!Number.isFinite(m) || m < 1 || m > 12 || !Number.isFinite(y))
+    throw new Error("Invalid month/year");
   const periodStart = `${y}-${String(m).padStart(2, "0")}-01`;
   const lastDay = new Date(y, m, 0).getDate();
   const periodEnd = `${y}-${String(m).padStart(2, "0")}-${String(
     lastDay
   ).padStart(2, "0")}`;
 
-  console.log(
-    `[computeAndStoreMonthlyLOP] periodStart=${periodStart} periodEnd=${periodEnd}`
-  );
-
-  // 1. First, try to get explicit LOP days from approved leave queries for this period
+  // explicit LOP
   const [lopRows] = await db.execute(
-    `SELECT SUM(loss_of_pay_days) AS total_lop_days
-     FROM leavequeries
-     WHERE employee_id = ?
-       AND status = 'Approved'
-       AND start_date <= ?
-       AND end_date >= ?`,
+    `SELECT SUM(loss_of_pay_days) AS total_lop_days FROM leavequeries WHERE employee_id = ? AND status = 'Approved' AND start_date <= ? AND end_date >= ?`,
     [employeeId, periodEnd, periodStart]
   );
-
   const explicitLOP = Number(lopRows[0]?.total_lop_days || 0);
-
   if (explicitLOP > 0) {
-    console.log(
-      `[computeAndStoreMonthlyLOP] Found explicit LOP=${explicitLOP}, overriding computed logic.`
-    );
-
-    try {
-      await db.execute(queries.UPSERT_EMPLOYEE_MONTHLY_LOP, [
-        employeeId,
-        m,
-        y,
-        explicitLOP,
-      ]);
-      console.log(
-        `[computeAndStoreMonthlyLOP] persisted LOP for ${employeeId} ${m}-${y} => ${explicitLOP}`
-      );
-    } catch (persistErr) {
-      console.error(
-        "[computeAndStoreMonthlyLOP] Failed to persist monthly LOP:",
-        persistErr
-      );
-      throw persistErr;
-    }
-
+    await db.execute(queries.UPSERT_EMPLOYEE_MONTHLY_LOP, [
+      employeeId,
+      m,
+      y,
+      explicitLOP,
+    ]);
     return { month: m, year: y, total_lop: explicitLOP };
   }
 
-  // 2. If no explicit LOP found, fall back to computed logic (allowance-based)
+  // fallback compute
   const policies = await getAllPolicies().catch((e) => {
     console.warn("getAllPolicies failed:", e);
     return [];
   });
-
   let active = null;
   if (Array.isArray(policies) && policies.length > 0) {
     active = policies.find(
@@ -231,17 +211,13 @@ async function computeAndStoreMonthlyLOP(employeeId, month, year) {
         new Date(p.year_start) <= new Date(periodEnd) &&
         new Date(p.year_end) >= new Date(periodStart)
     );
-    if (!active) {
+    if (!active)
       active = policies
         .slice()
         .sort((a, b) => new Date(b.year_start) - new Date(a.year_start))[0];
-    }
   }
 
   if (!active) {
-    console.log(
-      "[computeAndStoreMonthlyLOP] No active policy found. Persisting lop=0"
-    );
     await db.execute(queries.UPSERT_EMPLOYEE_MONTHLY_LOP, [
       employeeId,
       m,
@@ -251,47 +227,26 @@ async function computeAndStoreMonthlyLOP(employeeId, month, year) {
     return { month: m, year: y, total_lop: 0 };
   }
 
-  // used leaves overlapping this month (approved only)
   const usedByType = await getUsedLeavesInPeriod(
     employeeId,
     periodStart,
     periodEnd
-  ).catch((e) => {
-    console.warn("getUsedLeavesInPeriod failed:", e);
-    return {};
-  });
-  console.log("[computeAndStoreMonthlyLOP] usedByType:", usedByType);
-
-  const policyPeriodStart = active.year_start;
+  ).catch(() => ({}));
   const workedUntilMonthEnd = await getWorkedDays(
     employeeId,
-    policyPeriodStart,
+    active.year_start,
     periodEnd
-  ).catch((e) => {
-    console.warn("getWorkedDays failed:", e);
-    return 0;
-  });
-  console.log(
-    "[computeAndStoreMonthlyLOP] workedUntilMonthEnd:",
-    workedUntilMonthEnd
-  );
-
+  ).catch(() => 0);
   const policyYear = new Date(active.year_start).getFullYear();
   const employeeCFMap = await getEmployeeCarryForwards(
     employeeId,
     policyYear
-  ).catch((e) => {
-    console.warn("getEmployeeCarryForwards failed:", e);
-    return {};
-  });
-  console.log("[computeAndStoreMonthlyLOP] employeeCFMap:", employeeCFMap);
-
+  ).catch(() => ({}));
   const settings = Array.isArray(active.leave_settings)
     ? active.leave_settings
     : safeParseSettings(active.leave_settings);
 
   let total_lop = 0;
-
   for (const setting of settings) {
     try {
       const typeKey = String(setting.type || "")
@@ -299,11 +254,11 @@ async function computeAndStoreMonthlyLOP(employeeId, month, year) {
         .toLowerCase();
       const used = Number((usedByType && usedByType[typeKey]) || 0);
       const annualStatic = Number(setting.value || 0);
-      const policyCarryForwardAllowed = Number(setting.carry_forward || 0);
-      const employeeCarry = employeeCFMap[typeKey];
+      const policyCarry = Number(setting.carry_forward || 0);
+      const empCarry = employeeCFMap[typeKey];
       const carryForward =
-        employeeCarry !== undefined
-          ? Math.min(Number(employeeCarry || 0), policyCarryForwardAllowed)
+        empCarry !== undefined
+          ? Math.min(Number(empCarry || 0), policyCarry)
           : 0;
       const isEarned = typeKey === "earned";
       const monthlyStaticAllowance = isEarned
@@ -312,161 +267,106 @@ async function computeAndStoreMonthlyLOP(employeeId, month, year) {
 
       let earnedUntilMonthEnd = 0;
       if (isEarned) {
-        const workingDaysRequired = Number(setting.working_days || 0);
-        const earnedLeavesGrant = Number(setting.earned_leaves || 0);
         earnedUntilMonthEnd = computeEarnedLeavesFromWorked(
           workedUntilMonthEnd,
-          workingDaysRequired,
-          earnedLeavesGrant
+          Number(setting.working_days || 0),
+          Number(setting.earned_leaves || 0)
         );
       }
 
       const allowance =
         monthlyStaticAllowance + earnedUntilMonthEnd + carryForward;
       const lopForType = Math.max(Number(used) - allowance, 0);
-
-      console.log(
-        `[computeAndStoreMonthlyLOP] type=${typeKey} used=${used} allowance=${allowance} lopForType=${lopForType}`
-      );
-
       total_lop += lopForType;
-    } catch (innerErr) {
-      console.warn("[computeAndStoreMonthlyLOP] error in loop:", innerErr);
+    } catch (e) {
+      console.warn("computeAndStoreMonthlyLOP inner error:", e);
     }
   }
 
   total_lop = Number(total_lop.toFixed(2));
-  console.log(
-    "[computeAndStoreMonthlyLOP] total_lop (computed fallback) =",
-    total_lop
-  );
-
-  try {
-    await db.execute(queries.UPSERT_EMPLOYEE_MONTHLY_LOP, [
-      employeeId,
-      m,
-      y,
-      total_lop,
-    ]);
-    console.log(
-      `[computeAndStoreMonthlyLOP] persisted LOP for ${employeeId} ${m}-${y} => ${total_lop}`
-    );
-  } catch (persistErr) {
-    console.error(
-      "[computeAndStoreMonthlyLOP] Failed to persist monthly LOP:",
-      persistErr
-    );
-    throw persistErr;
-  }
-
+  await db.execute(queries.UPSERT_EMPLOYEE_MONTHLY_LOP, [
+    employeeId,
+    m,
+    y,
+    total_lop,
+  ]);
   return { month: m, year: y, total_lop };
 }
 
-/**
- * Return monthly LOP — first tries stored value, otherwise computes & stores it.
- */
 const getMonthlyLOP = async (employeeId, month, year) => {
   if (!employeeId) throw new Error("employeeId required");
-  const m = Number(month);
-  const y = Number(year);
-
-  // try fetch stored
+  const m = Number(month),
+    y = Number(year);
   const [rows] = await db.execute(queries.GET_EMPLOYEE_MONTHLY_LOP, [
     employeeId,
     m,
     y,
   ]);
-  if (rows && rows[0]) {
+  if (rows && rows[0])
     return {
       month: m,
       year: y,
       total_lop: Number(rows[0].lop || 0),
       computed_at: rows[0].computed_at,
     };
-  }
-
-  // compute & persist
-  const result = await computeAndStoreMonthlyLOP(employeeId, m, y);
-  return result;
+  return await computeAndStoreMonthlyLOP(employeeId, m, y);
 };
 
 const getLeaveBalance = async (employeeId) => {
   if (!employeeId) throw new Error("employeeId required");
-
   const policies = await getAllPolicies();
   if (!policies || policies.length === 0) return [];
-
-  // Use most recent policy as before
   const active = policies
     .slice()
     .sort((a, b) => new Date(b.year_start) - new Date(a.year_start))[0];
   if (!active) return [];
-
-  // compute workedDays from policy start up to now (for earned)
   const now = new Date();
   const upToDate =
     now > new Date(active.year_end)
       ? active.year_end
       : now.toISOString().split("T")[0];
-  const workedDaysForPolicyTillNow = await getWorkedDays(
+  const workedDays = await getWorkedDays(
     employeeId,
     active.year_start,
     upToDate
   );
-
-  // used leaves within policy period aggregated by type (normalized)
   const usedMap = await getUsedLeavesInPeriod(
     employeeId,
     active.year_start,
     active.year_end
   );
-
-  // fetch per-employee carry forwards for the policy year (normalized keys)
   const policyYear = new Date(active.year_start).getFullYear();
   const employeeCFMap = await getEmployeeCarryForwards(employeeId, policyYear);
-
   const settings = Array.isArray(active.leave_settings)
     ? active.leave_settings
     : safeParseSettings(active.leave_settings);
 
-  const result = settings.map((setting) => {
-    const type = setting.type;
-    const typeKey = String(type || "")
+  return settings.map((setting) => {
+    const typeKey = String(setting.type || "")
       .trim()
       .toLowerCase();
-
-    // normalized used lookup
     const used = Number(usedMap[typeKey] || 0);
-
-    // policy allowed carry_forward (maximum allowed to carry)
     const policyCarryAllowed = Number(setting.carry_forward || 0);
-
-    // actual carry-forward must come from employee_leave_carry_forward table.
     const employeeCarry = employeeCFMap[typeKey];
     const carryForward =
       employeeCarry !== undefined
         ? Math.min(Number(employeeCarry || 0), policyCarryAllowed)
         : 0;
-
     const annual = Number(setting.value || 0);
-
-    let earnedFromAttendance = 0;
-    if (typeKey === "earned") {
-      earnedFromAttendance = computeEarnedLeavesFromWorked(
-        workedDaysForPolicyTillNow,
-        Number(setting.working_days || 0),
-        Number(setting.earned_leaves || 0)
-      );
-    }
-
+    const earnedFromAttendance =
+      typeKey === "earned"
+        ? computeEarnedLeavesFromWorked(
+            workedDays,
+            Number(setting.working_days || 0),
+            Number(setting.earned_leaves || 0)
+          )
+        : 0;
     const allowance =
       (typeKey === "earned" ? earnedFromAttendance : annual) + carryForward;
-
     const remaining = Math.max(allowance - used, 0);
     const loss_of_pay = Math.max(used - allowance, 0);
-
     return {
-      type,
+      type: setting.type,
       enabled: !!setting.enabled,
       annual_allowance: annual,
       earned: earnedFromAttendance,
@@ -477,105 +377,166 @@ const getLeaveBalance = async (employeeId) => {
       loss_of_pay,
     };
   });
-
-  return result;
 };
 
+/* ------------------ AUTO-EXTEND: primary function you need ------------------ */
+
+/**
+ * Auto-extend recently ended policies by adding `extensionDays` to year_end.
+ * - extensionDays: days to add (default 90)
+ * - actorId: to record in leave_audit actor_id
+ *
+ * Returns array of updated policy rows.
+ */
 async function autoExtendRecentPolicies(
   extensionDays = 90,
   actorId = "system"
 ) {
-  if (!Number.isFinite(Number(extensionDays)) || extensionDays <= 0) {
-    extensionDays = 90;
+  const policies = await getAllPolicies();
+  if (!Array.isArray(policies) || policies.length === 0) {
+    console.log("[autoExtendRecentPolicies] no policies found");
+    return [];
   }
-  const created = [];
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const cutoff = new Date(today);
+  cutoff.setDate(cutoff.getDate() - Number(extensionDays || 90));
+
+  console.log(
+    `[autoExtendRecentPolicies] today=${today
+      .toISOString()
+      .slice(0, 10)} cutoff=${cutoff
+      .toISOString()
+      .slice(0, 10)} extensionDays=${extensionDays}`
+  );
+
+  const candidates = [];
+  for (const p of policies) {
+    const end = parseLocalDate(p.year_end);
+    if (!end) {
+      console.warn(
+        "[autoExtendRecentPolicies] skipping policy with invalid year_end:",
+        p
+      );
+      continue;
+    }
+    // Accept policies that ended on or before today, but not older than cutoff
+    // (i.e. year_end <= today && year_end >= cutoff)
+    const endedOnOrBeforeToday = end <= today;
+    const newerThanCutoff = end >= cutoff;
+    console.log(
+      `[autoExtendRecentPolicies] policy id=${p.id} year_end=${
+        p.year_end
+      } parsed=${end
+        .toISOString()
+        .slice(
+          0,
+          10
+        )} endedOnOrBeforeToday=${endedOnOrBeforeToday} newerThanCutoff=${newerThanCutoff}`
+    );
+    if (endedOnOrBeforeToday && newerThanCutoff) {
+      candidates.push({ policy: p, end });
+    }
+  }
+
+  if (candidates.length === 0) {
+    console.log(
+      "[autoExtendRecentPolicies] no policies to extend based on cutoff"
+    );
+    return [];
+  }
+
+  const conn = await db.getConnection();
   try {
-    // fetch all policies (re-uses your getAll query)
-    const [policies] = await db.execute(queries.getAll);
-    const today = new Date();
-    const msWindow = extensionDays * 24 * 60 * 60 * 1000;
+    await conn.beginTransaction();
+    const updated = [];
 
-    for (const p of policies) {
+    for (const item of candidates) {
+      const p = item.policy;
+      const oldEnd = item.end;
+
+      const newEnd = new Date(oldEnd);
+      newEnd.setDate(newEnd.getDate() + Number(extensionDays || 90));
+
+      const newEndStr = `${newEnd.getFullYear()}-${String(
+        newEnd.getMonth() + 1
+      ).padStart(2, "0")}-${String(newEnd.getDate()).padStart(2, "0")}`;
+
+      // Update in-place
+      await conn.execute(`UPDATE leave_policy SET year_end = ? WHERE id = ?`, [
+        newEndStr,
+        p.id,
+      ]);
+
+      // Prepare audit details
+      const detailsObj = {
+        action: "auto_extend_policy",
+        extensionDays: Number(extensionDays || 90),
+        policyId: p.id,
+        oldYearEnd: `${oldEnd.getFullYear()}-${String(
+          oldEnd.getMonth() + 1
+        ).padStart(2, "0")}-${String(oldEnd.getDate()).padStart(2, "0")}`,
+        newYearEnd: newEndStr,
+      };
+      const details = JSON.stringify(detailsObj);
+
+      // Insert audit row. leave_id is policy-level, so pass NULL.
+      // But if DB disallows NULL for leave_id, fallback to 0.
       try {
-        // p.year_end is already formatted as YYYY-MM-DD by the query
-        if (!p.year_end) continue;
-        const origEnd = new Date(p.year_end + "T00:00:00"); // local midnight
-        if (isNaN(origEnd.getTime())) continue;
-
-        // If policy still active (end >= today) skip
-        if (origEnd >= today) continue;
-
-        const elapsed = today.getTime() - origEnd.getTime();
-        // Only extend if within extension window
-        if (elapsed > msWindow) continue;
-
-        // compute new end date = origEnd + extensionDays
-        const newEndDate = new Date(origEnd.getTime() + msWindow);
-        const newEndStr = newEndDate.toISOString().split("T")[0];
-
-        // Avoid duplicate auto-extensions: if there's already a policy
-        // with same year_start and year_end >= newEndDate, skip
-        const duplicate = policies.some((q) => {
-          if (!q.year_start || !q.year_end) return false;
-          return (
-            String(q.year_start) === String(p.year_start) &&
-            new Date(q.year_end + "T00:00:00") >= newEndDate
-          );
-        });
-        if (duplicate) continue;
-
-        // Create new policy row (period annotated)
-        const newPeriod = `${p.period} (auto-extended)`;
-        const leaveSettingsJson =
-          typeof p.leave_settings === "string"
-            ? p.leave_settings
-            : JSON.stringify(p.leave_settings || []);
-        const [res] = await db.execute(queries.create, [
-          newPeriod,
-          p.year_start,
-          newEndStr,
-          leaveSettingsJson,
-        ]);
-
-        const newPolicyId = res && res.insertId ? res.insertId : null;
-
-        // Insert audit record into leave_audit.
-        // Use leave_id = NULL because this audit is about policies (not a specific leave).
-        const details = {
-          type: "policy_auto_extension",
-          originalPolicyId: p.id,
-          newPolicyId,
-          originalYearEnd: p.year_end,
-          newYearEnd: newEndStr,
-          extensionDays: Number(extensionDays),
-          createdAt: new Date().toISOString(),
-        };
-
-        // queries.INSERT_LEAVE_AUDIT expects [leave_id, actor_id, action, details]
-        await db.execute(queries.INSERT_LEAVE_AUDIT, [
+        await conn.execute(queries.INSERT_LEAVE_AUDIT, [
           null,
           actorId || "system",
-          "policy_auto_extended",
-          JSON.stringify(details),
+          "policy_auto_extend",
+          details,
         ]);
-
-        created.push({
-          originalPolicyId: p.id,
-          newPolicyId,
-          newYearEnd: newEndStr,
-        });
-      } catch (innerErr) {
-        // log and continue with other policies
+      } catch (auditErr) {
         console.warn(
-          "[autoExtendRecentPolicies] failed to extend policy id:",
-          p && p.id,
-          innerErr && innerErr.message
+          "[autoExtendRecentPolicies] failed to insert audit with leave_id=null, trying 0:",
+          auditErr && auditErr.message ? auditErr.message : auditErr
         );
+        try {
+          await conn.execute(queries.INSERT_LEAVE_AUDIT, [
+            0,
+            actorId || "system",
+            "policy_auto_extend",
+            details,
+          ]);
+        } catch (auditErr2) {
+          console.error(
+            "[autoExtendRecentPolicies] failed to insert audit fallback (0):",
+            auditErr2
+          );
+          // continue — do not abort entire operation for audit insertion failure
+        }
+      }
+
+      // reload updated policy row
+      const [rows] = await conn.execute(
+        `SELECT id, period, DATE_FORMAT(year_start, '%Y-%m-%d') AS year_start, DATE_FORMAT(year_end, '%Y-%m-%d') AS year_end, leave_settings FROM leave_policy WHERE id = ?`,
+        [p.id]
+      );
+      if (rows && rows[0]) {
+        const row = rows[0];
+        row.leave_settings = safeParseSettings(row.leave_settings);
+        updated.push(row);
       }
     }
-    return created;
+
+    await conn.commit();
+    conn.release();
+    console.log(
+      `[autoExtendRecentPolicies] extended ${updated.length} policy(ies)`
+    );
+    return updated;
   } catch (err) {
-    console.error("[autoExtendRecentPolicies] unexpected error:", err);
+    console.error("[autoExtendRecentPolicies] error, rolling back:", err);
+    try {
+      await conn.rollback();
+      conn.release();
+    } catch (e) {
+      console.error("rollback error:", e);
+    }
     throw err;
   }
 }
@@ -588,7 +549,6 @@ module.exports = {
   getLeaveBalance,
   getMonthlyLOP,
   computeAndStoreMonthlyLOP,
-  // exported helpers (for tests or elsewhere)
   getWorkedDays,
   getUsedLeavesInPeriod,
   computeEarnedLeavesFromWorked,
