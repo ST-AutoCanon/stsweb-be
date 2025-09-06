@@ -128,4 +128,14 @@ GROUP BY leave_type;
     FROM employee_leave_carry_forward
     WHERE employee_id = ? AND year = ?
   `,
+  // Insert audit record for traceability
+  INSERT_LEAVE_AUDIT: `
+    INSERT INTO leave_audit (
+      leave_id,
+      actor_id,
+      action,
+      details,
+      created_at
+    ) VALUES (?, ?, ?, ?, NOW())
+  `,
 };
