@@ -3,7 +3,7 @@ const db = require("../config");
 const queries = require("../constants/leaveQueries");
 const LeavePolicyService = require("./leavePolicyService");
 
-/* ---------- small helpers ---------- */
+/* ---------- helpers ---------- */
 const toLocalDateString = (dateInput) => {
   if (!dateInput) return "";
   const d = new Date(dateInput);
@@ -13,11 +13,13 @@ const toLocalDateString = (dateInput) => {
   const day = String(d.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 };
+
 const parseDateOnly = (isoDate) => {
   if (!isoDate) return null;
   const d = new Date(isoDate);
-  if (!isNaN(d.getTime()))
+  if (!isNaN(d.getTime())) {
     return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  }
   const parts = String(isoDate).split("-");
   if (parts.length >= 3) {
     const [y, m, day] = parts;
@@ -25,6 +27,7 @@ const parseDateOnly = (isoDate) => {
   }
   return null;
 };
+
 const computeInclusiveDays = (startDateStr, endDateStr, h_f_day = "") => {
   if (!startDateStr || !endDateStr) return 0;
   const start = parseDateOnly(startDateStr);
@@ -36,8 +39,9 @@ const computeInclusiveDays = (startDateStr, endDateStr, h_f_day = "") => {
   if (
     String(h_f_day).toLowerCase().includes("half") &&
     start.getTime() === end.getTime()
-  )
+  ) {
     return 0.5;
+  }
   return dayCount;
 };
 
@@ -86,7 +90,7 @@ const getLeaveQueries = async (filters = {}) => {
   }
 };
 
-/* ---------- core: updateLeaveRequest with robust transaction handling ---------- */
+/* ---------- updateLeaveRequest (transactional) ---------- */
 const updateLeaveRequest = async (payload) => {
   const {
     leaveId,
@@ -98,16 +102,18 @@ const updateLeaveRequest = async (payload) => {
     preserved_leave_days = null,
     actorId = null,
     total_days = null,
+    // new flag — expected from frontend when using default fallback
+    is_defaulted = false,
   } = payload;
 
   const bind = (v) => (v === undefined ? null : v);
-  let conn = null;
-  let released = false;
 
+  let conn = null;
+  let transactionStarted = false;
   try {
     console.log("[updateLeaveRequest] called with payload:", payload);
 
-    // 1) Load leave (readonly via pool)
+    // Load leave (pool non-transactional read)
     console.log("[updateLeaveRequest] executing GET_LEAVE_BY_LEAVEID", [
       leaveId,
     ]);
@@ -115,23 +121,23 @@ const updateLeaveRequest = async (payload) => {
       leaveId,
     ]);
     if (!leaveRows || leaveRows.length === 0) {
-      const error = new Error("Leave request not found.");
-      error.isBadRequest = true;
-      throw error;
+      const err = new Error("Leave request not found.");
+      err.isBadRequest = true;
+      throw err;
     }
     const leave = leaveRows[0];
     console.log("[updateLeaveRequest] loaded leave:", leave);
 
     const currentStatus = (leave.status || "").toLowerCase();
     if (currentStatus && currentStatus !== "pending") {
-      const error = new Error(
+      const err = new Error(
         "Leave request cannot be modified after it has been processed."
       );
-      error.isBadRequest = true;
-      throw error;
+      err.isBadRequest = true;
+      throw err;
     }
 
-    // 2) Validate totals
+    // validate totals
     const computedTotalDays = computeInclusiveDays(
       leave.start_date,
       leave.end_date,
@@ -157,7 +163,7 @@ const updateLeaveRequest = async (payload) => {
       totalDays = computedTotalDays;
     }
 
-    // 3) Read remaining (non-transactional read)
+    // read remaining balance (non-transactional)
     let remaining = 0;
     try {
       console.log("[updateLeaveRequest] selecting remaining balance", [
@@ -179,7 +185,7 @@ const updateLeaveRequest = async (payload) => {
     }
     console.log("[updateLeaveRequest] remaining balance:", remaining);
 
-    // 4) Approved path -> start transaction and do writes
+    // Approved branch: do all writes in a transaction
     if (status === "Approved") {
       const c = Number(compensated_days) || 0;
       const d = Number(deducted_days) || 0;
@@ -198,40 +204,45 @@ const updateLeaveRequest = async (payload) => {
         throw err;
       }
 
-      // acquire connection and begin
+      // acquire a dedicated connection for transaction
       conn = await db.getConnection();
       try {
         await conn.beginTransaction();
+        transactionStarted = true;
       } catch (e) {
+        // if beginTransaction fails, release connection and rethrow
         try {
           conn.release();
-          released = true;
-        } catch (er) {}
+        } catch (_) {}
         throw e;
       }
 
       try {
-        // round for persistence
+        // prepare write values
         const c_write = Number(c.toFixed(2));
         const d_write = Number(d.toFixed(2));
+        // if is_defaulted -> do NOT write the LoP into leavequeries.loss_of_pay_days (write zero)
         const l_write = Number(l.toFixed(2));
         const preserved_write =
           preserved_leave_days === null
             ? null
             : Number(Number(preserved_leave_days).toFixed(2));
+        const isDefaultFlagNum = is_defaulted ? 1 : 0;
 
-        // 4a) update leave row
+        // UPDATE leave row (order must match query)
         const paramsUpdateLeave = [
           bind(status),
           bind(comments),
           bind(c_write),
           bind(d_write),
-          bind(l_write),
+          // if is_defaulted -> write zero to loss_of_pay_days; otherwise write actual l_write
+          bind(isDefaultFlagNum ? 0 : l_write),
           bind(preserved_write),
+          bind(isDefaultFlagNum),
           bind(leaveId),
         ];
         console.log(
-          "[updateLeaveRequest] executing UPDATE_LEAVE_STATUS_EXTENDED",
+          "[updateLeaveRequest] executing UPDATE_LEAVE_STATUS_EXTENDED with params:",
           paramsUpdateLeave
         );
         await conn.execute(
@@ -239,7 +250,7 @@ const updateLeaveRequest = async (payload) => {
           paramsUpdateLeave
         );
 
-        // 4b) adjust leave balance (if deduction)
+        // adjust leave balance if there are deducted days
         if (d_write > EPS) {
           try {
             console.log("[updateLeaveRequest] executing ADJUST_LEAVE_BALANCE", [
@@ -263,8 +274,8 @@ const updateLeaveRequest = async (payload) => {
           }
         }
 
-        // 4c) insert LOP record (critical)
-        if (l_write > EPS) {
+        // Insert LoP record — only if actual LoP > 0 AND not defaulted.
+        if (!isDefaultFlagNum && l_write > EPS) {
           console.log("[updateLeaveRequest] executing INSERT_LOP_RECORD", [
             leave.employee_id,
             leaveId,
@@ -277,17 +288,23 @@ const updateLeaveRequest = async (payload) => {
             l_write,
             `LoP for leave ${leaveId}`,
           ]);
+        } else {
+          console.log(
+            "[updateLeaveRequest] skipping INSERT_LOP_RECORD because is_defaulted =",
+            isDefaultFlagNum,
+            "or l_write =",
+            l_write
+          );
         }
 
-        // 4d) audit insert:
-        // - ignore only if audit table missing (ER_NO_SUCH_TABLE)
-        // - for any other audit failure, rethrow so transaction will rollback
+        // Insert audit. If audit table missing -> non-fatal warning.
         try {
           const auditPayload = {
             compensated_days: c_write,
             deducted_days: d_write,
-            loss_of_pay_days: l_write,
+            loss_of_pay_days: isDefaultFlagNum ? 0 : l_write,
             preserved_leave_days: preserved_write,
+            is_defaulted: Boolean(isDefaultFlagNum),
           };
           const auditDetails = JSON.stringify(auditPayload);
           console.log("[updateLeaveRequest] executing INSERT_LEAVE_AUDIT", [
@@ -306,7 +323,7 @@ const updateLeaveRequest = async (payload) => {
           if (auditErr && auditErr.code === "ER_NO_SUCH_TABLE") {
             console.warn("leave_audit missing — skipping audit insert.");
           } else {
-            // unexpected audit error -> rethrow (fatal)
+            // Unexpected audit failure should cause rollback
             console.error(
               "[updateLeaveRequest] audit insert failed (fatal):",
               auditErr && auditErr.message ? auditErr.message : auditErr
@@ -315,17 +332,16 @@ const updateLeaveRequest = async (payload) => {
           }
         }
 
-        // 4e) commit
+        // commit
         await conn.commit();
-        console.log("[updateLeaveRequest] transaction committed");
+        console.log("[updateLeaveRequest] transaction committed successfully");
       } catch (txErr) {
-        // Attempt rollback; if rollback fails, log the failure and rethrow original error
         console.error(
           "[updateLeaveRequest] transaction error, attempting rollback:",
           txErr && txErr.message ? txErr.message : txErr
         );
         try {
-          if (conn) {
+          if (transactionStarted && conn) {
             await conn.rollback();
             console.log("[updateLeaveRequest] rollback successful");
           }
@@ -337,21 +353,21 @@ const updateLeaveRequest = async (payload) => {
         }
         throw txErr;
       } finally {
-        // release connection exactly once
-        if (conn) {
-          try {
+        try {
+          if (conn) {
             conn.release();
-            released = true;
-          } catch (e) {
-            console.warn(
-              "[updateLeaveRequest] conn.release() failed:",
-              e && e.message ? e.message : e
-            );
+            conn = null;
+            transactionStarted = false;
           }
+        } catch (releaseErr) {
+          console.warn(
+            "[updateLeaveRequest] conn.release() failed:",
+            releaseErr && releaseErr.message ? releaseErr.message : releaseErr
+          );
         }
       }
 
-      // 5) recompute monthly LOP outside transaction
+      // recompute monthly LOP outside transaction (best-effort)
       try {
         const leaveStart = parseDateOnly(leave.start_date);
         const leaveEnd = parseDateOnly(leave.end_date);
@@ -380,7 +396,7 @@ const updateLeaveRequest = async (payload) => {
               );
             } catch (recomputeErr) {
               console.warn(
-                `[updateLeaveRequest] recompute monthly LOP failed for ${leave.employee_id} ${month}-${year}:`,
+                `[updateLeaveRequest] Warning: failed to recompute monthly LOP for ${leave.employee_id} ${month}-${year}:`,
                 recomputeErr && recomputeErr.message
                   ? recomputeErr.message
                   : recomputeErr
@@ -390,30 +406,35 @@ const updateLeaveRequest = async (payload) => {
           }
         } else {
           console.warn(
-            "[updateLeaveRequest] could not parse leave start/end for recompute"
+            "[updateLeaveRequest] Could not parse leave start/end for LOP recompute."
           );
         }
       } catch (err) {
         console.warn(
-          "[updateLeaveRequest] error during monthly LOP recompute:",
+          "[updateLeaveRequest] Unexpected error when recomputing monthly LOP:",
           err && err.message ? err.message : err
         );
       }
 
       return;
     } else {
-      // Not Approved path: update status only (non-transactional)
+      // Rejection or other non-Approved: update non-transactionally
+      // Use the incoming is_defaulted flag so DB accurately reflects what frontend sent.
+      const isDefaultFlagNum = is_defaulted ? 1 : 0;
+
       const paramsReject = [
         bind(status),
         bind(comments),
-        bind(0),
-        bind(0),
-        bind(0),
+        bind(0), // compensated
+        bind(0), // deducted
+        bind(0), // loss_of_pay - rejected path sets 0
         bind(preserved_leave_days),
+        // is_defaulted as provided by caller (was previously hardcoded to 0)
+        bind(isDefaultFlagNum),
         bind(leaveId),
       ];
       console.log(
-        "[updateLeaveRequest] executing UPDATE_LEAVE_STATUS_EXTENDED (rejection)",
+        "[updateLeaveRequest] executing UPDATE_LEAVE_STATUS_EXTENDED (non-approved) with params:",
         paramsReject
       );
       await db.execute(queries.UPDATE_LEAVE_STATUS_EXTENDED, paramsReject);
@@ -426,21 +447,32 @@ const updateLeaveRequest = async (payload) => {
     );
     throw err;
   } finally {
-    // final defensive release
-    if (conn && !released) {
-      try {
-        conn.release();
-      } catch (e) {
-        console.warn(
-          "[updateLeaveRequest] final conn.release() failed:",
-          e && e.message ? e.message : e
-        );
+    // final defensive release if something left open
+    try {
+      if (conn) {
+        // if transaction still open try to rollback
+        try {
+          if (transactionStarted) {
+            await conn.rollback();
+            transactionStarted = false;
+          }
+        } catch (rb) {
+          // ignore
+        }
+        try {
+          conn.release();
+        } catch (releaseErr) {
+          // ignore
+        }
       }
+    } catch (e) {
+      // ignore final release failures
     }
   }
 };
 
-/* ---------- the rest of your file (unchanged read/write helpers) ---------- */
+/* ---------- remaining functions (unchanged) ---------- */
+
 const submitLeaveRequest = async ({
   employeeId,
   startDate,
@@ -471,9 +503,14 @@ const submitLeaveRequest = async ({
       throw new Error(
         "You already have a leave request on the selected date(s)."
       );
-    const query = queries.INSERT_LEAVE_REQUEST;
-    const params = [employeeId, startDate, endDate, h_f_day, reason, leavetype];
-    const [result] = await db.execute(query, params);
+    const [result] = await db.execute(queries.INSERT_LEAVE_REQUEST, [
+      employeeId,
+      startDate,
+      endDate,
+      h_f_day,
+      reason,
+      leavetype,
+    ]);
     return {
       id: result.insertId,
       employeeId,
@@ -592,8 +629,7 @@ const editLeaveRequest = async ({
       throw new Error(
         "Leave request cannot be edited after approval or rejection."
       );
-    const query = queries.UPDATE_LEAVE_REQUEST;
-    const params = [
+    const [result] = await db.execute(queries.UPDATE_LEAVE_REQUEST, [
       startDate,
       endDate,
       h_f_day,
@@ -601,8 +637,7 @@ const editLeaveRequest = async ({
       leavetype,
       leaveId,
       employeeId,
-    ];
-    const [result] = await db.execute(query, params);
+    ]);
     if (result.affectedRows === 0)
       throw new Error("Failed to update leave request.");
     return {
@@ -650,7 +685,6 @@ const cancelLeaveRequest = async (leaveId, employeeId) => {
   }
 };
 
-/* ---------- team lead helpers (same as your code) ---------- */
 const constructWhereClause = (
   filters = {},
   employeeIds = [],

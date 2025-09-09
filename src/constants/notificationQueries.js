@@ -2,8 +2,16 @@
 
 const INSERT_NOTIFICATION = `
   INSERT INTO notifications
-    (user_id, meeting_id, message, triggered_at, created_at)
-  VALUES (?, ?, ?, ?, NOW());
+    (user_id, meeting_id, policy_id, message, triggered_at, is_read, created_at)
+  VALUES (?, ?, ?, ?, ?, 0, NOW())
+`;
+
+const CHECK_RECENT_SIMILAR_NOTIFICATION = `
+  SELECT id FROM notifications
+  WHERE user_id = ?
+    AND message LIKE ?
+    AND triggered_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+  LIMIT 1
 `;
 
 const INSERT_NOTIFICATION_FOR_POLICY = `
@@ -67,4 +75,5 @@ module.exports = {
   SELECT_NOTIFICATION_RECIPIENTS,
   CHECK_NOTIFICATION_EXISTS,
   MARK_NOTIFICATION_READ,
+  CHECK_RECENT_SIMILAR_NOTIFICATION,
 };

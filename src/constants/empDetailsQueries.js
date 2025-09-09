@@ -685,17 +685,16 @@ LEFT JOIN (
   VALUES (?, ?, ?)
 `,
 
-  // 3) fetch full history for an employee
   GET_SUPERVISOR_HISTORY: `
   SELECT
     sa.id,
     sa.supervisor_id,
     CONCAT(e.first_name, ' ', e.last_name) AS supervisor_name,
-    sa.start_date,
-    sa.end_date
+    DATE_FORMAT(sa.start_date, '%Y-%m-%d') AS start_date,
+    CASE WHEN sa.end_date IS NULL THEN NULL ELSE DATE_FORMAT(sa.end_date, '%Y-%m-%d') END AS end_date
   FROM supervisor_assignments sa
   JOIN employees e ON e.employee_id = sa.supervisor_id
- WHERE sa.employee_id = ?
- ORDER BY sa.start_date DESC
+  WHERE sa.employee_id = ?
+  ORDER BY sa.start_date DESC
 `,
 };
