@@ -13,10 +13,6 @@ const getWebPath = (fullPath) => {
   return path.posix.join("/EmployeeDetails", relPath);
 };
 
-/**
- * Bulk add employees from an Excel file (concurrent processing).
- * Expects the Excel file to be uploaded via req.file (using multer).
- */
 exports.bulkAddEmployees = async (req, res) => {
   if (!req.file) {
     return res
@@ -30,16 +26,14 @@ exports.bulkAddEmployees = async (req, res) => {
   }
 
   try {
-    // Parse the Excel file
     const workbook = xlsx.readFile(req.file.path);
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
     const employeesData = xlsx.utils.sheet_to_json(worksheet);
-    // Excel epoch: day 1 = 1900‑01‑01 (but Excel mistakenly treats 1900 as leap year, so we adjust by 1)
     function excelSerialToJSDate(serial) {
-      const utc_days = serial - 25569; // days since 1970‑01‑01
+      const utc_days = serial - 25569;
       const ms = utc_days * 86400 * 1000;
-      return new Date(ms).toISOString().slice(0, 10); // "YYYY-MM-DD"
+      return new Date(ms).toISOString().slice(0, 10);
     }
 
     for (let row of employeesData) {
@@ -49,7 +43,6 @@ exports.bulkAddEmployees = async (req, res) => {
     }
     console.log(employeesData);
 
-    // Remove temp file
     fs.unlink(req.file.path, (err) => {
       if (err) console.warn("Temp file removal failed:", err);
     });
@@ -57,7 +50,6 @@ exports.bulkAddEmployees = async (req, res) => {
     const results = [];
     const errors = [];
 
-    // Kick off all addEmployee calls concurrently
     const promises = employeesData.map((employeeData) => {
       return employeeService
         .addFullEmployee(employeeData)
@@ -76,7 +68,6 @@ exports.bulkAddEmployees = async (req, res) => {
         });
     });
 
-    // Wait for all to finish
     await Promise.all(promises);
 
     return res
@@ -107,7 +98,6 @@ exports.createFullEmployee = async (req, res) => {
     const data = { ...req.body };
     const raw = req.body || {};
 
-    // --- parse additional_certs & experience (same as before) ---
     let additionalCerts = [];
     if (raw.additional_certs) {
       try {
@@ -155,7 +145,6 @@ exports.createFullEmployee = async (req, res) => {
     }
     data.experience = (expList || []).filter(Boolean);
 
-    // --- validations (same as before) ---
     const [emailRows] = await db.execute(queries.CHECK_EMAIL, [data.email]);
     if (emailRows.length) {
       return res
@@ -186,7 +175,6 @@ exports.createFullEmployee = async (req, res) => {
         );
     }
 
-    // --- file parsing (same as before) ---
     let filesByField = {};
     if (Array.isArray(req.files)) {
       for (let f of req.files) {
@@ -220,7 +208,6 @@ exports.createFullEmployee = async (req, res) => {
       data[dataKey] = files.map((f) => getWebPath(f.path));
     }
 
-    // additional_certs: attach uploaded file urls
     if (Array.isArray(data.additional_certs)) {
       data.additional_certs = data.additional_certs.map((cert, idx) => {
         const key = `additional_certs[${idx}][file]`;
@@ -230,7 +217,6 @@ exports.createFullEmployee = async (req, res) => {
       });
     }
 
-    // experience: attach uploaded doc urls
     if (Array.isArray(data.experience)) {
       data.experience = data.experience.map((exp, idx) => {
         const key = `experience[${idx}][doc]`;
@@ -240,7 +226,6 @@ exports.createFullEmployee = async (req, res) => {
       });
     }
 
-    // family docs
     for (let side of [
       "father",
       "mother",
@@ -253,23 +238,17 @@ exports.createFullEmployee = async (req, res) => {
       const urlKey = `${side}_gov_doc_url`;
       const files = filesByField[field] || [];
       if (files.length) data[urlKey] = files.map((f) => getWebPath(f.path));
-      // if no files uploaded and client didn't send urlKey, we leave it undefined
     }
 
-    // 8) call service
     console.log("[createFullEmployee] calling service.addFullEmployee");
     const { employee_id } = await employeeService.addFullEmployee(data);
     console.log("[createFullEmployee] ⇒ success", employee_id);
 
-    // ---------------------------
-    // Send reset email from controller (more reliable visibility)
-    // ---------------------------
     try {
       console.log(
         "[createFullEmployee] attempting to send reset email to:",
         data.email
       );
-      // ensure env values exist for better debug
       if (!process.env.SENDGRID_API_KEY) {
         console.warn(
           "[createFullEmployee] SENDGRID_API_KEY missing — skipping email send"
@@ -286,7 +265,6 @@ exports.createFullEmployee = async (req, res) => {
         console.log("[createFullEmployee] reset email sent");
       }
     } catch (mailErr) {
-      // log full error so you can see why it failed (DB save error, sendgrid error, etc)
       console.warn(
         "[createFullEmployee] warning: reset-email failed — not rolling back:",
         mailErr
@@ -316,7 +294,6 @@ exports.createFullEmployee = async (req, res) => {
 exports.updateFullEmployee = async (req, res) => {
   console.log("[updateFullEmployee] ⇒ start");
   try {
-    // raw request body and initial data object (include path param)
     const raw = req.body || {};
     const data = { employee_id: req.params.employeeId, ...raw };
 
@@ -326,7 +303,6 @@ exports.updateFullEmployee = async (req, res) => {
     );
     console.log("👉 RAW req.files:", JSON.stringify(req.files || {}, null, 2));
 
-    // normalize date-time strings to date-only if needed
     [
       "dob",
       "father_dob",
@@ -343,10 +319,8 @@ exports.updateFullEmployee = async (req, res) => {
       }
     });
 
-    // helper to detect if client explicitly provided a key in the request body
     const hasKey = (k) => Object.prototype.hasOwnProperty.call(raw, k);
 
-    // email uniqueness check
     const [emailRows] = await db.execute(queries.CHECK_EMAIL_UPDATE, [
       data.email,
       data.employee_id,
@@ -362,7 +336,6 @@ exports.updateFullEmployee = async (req, res) => {
         );
     }
 
-    // aadhar / pan uniqueness (excluding self)
     const [persRows] = await db.execute(queries.CHECK_PERSONAL_DUP_UPDATE, [
       data.aadhaar_number,
       data.pan_number,
@@ -381,16 +354,13 @@ exports.updateFullEmployee = async (req, res) => {
         );
     }
 
-    // Build filesByField from req.files (supports upload.any() and upload.fields() shapes)
     let filesByField = {};
     if (Array.isArray(req.files)) {
-      // upload.any()
       for (let f of req.files) {
         filesByField[f.fieldname] = filesByField[f.fieldname] || [];
         filesByField[f.fieldname].push(f);
       }
     } else if (typeof req.files === "object" && req.files !== null) {
-      // upload.fields()
       for (let [field, arr] of Object.entries(req.files)) {
         filesByField[field] = arr;
       }
@@ -400,7 +370,6 @@ exports.updateFullEmployee = async (req, res) => {
       Object.keys(filesByField)
     );
 
-    // Map of single file inputs -> DB url keys
     const simpleMap = {
       photo: "photo_url",
       aadhaar_doc: "aadhaar_doc_url",
@@ -416,21 +385,17 @@ exports.updateFullEmployee = async (req, res) => {
       other_docs: "other_docs_urls",
     };
 
-    // Attach URLs for simple fields only if files were uploaded OR the client explicitly sent the url key
     for (let [field, dataKey] of Object.entries(simpleMap)) {
       const files = filesByField[field] || [];
       if (files.length) {
         data[dataKey] = files.map((f) => getWebPath(f.path));
       } else if (hasKey(dataKey)) {
-        // client explicitly provided the url key (could be "[]" or a JSON string) — respect it
         data[dataKey] = raw[dataKey];
       } else {
-        // DON'T set the key (leave undefined) so the service keeps existing DB value
         delete data[dataKey];
       }
     }
 
-    // Parse and attach additional_certs only if client provided it
     if (hasKey("additional_certs")) {
       let additionalCerts = [];
       if (raw.additional_certs) {
@@ -443,7 +408,6 @@ exports.updateFullEmployee = async (req, res) => {
           additionalCerts = [];
         }
       }
-      // also handle form-style keys additional_certs[0][name] etc.
       for (let key of Object.keys(raw)) {
         const m = key.match(
           /^additional_certs\[(\d+)\]\[(name|year|institution)\]$/
@@ -454,7 +418,6 @@ exports.updateFullEmployee = async (req, res) => {
         additionalCerts[idx] = additionalCerts[idx] || {};
         additionalCerts[idx][field] = raw[key];
       }
-      // attach uploaded files for each cert if present
       data.additional_certs = (additionalCerts || []).map((cert, idx) => {
         const key = `additional_certs[${idx}][file]`;
         const files = filesByField[key] || [];
@@ -462,10 +425,9 @@ exports.updateFullEmployee = async (req, res) => {
         return cert;
       });
     } else {
-      delete data.additional_certs; // leave undefined so service won't delete existing rows
+      delete data.additional_certs;
     }
 
-    // Parse and attach experience only if client provided it
     if (hasKey("experience")) {
       let expList = [];
       if (raw.experience) {
@@ -498,7 +460,6 @@ exports.updateFullEmployee = async (req, res) => {
       delete data.experience;
     }
 
-    // Family gov docs: attach only if files uploaded OR client explicitly sent the url key
     for (let side of [
       "father",
       "mother",
@@ -513,10 +474,8 @@ exports.updateFullEmployee = async (req, res) => {
       if (files.length) {
         data[urlKey] = files.map((f) => getWebPath(f.path));
       } else if (hasKey(urlKey)) {
-        // explicit from client (even if empty array) — respect it
         data[urlKey] = raw[urlKey];
       } else {
-        // leave undefined so service retains existing DB values
         delete data[urlKey];
       }
     }
@@ -526,7 +485,6 @@ exports.updateFullEmployee = async (req, res) => {
       Object.keys(data)
     );
 
-    // Call service
     console.log("[updateFullEmployee] calling service.editFullEmployee");
     await employeeService.editFullEmployee(data);
 
@@ -549,9 +507,6 @@ exports.updateFullEmployee = async (req, res) => {
   }
 };
 
-/**
- * Fetch an employee's full profile (all steps).
- */
 exports.getFullEmployee = async (req, res) => {
   try {
     const employeeId = req.params.employeeId;
@@ -574,9 +529,6 @@ exports.getFullEmployee = async (req, res) => {
   }
 };
 
-/**
- * Handler to fetch all employees or search employees based on the search query and date filters.
- */
 exports.searchEmployees = async (req, res) => {
   try {
     const { search, fromDate, toDate } = req.query;
@@ -634,9 +586,6 @@ exports.serveEmployeeFile = async (req, res) => {
   }
 };
 
-/**
- * Handler to deactivate an employee.
- */
 exports.deactivateEmployee = async (req, res) => {
   try {
     const employeeId = req.params.employeeId;
@@ -658,10 +607,6 @@ exports.deactivateEmployee = async (req, res) => {
   }
 };
 
-/**
- * GET /api/user_roles
- * Returns [{ id, name }, …]
- */
 exports.listUserRoles = async (req, res) => {
   try {
     const roles = await employeeService.getUserRoles();
@@ -674,9 +619,6 @@ exports.listUserRoles = async (req, res) => {
   }
 };
 
-/**
- * GET /api/positions?role=Manager&department_id=23
- */
 exports.listPositions = async (req, res) => {
   try {
     const { role, department_id } = req.query;
@@ -690,9 +632,6 @@ exports.listPositions = async (req, res) => {
   }
 };
 
-/**
- * GET /api/positions/supervisors?position=Engineer&department_id=23
- */
 exports.listSupervisorsByPosition = async (req, res) => {
   try {
     const { position, department_id } = req.query;
@@ -735,7 +674,6 @@ exports.assignSupervisor = async (req, res, next) => {
   }
 };
 
-// GET /api/supervisor/history/:employeeId
 exports.getSupervisorHistory = async (req, res, next) => {
   try {
     const employeeId = req.params.employeeId;

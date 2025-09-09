@@ -9,7 +9,7 @@ const { Server } = require("socket.io");
 const cron = require("node-cron");
 const policyNotificationService = require("./services/policyNotificationService");
 cron.schedule(
-  "14 00 * * *",
+  "00 12 * * *",
   async () => {
     try {
       await policyNotificationService.sendPolicyEndNotifications(10);
@@ -24,6 +24,7 @@ cron.schedule(
   }
 );
 
+const { scheduleJob } = require("./jobs/profileMissingNotifier");
 const EmployeeQueries = require("./services/employeeQueries");
 const chatService = require("./services/chatService");
 const apiKeyMiddleware = require("./middleware/apiKeyMiddleware");
@@ -165,6 +166,44 @@ app.use(
     },
   })
 );
+
+// replace scheduleJob(); with this
+(async function initProfileNotifier() {
+  // only enable in environments where we want the cron to run
+  if (process.env.ENABLE_PROFILE_NOTIFIER !== "true") {
+    console.log(
+      "[startup] profileMissingNotifier disabled (ENABLE_PROFILE_NOTIFIER != true)"
+    );
+    return;
+  }
+
+  const db = require("./config"); // same db instance your app uses
+
+  // wait until DB responds to a simple query, retry a few times
+  const maxAttempts = 6;
+  let attempt = 0;
+  while (attempt < maxAttempts) {
+    try {
+      attempt++;
+      await db.execute("SELECT 1");
+      // DB reachable — schedule job
+      scheduleJob();
+      console.log("[startup] profileMissingNotifier scheduled (DB ready)");
+      return;
+    } catch (err) {
+      console.warn(
+        `[startup] profileMissingNotifier DB ping failed (attempt ${attempt}/${maxAttempts}) — retrying in 5s`,
+        err && err.message ? err.message : err
+      );
+      /* eslint-disable no-await-in-loop */
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+  }
+
+  console.error(
+    "[startup] profileMissingNotifier: DB did not become ready — job not scheduled"
+  );
+})();
 
 app.use(idleTimeout);
 app.use(bodyParser.json());

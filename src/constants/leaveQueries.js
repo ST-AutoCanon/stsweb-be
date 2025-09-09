@@ -35,7 +35,7 @@ module.exports = {
     ) VALUES (?, ?, ?, ?, ?, ?)
   `,
 
-  // Select all leave requests for a given employee
+  // Select all leave requests for a given employee (include is_defaulted)
   SELECT_LEAVE_REQUESTS: `
     SELECT
       lq.*,
@@ -46,7 +46,7 @@ module.exports = {
     WHERE lq.employee_id = ?
   `,
 
-  // Admin view: fetch all leave queries with department
+  // Admin view: fetch all leave queries with department (include is_defaulted explicitly)
   GET_LEAVE_QUERIES: `
     SELECT
       lq.id AS leave_id,
@@ -58,6 +58,7 @@ module.exports = {
       lq.start_date,
       lq.end_date,
       lq.comments,
+      lq.is_defaulted,
       lq.created_at,
       CONCAT(e.first_name, ' ', e.last_name) AS name,
       d.name AS department_name
@@ -81,6 +82,7 @@ module.exports = {
       lq.start_date,
       lq.end_date,
       lq.created_at,
+      lq.is_defaulted,
       CONCAT(e.first_name, ' ', e.last_name) AS name,
       d.name AS department_name
     FROM leavequeries lq
@@ -99,7 +101,7 @@ module.exports = {
     )
   `,
 
-  // Query to update the status of a leave request
+  // Query to update the status of a leave request (kept for compatibility)
   UPDATE_LEAVE_STATUS: `
     UPDATE leavequeries
     SET status   = ?,
@@ -121,7 +123,7 @@ module.exports = {
     WHERE pr.department_id = ?
   `,
 
-  // Team lead view: leave queries for team (base — add dynamic filters in code)
+  // Team lead view: leave queries for team (include is_defaulted)
   GET_LEAVE_QUERIES_FOR_TEAM: `
     SELECT
       lq.id AS leave_id,
@@ -133,6 +135,7 @@ module.exports = {
       lq.start_date,
       lq.end_date,
       lq.comments,
+      lq.is_defaulted,
       lq.created_at,
       CONCAT(e.first_name, ' ', e.last_name) AS name,
       d.name AS department_name
@@ -153,7 +156,7 @@ module.exports = {
     WHERE id = ?
   `,
 
-  // Updated: store the split fields into leavequeries so we have a single source of truth
+  // Updated: store the split fields into leavequeries + is_defaulted
   UPDATE_LEAVE_STATUS_EXTENDED: `
     UPDATE leavequeries
     SET status = ?,
@@ -162,6 +165,7 @@ module.exports = {
         deducted_days = ?,
         loss_of_pay_days = ?,
         preserved_leave_days = ?,
+        is_defaulted = ?,
         updated_at = NOW()
     WHERE id = ?
   `,
@@ -194,6 +198,7 @@ module.exports = {
       created_at
     ) VALUES (?, ?, ?, ?, NOW())
   `,
+
   GET_EMP_PROF_BY_ID: `
     SELECT *
     FROM employee_professional
@@ -201,7 +206,6 @@ module.exports = {
     LIMIT 1
   `,
 
-  // Get employees who have a given supervisor_id
   GET_EMPLOYEES_BY_SUPERVISOR: `
     SELECT e.employee_id
     FROM employees e
