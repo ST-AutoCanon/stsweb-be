@@ -7,50 +7,44 @@ const assetService = require('../services/assetsService'); // ✅ This is necess
 
 
 const addAssetHandler = async (req, res) => {
-    const { status = "In Use" } = req.body; // Default to "In Use" if status is missing
-    let { assigned_to } = req.body;
+  const { status = "In Use" } = req.body;
+  let { assigned_to } = req.body;
 
-try {
-  assigned_to = JSON.parse(assigned_to);
-} catch (err) {
-  console.warn("Could not parse assigned_to, using as string:", assigned_to);
-}
+  try {
+    assigned_to = JSON.parse(assigned_to);
+  } catch (err) {
+    console.warn("Could not parse assigned_to, using as string:", assigned_to);
+  }
 
-const validStatuses = ["In Use", "Not Using", "Decommissioned"];
-if (!validStatuses.includes(status)) {
+  const validStatuses = ["In Use", "Not Using", "Decommissioned"];
+  if (!validStatuses.includes(status)) {
     return res.status(400).json({ error: "Invalid status value" });
-}
-    try {
+  }
 
-        console.log("📥 Incoming Asset Data:", req.body);
+  try {
+    console.log("📥 Incoming Asset Data:", req.body);
+    const { asset_name, configuration, valuation_date, assigned_to, category, sub_category } = req.body;
+    let { status } = req.body;
+    const document_path = req.file ? req.file.filename : null; // Store only the filename
 
-        const { asset_name, configuration, valuation_date, assigned_to, category, sub_category } = req.body;
-        let { status } = req.body;
-        const document_path = req.file ? `/uploads/${req.file.filename}` : null;
-
-        // Ensure status is valid
-        const validStatuses = ["In Use", "Not Using", "Decommissioned"];
-        if (!status || !validStatuses.includes(status)) {
-            status = "In Use"; // Default to "In Use"
-        }
-
-        if (!asset_name || !category || (category !== "Others" && !sub_category)) {
-            return res.status(400).json({ error: "Missing required fields" });
-        }
-
-        
-        const assetData = { asset_name, configuration, valuation_date, assigned_to, category, sub_category, status, document_path };
-
-        console.log("📤 Processed Asset Data:", assetData);
-
-        const result = await addAsset(assetData);
-        res.status(201).json({ message: "Asset added successfully", asset_id: result.asset_id,  asset_code: result.asset_code // include this if needed in frontend
- });
-
-    } catch (error) {
-        console.error("❌ Database Error:", error);
-        res.status(500).json({ error: "Failed to add asset", details: error.message });
+    const validStatuses = ["In Use", "Not Using", "Decommissioned"];
+    if (!status || !validStatuses.includes(status)) {
+      status = "In Use";
     }
+
+    if (!asset_name || !category || (category !== "Others" && !sub_category)) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const assetData = { asset_name, configuration, valuation_date, assigned_to, category, sub_category, status, document_path };
+    console.log("📤 Processed Asset Data:", assetData);
+
+    const result = await addAsset(assetData);
+    res.status(201).json({ message: "Asset added successfully", asset_id: result.asset_id, asset_code: result.asset_code });
+  } catch (error) {
+    console.error("❌ Database Error:", error);
+    res.status(500).json({ error: "Failed to add asset", details: error.message });
+  }
 };
 const getAssetsHandler = async (req, res) => {
     try {
