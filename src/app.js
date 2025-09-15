@@ -6,6 +6,12 @@ require("dotenv").config();
 const path = require("path");
 const session = require("express-session");
 const { Server } = require("socket.io");
+//tasks
+const planRoutes = require("./routes/planRoute");
+const supervisorEmployeesRoutes = require("./routes/supervisorEmployeesRoutes");
+const supervisorRoutes = require("./routes/supervisorRoutes");
+
+
 // const cron = require("node-cron");
 
 const EmployeeQueries = require("./services/employeeQueries");
@@ -250,7 +256,9 @@ app.use(
     },
   })
 );
+app.use("/api/supervisor", supervisorRoutes);
 
+app.use("/api/plans", planRoutes);
 app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
 app.use("/assets", express.static(path.join(__dirname, "assets")));
 app.use("/api/leave-policies", leavePolicy);
@@ -337,6 +345,7 @@ app.use("/api/compensation", assignCompensationRoutes);
 app.use("/api", employeeRoutesforsalarybreakup);
 app.use("/api/overtime", overtimeRoutes);
 app.use("/api/overtime-summary", overtimeSummaryRoutes);
+app.use("/api/supervisor", supervisorEmployeesRoutes);
 
 const io = new Server(server, {
   cors: { origin: process.env.FRONTEND_URL || "*" },
