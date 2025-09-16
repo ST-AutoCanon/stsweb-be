@@ -82,7 +82,7 @@ const overtimeRoutes = require("./routes/assignCompensationRoute");
 const overtimeSummaryRoutes = require("./routes/overtimeSummaryRoutes");
 const employeeProjectsRoute = require("./routes/employeeProjectsRoute");
 const lossofPayCalculationRoutes = require("./routes/lossofPayCalculationRoutes");
-
+const incentivesRoutes = require("./routes/incentivesRoutes");
 const app = express();
 const server = http.createServer(app);
 
@@ -339,13 +339,20 @@ app.use("/api/templates", letterheadTemplateRoutes);
 app.use("/api", employeeProjectsRoute);
 app.use("/api/lop", lossofPayCalculationRoutes);
 
+//add incentives
+app.use("/api/incentives", incentivesRoutes);
+
 //compensation
+app.use("/api/overtime", overtimeRoutes);
+app.use("/api/overtime-summary", overtimeSummaryRoutes);
+
+
 app.use("/api/compensations", compensationRoutes);
 app.use("/api/compensation", assignCompensationRoutes);
 app.use("/api", employeeRoutesforsalarybreakup);
-app.use("/api/overtime", overtimeRoutes);
-app.use("/api/overtime-summary", overtimeSummaryRoutes);
-app.use("/api/supervisor", supervisorEmployeesRoutes);
+
+
+
 
 const io = new Server(server, {
   cors: { origin: process.env.FRONTEND_URL || "*" },

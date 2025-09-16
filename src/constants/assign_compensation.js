@@ -162,55 +162,6 @@ LIMIT 0, 1000;
   `,
 
  
-//     GET_EMPLOYEE_EXTRA_HOURS : `
-//   SELECT 
-//     punch_id,
-//     employee_id,
-//     DATE(punchin_time) AS work_date,
-//     punch_status,
-//     punchin_time,
-//     punchin_device,
-//     punchin_location,
-//     punchout_time,
-//     punchout_device,
-//     punchout_location,
-//     punchmode,
-//     ROUND(TIMESTAMPDIFF(MINUTE, punchin_time, punchout_time) / 60.0, 2) AS hours_worked,
-//     ROUND(TIMESTAMPDIFF(MINUTE, punchin_time, punchout_time) / 60.0 - 10, 2) AS extra_hours
-//   FROM emp_attendence
-//   WHERE 
-//     punchin_time IS NOT NULL
-//     AND punchout_time IS NOT NULL
-//     AND TIMESTAMPDIFF(HOUR, punchin_time, punchout_time) > 10
-//     AND punchin_time >= DATE_FORMAT(CURDATE() - INTERVAL 1 MONTH, '%Y-%m-25')
-//     AND punchin_time <= DATE_FORMAT(CURDATE(), '%Y-%m-25');
-// `
-
-//  GET_EMPLOYEE_EXTRA_HOURS: `
-//   SELECT 
-//     punch_id,
-//     employee_id,
-//     DATE(punchin_time) AS work_date,
-//     punch_status,
-//     punchin_time,
-//     punchin_device,
-//     punchin_location,
-//     punchout_time,
-//     punchout_device,
-//     punchout_location,
-//     punchmode,
-//     ROUND(TIMESTAMPDIFF(MINUTE, punchin_time, punchout_time) / 60.0, 2) AS hours_worked,
-//     ROUND(TIMESTAMPDIFF(MINUTE, punchin_time, punchout_time) / 60.0 - 10, 2) AS extra_hours
-//   FROM emp_attendence
-//   WHERE 
-//     punchin_time IS NOT NULL
-//     AND punchout_time IS NOT NULL
-//     AND TIMESTAMPDIFF(HOUR, punchin_time, punchout_time) > 10
-//     AND punchin_time >= ?
-//     AND punchin_time <= ?
-// ` ,
-
-// Insert bulk overtime records with default status "Pending"
 ADD_OVERTIME_DETAILS_BULK: `
   INSERT INTO overtime_details (
     punch_id,
