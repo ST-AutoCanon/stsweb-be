@@ -13,10 +13,7 @@ module.exports = {
     WHERE employee_id = ?
     ORDER BY created_at ASC`,
 
-  // UPDATE_SUPERVISOR_COMMENT: `
-  //   UPDATE task_interactions
-  //   SET message_text = ?
-  //   WHERE interaction_id = ? AND sender_role = 'supervisor'`,
+  
   UPDATE_SUPERVISOR_COMMENT: `
     UPDATE task_interactions
     SET supervisor_reply = ?

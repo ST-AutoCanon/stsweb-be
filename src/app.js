@@ -10,6 +10,14 @@ const { Server } = require("socket.io");
 const planRoutes = require("./routes/planRoute");
 const supervisorEmployeesRoutes = require("./routes/supervisorEmployeesRoutes");
 const supervisorRoutes = require("./routes/supervisorRoutes");
+const taskEmployeesRoutes = require("./routes/taskEmployeesRoutes");
+const taskRoutes = require("./routes/taskroutes");
+const taskMessagesRoutes = require("./routes/taskMessagesRoutes");
+const employeeTaskRoutes = require("./routes/employeeTaskUpdateRoutes");
+// const supervisorEmployeesRoutes = require("./routes/supervisorEmployeesRoutes");
+
+// const taskEmployeesRoutes = require("./routes/taskEmployeesRoutes");
+// const employeeTaskRoutes = require("./routes/employeeTaskUpdateRoutes");
 
 
 // const cron = require("node-cron");
@@ -124,7 +132,18 @@ app.use((req, res, next) => {
 });
 
 //assets
+app.use("/api/tasks", taskRoutes);
+app.use("/api/messages", taskMessagesRoutes);
+app.use("/api/supervisor", supervisorRoutes);
+app.use("/api/plans", planRoutes);
+app.use("/api/supervisor", supervisorEmployeesRoutes);
+
+app.use("/api/task-emp-emp", taskEmployeesRoutes);
+app.use("/api/employee-tasks", employeeTaskRoutes);
+
+
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
+
 const assetsRoutesforreturn = require("./routes/assetsRoutes");
 const chatRoutes = require("./routes/chatRoutes");
 const webpush = require("web-push");
@@ -256,9 +275,15 @@ app.use(
     },
   })
 );
-app.use("/api/supervisor", supervisorRoutes);
+//tasks
+// app.use("/api/task-emp-emp", taskEmployeesRoutes);
+// app.use("/api/supervisor", supervisorRoutes);
+// app.use("/api/plans", planRoutes);
 
-app.use("/api/plans", planRoutes);
+// app.use("/api/tasks", taskRoutes);
+// app.use("/api/messages", taskMessagesRoutes);
+// app.use("/api/task-emp-emp", taskEmployeesRoutes);
+
 app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
 app.use("/assets", express.static(path.join(__dirname, "assets")));
 app.use("/api/leave-policies", leavePolicy);
@@ -351,6 +376,7 @@ app.use("/api/compensations", compensationRoutes);
 app.use("/api/compensation", assignCompensationRoutes);
 app.use("/api", employeeRoutesforsalarybreakup);
 
+////////////
 
 
 
