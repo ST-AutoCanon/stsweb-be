@@ -93,7 +93,6 @@
 //   // Add your production domain
 // ];
 
-
 // app.use((req, res, next) => {
 //   const origin = req.headers.origin;
 //   if (allowedOrigins.includes(origin)) {
@@ -491,7 +490,7 @@ const adminAttendanceRoutes = require("./routes/adminAttendancetrackerRoute");
 const adminAttendancetrackerRoute = require("./routes/adminAttendancetrackerRoute");
 const face_admin_page = require("./routes/face_adminpageRoutes");
 const employeeloginRoutes = require("./routes/employeeloginRoutes");
- require("./services/punchCronService");
+require("./services/punchCronService");
 const employeeBirthdayRoutes = require("./routes/employeeBirthday");
 
 const meetingRoutes = require("./routes/meetingRoutes");
@@ -797,71 +796,100 @@ app.use("/api", employeeRoutesforsalarybreakup);
 app.use("/api/overtime", overtimeRoutes);
 app.use("/api/overtime-summary", overtimeSummaryRoutes);
 
+// server side (app.js)
 const io = new Server(server, {
-  cors: { origin: process.env.FRONTEND_URL || "*" },
+  cors: { origin: process.env.FRONTEND_URL || "*", credentials: true },
+  path: "/api/socket.io",
 });
-
 app.set("io", io);
 
+// keep/replace your io.use(...) with the permissive one we used earlier:
 io.use((socket, next) => {
-  const userId = socket.handshake.query.userId;
-  if (!userId) return next(new Error("Auth error"));
-  socket.userId = userId;
-  next();
+  const queryUser = socket.handshake.query?.userId || null;
+  const authUser = socket.handshake.auth?.userId || null;
+  const headerUser = socket.handshake.headers?.["x-employee-id"] || null;
+  const userId = queryUser || authUser || headerUser || null;
+
+  if (!userId) {
+    console.warn(
+      "[socket] no userId in handshake; allowing connection but functionality may be limited"
+    );
+    socket.userId = null;
+    return next();
+  }
+
+  socket.userId = String(userId);
+  return next();
 });
 
-// ✅ Added socket.io handlers from second file
 io.on("connection", (socket) => {
-  console.log(
-    "[socket] new connection",
-    socket.id,
-    "handshake.query=",
-    socket.handshake.query
-  );
-
-  // after joining user rooms
-  chatService
-    .getUserRooms(socket.userId)
-    .then((rooms) => {
-      console.log(
-        `[socket:${socket.id}] joining ${rooms.length} rooms for user ${socket.userId}`
-      );
-      rooms.forEach((r) => socket.join(r.id.toString()));
-    })
-    .catch((err) => {
-      console.error("[socket] getUserRooms error:", err);
-    });
-
-  EmployeeQueries.getThreadsByEmployee(socket.userId)
-    .then((threads) => {
-      console.log(
-        `[socket:${socket.id}] joining ${threads.length} query threads for user ${socket.userId}`
-      );
-      threads.forEach((t) => socket.join(`query_${t.id}`));
-    })
-    .catch((err) => {
-      console.error("[socket] getThreadsByEmployee error:", err);
-    });
-
-  socket.on("joinThread", (threadId) => {
-    console.log(`[socket:${socket.id}] joinThread ${threadId}`);
-    socket.join(`query_${threadId}`);
+  console.log(`[socket] new connection ${socket.id} userId=${socket.userId}`, {
+    query: socket.handshake.query,
+    auth: socket.handshake.auth,
   });
 
+  // If we have a userId from handshake, join their chat rooms + query rooms.
+  if (socket.userId) {
+    chatService
+      .getUserRooms(socket.userId)
+      .then((rooms) => {
+        console.log(
+          `[socket:${socket.id}] joining ${rooms.length} rooms for user ${socket.userId}`
+        );
+        rooms.forEach((r) => socket.join(String(r.id)));
+      })
+      .catch((err) => console.error("[socket] getUserRooms error:", err));
+
+    EmployeeQueries.getThreadsByEmployee(socket.userId)
+      .then((threads) => {
+        console.log(
+          `[socket:${socket.id}] joining ${threads.length} query threads for user ${socket.userId}`
+        );
+        threads.forEach((t) => socket.join(`query_${String(t.id)}`));
+      })
+      .catch((err) =>
+        console.error("[socket] getThreadsByEmployee error:", err)
+      );
+  } else {
+    console.log(
+      `[socket:${socket.id}] connected without userId — will require payload senderId for message saves.`
+    );
+  }
+
+  // joinThread (employee queries)
+  socket.on("joinThread", (threadId) => {
+    try {
+      console.log(`[socket:${socket.id}] joinThread ${threadId}`);
+      socket.join(`query_${String(threadId)}`);
+    } catch (e) {
+      console.error(`[socket:${socket.id}] joinThread error`, e);
+    }
+  });
+
+  // sendQueryMessage (employee queries) — prefer socket.userId but respect payload.sender_id
   socket.on("sendQueryMessage", async (payload, callback) => {
     console.log(`[socket:${socket.id}] sendQueryMessage payload:`, payload);
     try {
-      // defensive checks (keep as you already have)
-      if (!payload || !payload.thread_id || !payload.sender_id) {
-        const errMsg = "Invalid payload for sendQueryMessage";
+      if (!payload || !payload.thread_id) {
+        const errMsg =
+          "Invalid payload for sendQueryMessage (missing thread_id)";
         if (typeof callback === "function")
           callback({ success: false, error: errMsg });
         return;
       }
 
+      const senderIdToUse = payload.sender_id ?? socket.userId ?? null;
+      if (!senderIdToUse) {
+        const errMsg = "Missing sender id for sendQueryMessage";
+        if (typeof callback === "function")
+          callback({ success: false, error: errMsg });
+        socket.emit("error", errMsg);
+        return;
+      }
+
       const messageId = await EmployeeQueries.addMessage(
         payload.thread_id,
-        payload.sender_id,
+        senderIdToUse,
         payload.sender_role,
         payload.message,
         payload.recipient_id,
@@ -869,12 +897,14 @@ io.on("connection", (socket) => {
         payload.attachmentBase64
       );
 
-      console.log("[socket] message inserted id=", messageId);
+      console.log(
+        `[socket:${socket.id}] sendQueryMessage inserted id=${messageId}`
+      );
 
       const newMsg = {
         id: messageId,
-        thread_id: payload.thread_id,
-        sender_id: payload.sender_id,
+        thread_id: String(payload.thread_id),
+        sender_id: senderIdToUse,
         sender_role: payload.sender_role,
         recipient_id: payload.recipient_id,
         sender_name: payload.sender_name || null,
@@ -885,11 +915,12 @@ io.on("connection", (socket) => {
           : null,
       };
 
-      io.to(`query_${payload.thread_id}`).emit("newMessage", newMsg);
-      socket.emit("messageAck", newMsg);
-
+      io.to(`query_${String(payload.thread_id)}`).emit("newMessage", newMsg);
+      // ack to sender
       if (typeof callback === "function")
         callback({ success: true, message: newMsg });
+      // also emit an immediate ack event (compat)
+      socket.emit("messageAck", newMsg);
     } catch (err) {
       console.error(
         "[socket] sendQueryMessage error:",
@@ -901,19 +932,43 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on(
-    "send_message",
-    async ({ roomId, content, type, fileUrl, location }) => {
-      if (!location?.lat || !location?.lng) {
-        socket.emit("error", "Location required");
+  // send_message (chat) — accept missing location, accept sender from socket or payload
+  socket.on("send_message", async (payload = {}, ack) => {
+    // payload: { roomId, content, type, fileUrl, location, senderId }
+    console.log(
+      `[socket:${socket.id}] send_message payload:`,
+      payload && { ...payload, location: payload?.location ? "present" : null }
+    );
+
+    try {
+      const { roomId, content, type, fileUrl, location } = payload;
+      const payloadSenderId = payload.senderId ?? payload.sender_id ?? null;
+
+      if (!roomId) {
+        const errMsg = "Missing roomId in send_message";
+        if (typeof ack === "function") ack({ success: false, error: errMsg });
+        socket.emit("error", errMsg);
         return;
       }
 
-      const { lat, lng, address } = location;
+      const effectiveSenderId = socket.userId ?? payloadSenderId ?? null;
+      if (!effectiveSenderId) {
+        const errMsg =
+          "Missing sender id in send_message (socket not authed and payload has no senderId)";
+        console.warn(`[socket:${socket.id}] ${errMsg}`);
+        if (typeof ack === "function") ack({ success: false, error: errMsg });
+        socket.emit("error", errMsg);
+        return;
+      }
+
+      // allow location to be missing
+      const lat = location?.lat ?? null;
+      const lng = location?.lng ?? null;
+      const address = location?.address ?? null;
 
       const saved = await chatService.saveMessage(
         roomId,
-        socket.userId,
+        effectiveSenderId,
         content,
         type,
         fileUrl,
@@ -922,33 +977,61 @@ io.on("connection", (socket) => {
         address
       );
 
-      io.to(roomId.toString()).emit("new_message", {
+      console.log(
+        `[socket:${socket.id}] saved chat message id=${saved.id} room=${roomId} sender=${effectiveSenderId}`
+      );
+
+      const emitted = {
         roomId: saved.roomId,
         id: saved.id,
         senderId: saved.senderId,
+        senderName: saved.senderName ?? saved.sender_name ?? null,
+        photoUrl: saved.photoUrl ?? saved.photo_url ?? null,
         content: saved.content,
         type: saved.type,
-        fileUrl: saved.fileUrl,
+        fileUrl: saved.fileUrl ?? saved.file_url ?? null,
         sentAt: saved.sentAt,
-        location: {
-          lat: saved.latitude,
-          lng: saved.longitude,
-          address: saved.address,
-        },
-      });
-    }
-  );
+        readAt: saved.readAt ?? null,
+        location: lat != null && lng != null ? { lat, lng, address } : null,
+      };
 
-  socket.on("create_room", async ({ name, isGroup, members }) => {
-    const roomId = await chatService.createRoom(
-      name,
-      isGroup,
-      socket.userId,
-      members
+      io.to(String(roomId)).emit("new_message", emitted);
+
+      if (typeof ack === "function") ack({ success: true, message: emitted });
+    } catch (err) {
+      console.error(
+        "[socket] send_message error:",
+        err && err.message ? err.message : err
+      );
+      if (typeof ack === "function")
+        ack({ success: false, error: err.message || "send_message failed" });
+      socket.emit("error", err.message || "send_message failed");
+    }
+  });
+
+  // create_room (unchanged, but with logs)
+  socket.on("create_room", async ({ name, isGroup, members } = {}) => {
+    try {
+      const roomId = await chatService.createRoom(
+        name,
+        isGroup,
+        socket.userId,
+        members
+      );
+      socket.join(String(roomId));
+      const [room] = await chatService.getUserRooms(socket.userId);
+      socket.emit("room_created", room);
+    } catch (err) {
+      console.error("[socket] create_room error:", err);
+      socket.emit("error", err.message || "create_room failed");
+    }
+  });
+
+  // optional: clean disconnect log
+  socket.on("disconnect", (reason) => {
+    console.log(
+      `[socket] ${socket.id} disconnected (${reason}) userId=${socket.userId}`
     );
-    socket.join(roomId.toString());
-    const [room] = await chatService.getUserRooms(socket.userId);
-    socket.emit("room_created", room);
   });
 });
 
