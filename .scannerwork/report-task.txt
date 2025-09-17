@@ -2,5 +2,5 @@ projectKey=sts
 serverUrl=http://localhost:9000
 serverVersion=9.6.1.59531
 dashboardUrl=http://localhost:9000/dashboard?id=sts
-ceTaskId=AZWPWdqGTemFFWa0GXfS
-ceTaskUrl=http://localhost:9000/api/ce/task?id=AZWPWdqGTemFFWa0GXfS
+ceTaskId=AZk38yuJewi-8nY5P-O-
+ceTaskUrl=http://localhost:9000/api/ce/task?id=AZk38yuJewi-8nY5P-O-
