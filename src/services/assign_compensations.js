@@ -315,10 +315,24 @@ async function getEmployeeLopDetailsForCurrentPeriod() {
   }
 }
 
+async function getWorkingDaysCurrentMonth() {
+  const conn = await pool.getConnection();
+  try {
+    const [rows] = await conn.query(queries.GET_WORKING_DAYS_CURRENT_MONTH);
+    return rows[0]?.total_working_days || 0;
+  } catch (err) {
+    console.error("Error fetching working days:", err);
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
+
 module.exports = {
   checkEmployeeAssignment,
   assignCompensation,
-  
+   getWorkingDaysCurrentMonth, 
   getAssignedCompensationDetails,
   addEmployeeBonus,
   addEmployeeBonusBulk,
