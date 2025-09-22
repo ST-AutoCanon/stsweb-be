@@ -267,6 +267,46 @@ WHERE JSON_CONTAINS(assigned_data, ?, '$.employee_id')
       assigned_date
     )
     VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+  `,
+
+
+  GET_WORKING_DAYS_CURRENT_MONTH: `
+    WITH RECURSIVE month_days AS (
+        SELECT DATE(CONCAT(YEAR(NOW()), '-', MONTH(NOW()), '-01')) AS work_date
+        UNION ALL
+        SELECT DATE_ADD(work_date, INTERVAL 1 DAY)
+        FROM month_days
+        WHERE work_date < LAST_DAY(NOW())
+    ),
+    all_saturdays AS (
+        SELECT work_date, ROW_NUMBER() OVER (ORDER BY work_date) AS sat_position
+        FROM month_days
+        WHERE WEEKDAY(work_date) = 5  -- Saturday
+    ),
+    saturday_list AS (
+        SELECT all_saturdays.work_date AS holiday_date
+        FROM all_saturdays
+        JOIN (
+            SELECT SUBSTRING_INDEX(SUBSTRING_INDEX(saturdays, ',', numbers.n), ',', -1) AS selected_sat
+            FROM saturday_holidays
+            JOIN (SELECT 1 n UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5) numbers
+            ON CHAR_LENGTH(saturdays) - CHAR_LENGTH(REPLACE(saturdays, ',', '')) >= numbers.n - 1
+            WHERE month_year = DATE_FORMAT(NOW(), '%m-%Y')
+        ) subquery
+        ON all_saturdays.sat_position = subquery.selected_sat
+    )
+    SELECT COUNT(*) AS total_working_days
+    FROM month_days
+    WHERE WEEKDAY(work_date) != 6  -- Exclude Sundays
+      AND work_date NOT IN (SELECT holiday_date FROM saturday_list)
+      AND work_date NOT IN (
+          SELECT date FROM holidays
+          WHERE MONTH(date) = MONTH(NOW()) 
+            AND YEAR(date) = YEAR(NOW())
+      );
   `
+
+
+
 };
 
