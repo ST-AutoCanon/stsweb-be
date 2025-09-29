@@ -162,55 +162,6 @@ LIMIT 0, 1000;
   `,
 
  
-//     GET_EMPLOYEE_EXTRA_HOURS : `
-//   SELECT 
-//     punch_id,
-//     employee_id,
-//     DATE(punchin_time) AS work_date,
-//     punch_status,
-//     punchin_time,
-//     punchin_device,
-//     punchin_location,
-//     punchout_time,
-//     punchout_device,
-//     punchout_location,
-//     punchmode,
-//     ROUND(TIMESTAMPDIFF(MINUTE, punchin_time, punchout_time) / 60.0, 2) AS hours_worked,
-//     ROUND(TIMESTAMPDIFF(MINUTE, punchin_time, punchout_time) / 60.0 - 10, 2) AS extra_hours
-//   FROM emp_attendence
-//   WHERE 
-//     punchin_time IS NOT NULL
-//     AND punchout_time IS NOT NULL
-//     AND TIMESTAMPDIFF(HOUR, punchin_time, punchout_time) > 10
-//     AND punchin_time >= DATE_FORMAT(CURDATE() - INTERVAL 1 MONTH, '%Y-%m-25')
-//     AND punchin_time <= DATE_FORMAT(CURDATE(), '%Y-%m-25');
-// `
-
-//  GET_EMPLOYEE_EXTRA_HOURS: `
-//   SELECT 
-//     punch_id,
-//     employee_id,
-//     DATE(punchin_time) AS work_date,
-//     punch_status,
-//     punchin_time,
-//     punchin_device,
-//     punchin_location,
-//     punchout_time,
-//     punchout_device,
-//     punchout_location,
-//     punchmode,
-//     ROUND(TIMESTAMPDIFF(MINUTE, punchin_time, punchout_time) / 60.0, 2) AS hours_worked,
-//     ROUND(TIMESTAMPDIFF(MINUTE, punchin_time, punchout_time) / 60.0 - 10, 2) AS extra_hours
-//   FROM emp_attendence
-//   WHERE 
-//     punchin_time IS NOT NULL
-//     AND punchout_time IS NOT NULL
-//     AND TIMESTAMPDIFF(HOUR, punchin_time, punchout_time) > 10
-//     AND punchin_time >= ?
-//     AND punchin_time <= ?
-// ` ,
-
-// Insert bulk overtime records with default status "Pending"
 ADD_OVERTIME_DETAILS_BULK: `
   INSERT INTO overtime_details (
     punch_id,
@@ -316,6 +267,46 @@ WHERE JSON_CONTAINS(assigned_data, ?, '$.employee_id')
       assigned_date
     )
     VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+  `,
+
+
+  GET_WORKING_DAYS_CURRENT_MONTH: `
+    WITH RECURSIVE month_days AS (
+        SELECT DATE(CONCAT(YEAR(NOW()), '-', MONTH(NOW()), '-01')) AS work_date
+        UNION ALL
+        SELECT DATE_ADD(work_date, INTERVAL 1 DAY)
+        FROM month_days
+        WHERE work_date < LAST_DAY(NOW())
+    ),
+    all_saturdays AS (
+        SELECT work_date, ROW_NUMBER() OVER (ORDER BY work_date) AS sat_position
+        FROM month_days
+        WHERE WEEKDAY(work_date) = 5  -- Saturday
+    ),
+    saturday_list AS (
+        SELECT all_saturdays.work_date AS holiday_date
+        FROM all_saturdays
+        JOIN (
+            SELECT SUBSTRING_INDEX(SUBSTRING_INDEX(saturdays, ',', numbers.n), ',', -1) AS selected_sat
+            FROM saturday_holidays
+            JOIN (SELECT 1 n UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5) numbers
+            ON CHAR_LENGTH(saturdays) - CHAR_LENGTH(REPLACE(saturdays, ',', '')) >= numbers.n - 1
+            WHERE month_year = DATE_FORMAT(NOW(), '%m-%Y')
+        ) subquery
+        ON all_saturdays.sat_position = subquery.selected_sat
+    )
+    SELECT COUNT(*) AS total_working_days
+    FROM month_days
+    WHERE WEEKDAY(work_date) != 6  -- Exclude Sundays
+      AND work_date NOT IN (SELECT holiday_date FROM saturday_list)
+      AND work_date NOT IN (
+          SELECT date FROM holidays
+          WHERE MONTH(date) = MONTH(NOW()) 
+            AND YEAR(date) = YEAR(NOW())
+      );
   `
+
+
+
 };
 

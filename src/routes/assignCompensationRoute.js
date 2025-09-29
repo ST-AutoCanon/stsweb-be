@@ -14,7 +14,8 @@ const {
   handleRejectOvertimeRow,
   getOvertimeDetailsHandler,
   
-  getEmployeeLopHandler
+  getEmployeeLopHandler,
+  getWorkingDaysHandler 
 } = require('../handlers/assignCompensationHandler'); // Adjust path if needed
 
 const router = express.Router();
@@ -64,6 +65,9 @@ router.get("/overtime-status-summary", getOvertimeDetailsHandler);
 
 // Get LOP details for current period
 router.get("/lop-details", getEmployeeLopHandler);
+
+router.get("/working-days", getWorkingDaysHandler);
+
 
 // Log registered routes
 router.stack.forEach((r) => {

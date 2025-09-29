@@ -12,10 +12,27 @@ const {
   approveOvertimeRow,
   rejectOvertimeRow,
   getAllOvertimeDetails,
-  getEmployeeLopDetailsForCurrentPeriod
+  getEmployeeLopDetailsForCurrentPeriod,
+  getWorkingDaysCurrentMonth,
 } = require("../services/assign_compensations");
 
-
+const getWorkingDaysHandler = async (req, res) => {
+  try {
+    const totalWorkingDays = await getWorkingDaysCurrentMonth();
+    res.status(200).json({
+      success: true,
+      message: `Total working days for current month: ${totalWorkingDays}`,
+      data: { totalWorkingDays }
+    });
+  } catch (error) {
+    console.error("Error fetching working days:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch working days",
+      details: error.message
+    });
+  }
+};
 async function checkEmployeeAssignmentHandler(req, res) {
   try {
     console.log("Received req.body:", req.body); // Debug log
@@ -431,5 +448,7 @@ module.exports = {
   handleApproveOvertimeRow,
   handleRejectOvertimeRow,
   getOvertimeDetailsHandler,
-  getEmployeeLopHandler
+  getEmployeeLopHandler,
+    getWorkingDaysHandler, // add this line
+
 };
