@@ -140,7 +140,8 @@ class LoginService {
         employeeId: emp.employee_id,
         position: emp.position,
         gender: emp.gender,
-        department: emp.department, // department name
+        department: emp.department,
+        department_id: emp.department_id,
         salary: emp.salary,
         photoUrl: emp.photo_url,
         attendance_count: emp.attendance_count || 0,

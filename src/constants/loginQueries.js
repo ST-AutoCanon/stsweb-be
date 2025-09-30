@@ -15,7 +15,8 @@ module.exports = {
       e.password,
       pr.position,
       e.status,
-      d.name AS department
+      d.name AS department,
+      d.id AS department_id
     FROM employees e
     LEFT JOIN employee_personal p
       ON e.employee_id = p.employee_id
@@ -158,6 +159,7 @@ module.exports = {
       e.employee_id,
       p.gender,
       d.name AS department,
+      d.id AS department_id,
       pr.position,
       pr.salary,
       p.photo_url,

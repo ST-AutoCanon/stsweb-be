@@ -157,8 +157,17 @@ module.exports = {
   INSERT INTO message_read_status (message_id, recipient_id, is_read) VALUES ?
   `,
 
-  GET_ADMIN: `SELECT employee_id FROM employees WHERE role = 'Admin'`,
-  GET_HR: `SELECT employee_id FROM employees WHERE role = 'HR'`,
+  GET_ADMIN: `SELECT employee_id FROM employee_professional WHERE role = 'Admin'`,
+  // GET_HR: `SELECT employee_id FROM employee_professional WHERE role = 'HR'`,
+  GET_HR: `SELECT employee_id
+FROM employee_professional
+WHERE role = 'Manager'
+  AND department_id = (
+    SELECT id
+    FROM departments
+    WHERE name = 'HR'
+    LIMIT 1
+  );`,
 
   UPDATE_LATEST_MESSAGE: `
     UPDATE threads
