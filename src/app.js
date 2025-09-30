@@ -504,7 +504,7 @@ const adminAttendanceRoutes = require("./routes/adminAttendancetrackerRoute");
 const adminAttendancetrackerRoute = require("./routes/adminAttendancetrackerRoute");
 const face_admin_page = require("./routes/face_adminpageRoutes");
 const employeeloginRoutes = require("./routes/employeeloginRoutes");
-require("./services/punchCronService");
+// require("./services/punchCronService");
 const employeeBirthdayRoutes = require("./routes/employeeBirthday");
 
 const meetingRoutes = require("./routes/meetingRoutes");
