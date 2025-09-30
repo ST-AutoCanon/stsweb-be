@@ -447,6 +447,20 @@ require("dotenv").config();
 const path = require("path");
 const session = require("express-session");
 const { Server } = require("socket.io");
+//tasks
+const planRoutes = require("./routes/planRoute");
+const supervisorEmployeesRoutes = require("./routes/supervisorEmployeesRoutes");
+const supervisorRoutes = require("./routes/supervisorRoutes");
+const taskEmployeesRoutes = require("./routes/taskEmployeesRoutes");
+const taskRoutes = require("./routes/taskroutes");
+const taskMessagesRoutes = require("./routes/taskMessagesRoutes");
+const employeeTaskRoutes = require("./routes/employeeTaskUpdateRoutes");
+// const supervisorEmployeesRoutes = require("./routes/supervisorEmployeesRoutes");
+
+// const taskEmployeesRoutes = require("./routes/taskEmployeesRoutes");
+// const employeeTaskRoutes = require("./routes/employeeTaskUpdateRoutes");
+
+
 // const cron = require("node-cron");
 
 const EmployeeQueries = require("./services/employeeQueries");
@@ -517,7 +531,7 @@ const overtimeRoutes = require("./routes/assignCompensationRoute");
 const overtimeSummaryRoutes = require("./routes/overtimeSummaryRoutes");
 const employeeProjectsRoute = require("./routes/employeeProjectsRoute");
 const lossofPayCalculationRoutes = require("./routes/lossofPayCalculationRoutes");
-
+const incentivesRoutes = require("./routes/incentivesRoutes");
 const app = express();
 const server = http.createServer(app);
 
@@ -565,7 +579,18 @@ app.use((req, res, next) => {
 });
 
 //assets
+app.use("/api/tasks", taskRoutes);
+app.use("/api/messages", taskMessagesRoutes);
+app.use("/api/supervisor", supervisorRoutes);
+app.use("/api/plans", planRoutes);
+app.use("/api/supervisor", supervisorEmployeesRoutes);
+
+app.use("/api/task-emp-emp", taskEmployeesRoutes);
+app.use("/api/employee-tasks", employeeTaskRoutes);
+
+
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
+
 const assetsRoutesforreturn = require("./routes/assetsRoutes");
 const chatRoutes = require("./routes/chatRoutes");
 const webpush = require("web-push");
@@ -708,6 +733,14 @@ app.use(
     },
   })
 );
+//tasks
+// app.use("/api/task-emp-emp", taskEmployeesRoutes);
+// app.use("/api/supervisor", supervisorRoutes);
+// app.use("/api/plans", planRoutes);
+
+// app.use("/api/tasks", taskRoutes);
+// app.use("/api/messages", taskMessagesRoutes);
+// app.use("/api/task-emp-emp", taskEmployeesRoutes);
 
 app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
 app.use("/assets", express.static(path.join(__dirname, "assets")));
@@ -789,12 +822,21 @@ app.use("/api/templates", letterheadTemplateRoutes);
 app.use("/api", employeeProjectsRoute);
 app.use("/api/lop", lossofPayCalculationRoutes);
 
+//add incentives
+app.use("/api/incentives", incentivesRoutes);
+
 //compensation
+app.use("/api/overtime", overtimeRoutes);
+app.use("/api/overtime-summary", overtimeSummaryRoutes);
+
+
 app.use("/api/compensations", compensationRoutes);
 app.use("/api/compensation", assignCompensationRoutes);
 app.use("/api", employeeRoutesforsalarybreakup);
-app.use("/api/overtime", overtimeRoutes);
-app.use("/api/overtime-summary", overtimeSummaryRoutes);
+
+////////////
+
+
 
 // server side (app.js)
 const io = new Server(server, {
