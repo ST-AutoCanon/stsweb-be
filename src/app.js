@@ -1,4 +1,3 @@
-
 const express = require("express");
 const http = require("http");
 const bodyParser = require("body-parser");
@@ -17,12 +16,12 @@ const taskMessagesRoutes = require("./routes/taskMessagesRoutes");
 const employeeTaskRoutes = require("./routes/employeeTaskUpdateRoutes");
 const weeklyTaskSupervisorRoutes = require("./routes/weekly_task_supervisor");
 const weekTaskRoutes = require("./routes/weekTaskRoutes");
+const report = require("./routes/reportRoutes");
 
 // const supervisorEmployeesRoutes = require("./routes/supervisorEmployeesRoutes");
 
 // const taskEmployeesRoutes = require("./routes/taskEmployeesRoutes");
 // const employeeTaskRoutes = require("./routes/employeeTaskUpdateRoutes");
-
 
 // const cron = require("node-cron");
 
@@ -152,7 +151,6 @@ app.use("/api/supervisor", supervisorEmployeesRoutes);
 
 app.use("/api/task-emp-emp", taskEmployeesRoutes);
 app.use("/api/employee-tasks", employeeTaskRoutes);
-
 
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
@@ -309,19 +307,17 @@ app.use(
 
 //tasks
 
-
 app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
 app.use("/assets", express.static(path.join(__dirname, "assets")));
 app.use("/api/leave-policies", leavePolicy);
 
 app.use(idleTimeout);
 
-
-
 // ✅ Your routes (unchanged below) …
 app.use("/", holidayRoutes);
 app.use("/", loginRoutes);
 app.use("/", leaveRoutes);
+
 app.use("/", projects);
 app.use("/", invoices);
 app.use("/", employeeRoutes);
@@ -342,6 +338,8 @@ app.use("/", empLeaveQueryDashboard);
 app.use("/salary", salaryRoutes);
 app.use("/api", payrollRoutes);
 app.use("/api", bankDetailsRoutes);
+app.use("/api/report", report);
+
 app.use("/", workDayRoutes);
 app.use("/api", adminSalaryStatementRoutes);
 app.use("/", salarylastmonthtotal);
@@ -399,14 +397,11 @@ app.use("/api/incentives", incentivesRoutes);
 app.use("/api/overtime", overtimeRoutes);
 app.use("/api/overtime-summary", overtimeSummaryRoutes);
 
-
 app.use("/api/compensations", compensationRoutes);
 app.use("/api/compensation", assignCompensationRoutes);
 app.use("/api", employeeRoutesforsalarybreakup);
 
 ////////////
-
-
 
 // server side (app.js)
 const io = new Server(server, {
