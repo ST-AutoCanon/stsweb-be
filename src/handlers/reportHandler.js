@@ -166,10 +166,14 @@ async function downloadLeavesReport(req, res, next) {
         { header: "Employee ID", key: "employee_id" },
         { header: "Employee Name", key: "employee_name" },
         { header: "Department", key: "department_name" },
+        { header: "Leave type", key: "leave_type" },
+
         { header: "Start Date", key: "start_date" },
         { header: "End Date", key: "end_date" },
         { header: "Status", key: "status" },
         { header: "Comments", key: "comments" },
+        { header: "Reason", key: "reason" },
+
         { header: "Created at", key: "created_at" },
       ];
       const buf = await reportService.renderExcelBuffer(rows, headers);

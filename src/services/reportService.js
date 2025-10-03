@@ -1,9 +1,14 @@
 ﻿// src/services/reportService.js
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
+const util = require("util");
+const child_process = require("child_process");
+const execFile = util.promisify(child_process.execFile);
+const spawnSync = child_process.spawnSync;
+
 const ExcelJS = require("exceljs");
-const puppeteer = require("puppeteer");
-const PDFDocument = require("pdfkit");
+const PDFDocument = require("pdfkit"); // small fallback (kept)
 const db = require("../config"); // expects db exported with .query(...)
 /* eslint-disable no-console */
 const queries = require("../constants/reportQueries");
@@ -96,8 +101,7 @@ function normalizeReimbursementRow(raw) {
         : "";
   }
 
-  // payment_status: your SQL returns COALESCE(NULLIF(r.payment_status, ''), NULLIF(r.status, '')) AS payment_status
-  // keep raw_payment_status (the original r.payment_status) available, but ensure unified column exists
+  // payment_status
   if (
     !Object.prototype.hasOwnProperty.call(r, "payment_status") ||
     r.payment_status === null ||
@@ -114,7 +118,7 @@ function normalizeReimbursementRow(raw) {
     }
   }
 
-  // Make sure `id` is present
+  // id fallback
   if (
     !Object.prototype.hasOwnProperty.call(r, "id") &&
     Object.prototype.hasOwnProperty.call(r, "reimbursement_id")
@@ -122,7 +126,7 @@ function normalizeReimbursementRow(raw) {
     r.id = r.reimbursement_id;
   }
 
-  // Make sure employee_name exists
+  // employee_name fallback
   if (
     !Object.prototype.hasOwnProperty.call(r, "employee_name") &&
     (r.first_name || r.last_name)
@@ -168,25 +172,16 @@ async function getLeaveRows(startDate, endDate, status, fields) {
 }
 
 /**
- * getReimbursementRows:
- * Matches your provided GET_REIMBURSEMENT_REPORT SQL which expects 9 placeholders in order:
- *  [startDate, startDate, endDate, endDate, status, status, status, status, status]
- *
- * The SQL implements:
- *  - date filter based on COALESCE(approved_date, created_at)
- *  - a compound status filter that supports: paid / unpaid / pending|approved|rejected
+ * getReimbursementRows
  */
 async function getReimbursementRows(startDate, endDate, status, fields) {
   const sql = queries.GET_REIMBURSEMENT_REPORT;
 
   const s = startDate || null;
   const e = endDate || null;
-  // If the frontend sends "All" we should disable status filter by passing null
   const st =
     status && String(status).trim().toLowerCase() !== "all" ? status : null;
 
-  // Build params to match the 9 placeholders in your SQL
-  // order: start, start, end, end, st, st, st, st, st
   const params = [s, s, e, e, st, st, st, st, st];
 
   let rawRows;
@@ -360,29 +355,110 @@ async function getAssetRows(startDate, endDate, status, fields) {
 }
 
 /* ---------- Excel (XLSX) builder ---------- */
+/**
+ * Helper: remove columns whose every cell is empty (\"\", null, undefined)
+ * Returns {columns, keptIndexes} where columns is array of {header,key,width}
+ */
+function pruneEmptyColumnsFromData(rows, columns) {
+  // columns: array of {header, key}
+  if (!Array.isArray(columns) || columns.length === 0)
+    return { columns: [], keptIndexes: [] };
+  const kept = [];
+  const keptIdx = [];
+  for (let i = 0; i < columns.length; i++) {
+    const key = columns[i].key;
+    let hasNonEmpty = false;
+    for (let r = 0; r < rows.length; r++) {
+      const val = rows[r][key];
+      if (val !== null && val !== undefined && String(val).trim() !== "") {
+        hasNonEmpty = true;
+        break;
+      }
+    }
+    if (hasNonEmpty) {
+      kept.push(columns[i]);
+      keptIdx.push(i);
+    }
+  }
+  return { columns: kept, keptIndexes: keptIdx };
+}
+
+/**
+ * Heuristic auto-width (Excel character width units).
+ * clamps width between minWidth and maxWidth.
+ */
+function computeAutoWidthForColumn(rows, key, header) {
+  const minWidth = 5;
+  const maxWidth = 80; // avoid absurdly large widths
+  let maxLen = String(header || "").length;
+  for (let i = 0; i < rows.length; i++) {
+    const v = rows[i][key];
+    if (v === null || v === undefined) continue;
+    const s = String(v);
+    if (s.length > maxLen) maxLen = s.length;
+  }
+  // convert char count to Excel approx width: small adjustment factor
+  const width = Math.ceil(Math.min(maxWidth, Math.max(minWidth, maxLen * 1.1)));
+  return width;
+}
+
 async function renderExcelBuffer(rows, headers) {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Report");
 
+  // Normalize rows
+  const safeRows = Array.isArray(rows) ? rows.map((r) => ({ ...r })) : [];
+
+  // If headers provided (handler-specific), convert to uniform objects
+  let cols;
   if (Array.isArray(headers) && headers.length > 0) {
-    sheet.columns = headers.map((h) => ({
-      header: h.header || h,
-      key: h.key || h.header || h,
-      width: h.width || 20,
-    }));
-    rows.forEach((r) => sheet.addRow(r));
-  } else if (rows.length > 0) {
-    const cols = Object.keys(rows[0]).map((k) => ({
+    cols = headers.map((h) => {
+      if (typeof h === "string") return { header: h, key: h, width: 20 };
+      return {
+        header: h.header || h.key || h,
+        key: h.key || h.header || h,
+        width: h.width || 20,
+      };
+    });
+  } else if (safeRows.length > 0) {
+    cols = Object.keys(safeRows[0]).map((k) => ({
       header: k,
       key: k,
       width: 20,
     }));
-    sheet.columns = cols;
-    rows.forEach((r) => sheet.addRow(r));
   } else {
-    sheet.columns = [{ header: "Message", key: "message", width: 50 }];
-    sheet.addRow({ message: "No data available for selected range" });
+    cols = [{ header: "Message", key: "message", width: 50 }];
+    safeRows.push({ message: "No data available for selected range" });
   }
+
+  // Remove columns that are entirely empty (this addresses your empty column issue)
+  const pruned = pruneEmptyColumnsFromData(safeRows, cols);
+  const finalCols = pruned.columns.length > 0 ? pruned.columns : cols; // if all pruned, keep original to show headed message
+
+  // Compute auto widths
+  finalCols.forEach((c) => {
+    c.width = computeAutoWidthForColumn(safeRows, c.key, c.header);
+  });
+
+  sheet.columns = finalCols.map((c) => ({
+    header: c.header,
+    key: c.key,
+    width: c.width,
+  }));
+
+  // Add rows ensuring keys match sheet columns order (ExcelJS will ignore unknown keys)
+  for (const r of safeRows) {
+    const rowObj = {};
+    for (const c of finalCols) {
+      rowObj[c.key] = Object.prototype.hasOwnProperty.call(r, c.key)
+        ? r[c.key]
+        : "";
+    }
+    sheet.addRow(rowObj);
+  }
+
+  // Optional: freeze header row
+  sheet.views = [{ state: "frozen", xSplit: 0, ySplit: 1 }];
 
   const buffer = await workbook.xlsx.writeBuffer();
   return buffer;
@@ -400,15 +476,18 @@ function escapeHtml(str) {
 
 /**
  * Compute equal column widths (keeps layout stable for printing).
+ * Slight tweak: if there are many columns, produce smaller percentages so table fits.
  */
 function computeColumnPercents(rows) {
   if (!rows || rows.length === 0) return [];
   const headers = Object.keys(rows[0] || {});
   if (!headers.length) return [];
 
-  const equal = Math.round((100 / headers.length) * 10) / 10;
-  const percents = headers.map(() => equal);
-
+  const count = headers.length;
+  // When very many columns, cap per-column percent small to avoid overflow in some renderers
+  const base = Math.max(6, Math.round((100 / count) * 10) / 10);
+  const percents = headers.map(() => base);
+  // normalize sum to 100
   const sum = percents.reduce((s, v) => s + v, 0);
   const diff = Math.round((100 - sum) * 10) / 10;
   if (Math.abs(diff) >= 0.1) {
@@ -419,6 +498,7 @@ function computeColumnPercents(rows) {
 
 /**
  * rowsToHtml: print-friendly HTML with colgroup to stabilize widths
+ * Dynamically reduces font-size/padding when lots of columns to help fit on page.
  */
 function rowsToHtml(title, rows) {
   const headerCols = rows && rows.length ? Object.keys(rows[0]) : [];
@@ -450,21 +530,29 @@ function rowsToHtml(title, rows) {
           headerCols.length || 1
         }" style="text-align:center;padding:12px">No data available</td></tr>`;
 
+  // Adaptive CSS: if many columns, reduce font size & padding and set small table-layout
+  const colCount = headerCols.length || 0;
+  const smallMode = colCount >= 8;
+  const fontSize = smallMode ? "8px" : "10px";
+  const headerFontSize = smallMode ? "9px" : "10px";
+  const cellPadding = smallMode ? "4px" : "6px";
+  const tableFont = "Arial, Helvetica, sans-serif";
+
   const css = `
-    @page { size: A4; margin: 10mm; }
-    body { font-family: Arial, Helvetica, sans-serif; font-size:10px; color:#111; margin:0; padding:0; }
-    .wrap { padding:8px; box-sizing:border-box; width:100%; }
-    h2 { margin:0 0 6px 0; font-size:12px; }
-    .meta { margin-bottom:6px; font-size:10px; color:#444; }
-    table { border-collapse: collapse; width:100%; table-layout: fixed; font-size:10px; }
+    @page { size: A4 ${colCount >= 6 ? "landscape" : "portrait"}; margin: 8mm; }
+    body { font-family: ${tableFont}; font-size:${fontSize}; color:#111; margin:0; padding:0; }
+    .wrap { padding:6px; box-sizing:border-box; width:100%; }
+    h2 { margin:0 0 6px 0; font-size:${headerFontSize}; }
+    .meta { margin-bottom:6px; font-size:9px; color:#444; }
+    table { border-collapse: collapse; width:100%; table-layout: fixed; font-size:${fontSize}; word-break:break-word; }
     col { vertical-align: top; }
-    thead th { background:#f6f8fa; padding:6px; text-align:left; vertical-align:top; font-weight:600; font-size:10px; }
-    th, td { border:1px solid #ddd; padding:6px 6px; vertical-align:top; word-break:break-word; overflow-wrap:break-word; white-space:normal; }
-    td { font-size:10px; }
+    thead th { background:#f6f8fa; padding:${cellPadding}; text-align:left; vertical-align:top; font-weight:600; font-size:${headerFontSize}; }
+    th, td { border:1px solid #ddd; padding:${cellPadding}; vertical-align:top; word-break:break-word; overflow-wrap:break-word; white-space:normal; }
+    td { font-size:${fontSize}; }
     tr { page-break-inside: avoid; }
     @media print {
-      thead th, td { padding:4px 6px; font-size:9px; }
-      h2 { font-size:11px; }
+      thead th, td { padding:${cellPadding}; font-size:${fontSize}; }
+      h2 { font-size:${headerFontSize}; }
     }
   `;
 
@@ -487,6 +575,257 @@ function rowsToHtml(title, rows) {
     </div>
   </body>
 </html>`;
+}
+
+/* ---------- Find LibreOffice binary ---------- */
+function findLibreOfficeBinary() {
+  const candidates = [];
+  if (process.env.LIBREOFFICE_PATH)
+    candidates.push(process.env.LIBREOFFICE_PATH);
+  candidates.push("soffice", "libreoffice", "soffice.exe", "libreoffice.exe");
+
+  for (const bin of candidates) {
+    if (!bin) continue;
+    try {
+      // spawnSync --version is portable; suppress output
+      const res = spawnSync(bin, ["--version"], { stdio: "ignore" });
+      if (res && typeof res.status === "number" && res.status === 0) {
+        return bin;
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  // fallback: attempt which / where
+  try {
+    const which = spawnSync("which", ["soffice"], { encoding: "utf8" });
+    if (which && which.status === 0 && which.stdout) {
+      const p = which.stdout.trim().split("\n")[0];
+      if (p) return p;
+    }
+  } catch (e) {}
+
+  return null;
+}
+
+/* ---------- Convert HTML -> PDF using LibreOffice CLI ---------- */
+async function renderPdfBuffer(title, rows) {
+  const html = rowsToHtml(title, rows);
+  console.log(
+    "[reportService] renderPdfBuffer html length:",
+    html ? html.length : 0
+  );
+
+  if (!html || html.length === 0) {
+    throw new Error("Empty HTML passed to PDF generator");
+  }
+
+  // create temporary directory & files
+  const tmpBase = await fs.promises.mkdtemp(path.join(os.tmpdir(), "report-"));
+  const htmlFilename = `report_${Date.now()}.html`;
+  const htmlPath = path.join(tmpBase, htmlFilename);
+
+  try {
+    await fs.promises.writeFile(htmlPath, html, "utf8");
+  } catch (writeErr) {
+    try {
+      await fs.promises.rm(tmpBase, { recursive: true, force: true });
+    } catch (e) {}
+    throw writeErr;
+  }
+
+  // find libreoffice
+  const soffice = findLibreOfficeBinary();
+  if (!soffice) {
+    try {
+      await fs.promises.rm(tmpBase, { recursive: true, force: true });
+    } catch (e) {}
+    throw new Error(
+      "LibreOffice binary not found. Install LibreOffice and ensure 'soffice' is in PATH or set LIBREOFFICE_PATH env var."
+    );
+  }
+
+  // Conversion args
+  const args = [
+    "--headless",
+    "--convert-to",
+    "pdf:writer_pdf_Export",
+    htmlPath,
+    "--outdir",
+    tmpBase,
+  ];
+
+  const timeoutMs = 30000;
+  try {
+    await execFile(soffice, args, {
+      timeout: timeoutMs,
+      maxBuffer: 50 * 1024 * 1024,
+    });
+  } catch (convErr) {
+    console.error(
+      "[reportService] LibreOffice conversion error:",
+      convErr && (convErr.message || convErr)
+    );
+    try {
+      const debugFiles = await fs.promises.readdir(tmpBase);
+      console.error("[reportService] debug files in tmp:", debugFiles);
+    } catch (e) {}
+    try {
+      await fs.promises.rm(tmpBase, { recursive: true, force: true });
+    } catch (e) {}
+    throw new Error(
+      `LibreOffice conversion failed: ${
+        convErr && convErr.message ? convErr.message : String(convErr)
+      }`
+    );
+  }
+
+  // expected generated PDF path
+  const pdfBasename =
+    path.basename(htmlFilename, path.extname(htmlFilename)) + ".pdf";
+  const pdfPath = path.join(tmpBase, pdfBasename);
+
+  // Wait for the file to exist (small loop)
+  let pdfBuf;
+  const maxWait = 5000;
+  const step = 200;
+  let waited = 0;
+  while (waited < maxWait) {
+    if (fs.existsSync(pdfPath)) break;
+    // sleep step
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((r) => setTimeout(r, step));
+    waited += step;
+  }
+
+  try {
+    pdfBuf = await fs.promises.readFile(pdfPath);
+  } catch (readErr) {
+    try {
+      await fs.promises.rm(tmpBase, { recursive: true, force: true });
+    } catch (e) {}
+    throw new Error(
+      "PDF conversion seemed to succeed but output file couldn't be read: " +
+        (readErr && readErr.message)
+    );
+  }
+
+  // cleanup temporary files
+  try {
+    await fs.promises.rm(tmpBase, { recursive: true, force: true });
+  } catch (e) {
+    console.warn("[reportService] failed to cleanup tmp dir:", e && e.message);
+  }
+
+  if (!Buffer.isBuffer(pdfBuf) || pdfBuf.length === 0) {
+    throw new Error("LibreOffice produced empty PDF buffer");
+  }
+
+  return pdfBuf;
+}
+
+/* ---------- XLSX -> PDF wrapper (prefer this for very wide tables) ---------- */
+/**
+ * renderExcelToPdfBuffer(rows, headers)
+ * - Generate .xlsx (via renderExcelBuffer)
+ * - Convert .xlsx -> .pdf using LibreOffice (soffice)
+ * - Return PDF Buffer
+ */
+async function renderExcelToPdfBuffer(rows, headers) {
+  // 1) create xlsx buffer using existing helper
+  const xlsxBuffer = await renderExcelBuffer(rows, headers);
+
+  // 2) create temp dir and write xlsx file
+  const tmpBase = await fs.promises.mkdtemp(
+    path.join(os.tmpdir(), "report-xlsx-")
+  );
+  const xlsxFilename = `report_${Date.now()}.xlsx`;
+  const xlsxPath = path.join(tmpBase, xlsxFilename);
+  await fs.promises.writeFile(xlsxPath, xlsxBuffer);
+
+  // 3) find LibreOffice binary
+  const soffice = findLibreOfficeBinary();
+  if (!soffice) {
+    try {
+      await fs.promises.rm(tmpBase, { recursive: true, force: true });
+    } catch (e) {}
+    throw new Error(
+      "LibreOffice binary not found. Install LibreOffice and ensure 'soffice' is in PATH or set LIBREOFFICE_PATH."
+    );
+  }
+
+  // 4) exec conversion
+  const args = [
+    "--headless",
+    "--convert-to",
+    "pdf:writer_pdf_Export",
+    xlsxPath,
+    "--outdir",
+    tmpBase,
+  ];
+  const timeoutMs = 30000;
+  try {
+    await execFile(soffice, args, {
+      timeout: timeoutMs,
+      maxBuffer: 50 * 1024 * 1024,
+    });
+  } catch (convErr) {
+    try {
+      const debugFiles = await fs.promises.readdir(tmpBase);
+      console.error(
+        "[reportService] LibreOffice conversion error, tmp files:",
+        debugFiles
+      );
+    } catch (e) {}
+    try {
+      await fs.promises.rm(tmpBase, { recursive: true, force: true });
+    } catch (e) {}
+    throw new Error(
+      "LibreOffice conversion failed: " +
+        (convErr && convErr.message ? convErr.message : String(convErr))
+    );
+  }
+
+  // 5) read resulting pdf
+  const pdfPath = path.join(
+    tmpBase,
+    path.basename(xlsxPath, path.extname(xlsxPath)) + ".pdf"
+  );
+  const maxWait = 5000;
+  const step = 200;
+  let waited = 0;
+  while (waited < maxWait && !fs.existsSync(pdfPath)) {
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((r) => setTimeout(r, step));
+    waited += step;
+  }
+
+  let pdfBuf;
+  try {
+    pdfBuf = await fs.promises.readFile(pdfPath);
+  } catch (readErr) {
+    try {
+      await fs.promises.rm(tmpBase, { recursive: true, force: true });
+    } catch (e) {}
+    throw new Error(
+      "Converted PDF missing or unreadable: " +
+        (readErr && readErr.message ? readErr.message : String(readErr))
+    );
+  }
+
+  // 6) cleanup temp files
+  try {
+    await fs.promises.rm(tmpBase, { recursive: true, force: true });
+  } catch (e) {
+    console.warn("[reportService] failed to cleanup tmp dir:", e && e.message);
+  }
+
+  if (!Buffer.isBuffer(pdfBuf) || pdfBuf.length === 0) {
+    throw new Error("LibreOffice conversion produced empty PDF");
+  }
+
+  return pdfBuf;
 }
 
 /* ---------- PNG -> PDF fallback using pdfkit ---------- */
@@ -527,255 +866,6 @@ function createPdfFromPng(pngPath) {
   });
 }
 
-/* ---------- PDF renderer using puppeteer (robust) ---------- */
-async function renderPdfBuffer(title, rows) {
-  const html = rowsToHtml(title, rows);
-  console.log(
-    "[reportService] renderPdfBuffer html length:",
-    html ? html.length : 0
-  );
-
-  if (!html || html.length === 0) {
-    throw new Error("Empty HTML passed to Puppeteer");
-  }
-
-  const cols = rows && rows.length ? Object.keys(rows[0]).length : 0;
-  const useLandscape = cols >= 6;
-  const viewportWidth = useLandscape ? 1200 : 1000;
-  const viewportHeight = 900;
-
-  const maxRetries = 2;
-  let lastErr = null;
-
-  for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
-    let browser;
-    let page;
-    try {
-      const launchOpts = {
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-gpu",
-          "--disable-extensions",
-          "--disable-background-networking",
-        ],
-        headless: process.env.PUPPETEER_HEADLESS || "new",
-        defaultViewport: { width: viewportWidth, height: viewportHeight },
-        dumpio: !!process.env.DEBUG_PUPPETEER_DUMPIO,
-      };
-
-      if (process.env.CHROME_PATH)
-        launchOpts.executablePath = process.env.CHROME_PATH;
-      if (process.env.PUPPETEER_EXEC_PATH)
-        launchOpts.executablePath = process.env.PUPPETEER_EXEC_PATH;
-
-      browser = await puppeteer.launch(launchOpts);
-
-      try {
-        console.log(
-          "[reportService] Puppeteer browser version:",
-          await browser.version()
-        );
-      } catch (vErr) {
-        console.warn(
-          "[reportService] browser.version() failed:",
-          vErr && vErr.message
-        );
-      }
-
-      page = await browser.newPage();
-
-      page.on("console", (msg) => {
-        try {
-          console.log(
-            `[reportService][page.console] ${msg.type()}: ${msg.text()}`
-          );
-        } catch (e) {}
-      });
-      page.on("pageerror", (err) => {
-        console.error(
-          "[reportService][pageerror]",
-          err && (err.stack || err.message || err)
-        );
-      });
-      page.on("error", (err) => {
-        console.error(
-          "[reportService][page error event]",
-          err && (err.stack || err.message || err)
-        );
-      });
-
-      try {
-        await page.emulateMediaType("screen");
-      } catch (e) {}
-
-      await page.setViewport({ width: viewportWidth, height: viewportHeight });
-      await page.setContent(html, {
-        waitUntil: "domcontentloaded",
-        timeout: 30000,
-      });
-
-      try {
-        await page.waitForSelector("table", { timeout: 7000 });
-      } catch (selErr) {
-        console.warn(
-          "[reportService] table selector not found/timed out:",
-          selErr.message
-        );
-      }
-
-      try {
-        const ready = await page
-          .evaluate(() => document.readyState)
-          .catch(() => "evaluate-failed");
-        console.log("[reportService] document.readyState:", ready);
-      } catch (e) {
-        console.warn(
-          "[reportService] evaluate readyState failed:",
-          e && e.message
-        );
-      }
-
-      const pdfPromise = page.pdf({
-        format: "A4",
-        landscape: useLandscape,
-        printBackground: true,
-        margin: { top: "10mm", bottom: "10mm", left: "8mm", right: "8mm" },
-        preferCSSPageSize: true,
-        scale: 1.0,
-      });
-
-      const timeoutMs = 45000;
-      const buffer = await Promise.race([
-        pdfPromise,
-        new Promise((_, rej) =>
-          setTimeout(() => rej(new Error("pdf-generation-timeout")), timeoutMs)
-        ),
-      ]);
-
-      if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
-        throw new Error("Puppeteer returned empty PDF buffer");
-      }
-
-      try {
-        if (browser) await browser.close();
-      } catch (e) {
-        console.warn(
-          "[reportService] Error closing browser after success:",
-          e && e.message
-        );
-      }
-      return buffer;
-    } catch (err) {
-      lastErr = err;
-      const isTargetClose =
-        err &&
-        (err.name === "TargetCloseError" ||
-          (err.message && err.message.includes("Target closed")));
-      console.error(
-        `[reportService] renderPdfBuffer error (attempt ${attempt}):`,
-        err && (err.stack || err.message || err)
-      );
-
-      // save debug artifacts
-      try {
-        const debugDir = path.join(process.cwd(), "tmp", "report_debug");
-        fs.mkdirSync(debugDir, { recursive: true });
-        const ts = new Date().toISOString().replace(/[:.]/g, "-");
-        const htmlPath = path.join(
-          debugDir,
-          `report_${ts}_attempt${attempt}.html`
-        );
-        const pngPath = path.join(
-          debugDir,
-          `report_${ts}_attempt${attempt}.png`
-        );
-        fs.writeFileSync(htmlPath, html, "utf8");
-
-        if (page && typeof page.screenshot === "function") {
-          try {
-            await page.screenshot({ path: pngPath, fullPage: true });
-            console.error(
-              `[reportService] Saved debug files: ${htmlPath} ${pngPath}`
-            );
-          } catch (ssErr) {
-            console.warn(
-              "[reportService] screenshot failed:",
-              ssErr && ssErr.message
-            );
-            console.error(
-              `[reportService] Saved debug HTML: ${htmlPath} (screenshot skipped)`
-            );
-          }
-        } else {
-          console.error(
-            `[reportService] Saved debug HTML: ${htmlPath} (page not available for screenshot)`
-          );
-        }
-
-        const pngExists = fs.existsSync(pngPath);
-        if (pngExists) {
-          try {
-            const fallback = await createPdfFromPng(pngPath);
-            console.log(
-              "[reportService] Returning fallback PDF created from screenshot PNG"
-            );
-            try {
-              if (browser) await browser.close();
-            } catch (e) {}
-            return fallback;
-          } catch (fallbackErr) {
-            console.warn(
-              "[reportService] fallback PNG→PDF failed:",
-              fallbackErr && fallbackErr.message
-            );
-          }
-        }
-      } catch (fsErr) {
-        console.error(
-          "[reportService] failed to write debug files:",
-          fsErr && fsErr.message
-        );
-      }
-
-      try {
-        if (browser) await browser.close();
-      } catch (closeErr) {
-        console.warn(
-          "[reportService] error closing browser after failure:",
-          closeErr && closeErr.message
-        );
-      }
-
-      if (
-        (isTargetClose ||
-          (err &&
-            err.message &&
-            (err.message.includes("pdf-generation-timeout") ||
-              err.message.includes("Target closed")))) &&
-        attempt <= maxRetries
-      ) {
-        console.warn(
-          `[reportService] transient error detected — retrying (attempt ${
-            attempt + 1
-          }/${maxRetries + 1})`
-        );
-        await new Promise((res) => setTimeout(res, 1000 * attempt));
-        continue;
-      }
-
-      break;
-    }
-  }
-
-  console.error(
-    "[reportService] All PDF attempts failed. Last error:",
-    lastErr && (lastErr.stack || lastErr.message || lastErr)
-  );
-  throw lastErr || new Error("Failed to generate PDF");
-}
-
 /* ---------- exports ---------- */
 module.exports = {
   normalizeStatusForQuery,
@@ -788,4 +878,5 @@ module.exports = {
   renderExcelBuffer,
   getAttendanceRows,
   renderPdfBuffer,
+  renderExcelToPdfBuffer,
 };
