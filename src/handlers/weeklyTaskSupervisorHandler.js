@@ -1,9 +1,9 @@
+
 const {
   fetchTasksBySupervisor,
   updateTaskById,
 } = require("../services/weekly_task_supervisor_service");
 
-// GET tasks for supervisor
 const getTasks = async (req, res) => {
   const { supervisorId } = req.params;
 
@@ -16,27 +16,47 @@ const getTasks = async (req, res) => {
   }
 };
 
-// PUT update a task (supervisor fields)
+
+
 const updateTask = async (req, res) => {
   const { taskId } = req.params;
-const { sup_status, sup_comment, sup_review_status, replacement_task, star_rating } = req.body;
+  const {
+    sup_status,
+    sup_comment,
+    sup_review_status,
+    replacement_task,
+    star_rating,
+    project_id,
+    project_name,
+  } = req.body;
 
   try {
-await updateTaskById(
-  taskId,
-  sup_status,
-  sup_comment,
-  sup_review_status,
-  replacement_task,
-  star_rating
-);    res.json({ success: true, message: "Task updated successfully" });
+    // Build update payload
+    const updateData = {
+      sup_status,
+      sup_comment,
+      sup_review_status,
+      replacement_task,
+      star_rating,
+    };
+
+    // Only add project fields if provided (avoid null issue)
+    if (project_id !== undefined && project_id !== null) {
+      updateData.project_id = project_id;
+    }
+    if (project_name !== undefined && project_name !== null) {
+      updateData.project_name = project_name;
+    }
+
+    // Pass the filtered update data
+    await updateTaskById(taskId, updateData);
+
+    res.json({ success: true, message: "Task updated successfully" });
   } catch (error) {
     console.error("Error updating task:", error);
     res.status(500).json({ success: false, message: "Update failed" });
   }
 };
 
-// const { fetchTasksBySupervisor, updateTaskById, replaceTaskById } = require("../services/weekly_task_supervisor_service");
 
-
-module.exports = { getTasks, updateTask  };
+module.exports = { getTasks, updateTask };
