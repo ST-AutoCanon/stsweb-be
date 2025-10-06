@@ -258,7 +258,7 @@ app.post("/check-subscription", (req, res) => {
   res.json({ exists });
 });
 
-cron.schedule("0 20 * * *", async () => {
+cron.schedule('0 20 * * 1-6', async () => {
   console.log(
     "Sending daily notifications to",
     subscriptions.length,
