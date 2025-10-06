@@ -25,7 +25,7 @@ module.exports = {
     AND ( ? IS NULL OR LOWER(lq.status) = LOWER(?) )
   ORDER BY COALESCE(lq.updated_at, lq.created_at) DESC
 `,
-  /* ---------- Reimbursements: unified status for display + robust filtering ---------- */
+
   GET_REIMBURSEMENT_REPORT: `
 SELECT
   r.*,
@@ -54,13 +54,19 @@ WHERE ( ? IS NULL OR (COALESCE(r.approved_date, r.created_at) >= ? ) )
   AND (
     ? IS NULL
     OR (
-      LOWER(?) = 'paid' AND LOWER(r.payment_status) = 'paid'
+      LOWER(?) = 'paid' AND LOWER(COALESCE(r.payment_status, '')) = 'paid'
     )
     OR (
       LOWER(?) = 'unpaid' AND (r.payment_status IS NULL OR r.payment_status = '' OR LOWER(r.payment_status) = 'unpaid')
     )
     OR (
       LOWER(?) IN ('pending','approved','rejected') AND LOWER(COALESCE(r.status, '')) = LOWER(?)
+    )
+    OR (
+      LOWER(?) = 'approved/pending' AND LOWER(COALESCE(r.status, ''))  = 'approved' AND LOWER(COALESCE(r.payment_status, '')) = 'pending'
+    )
+    OR (
+      LOWER(?) = 'approved/paid' AND LOWER(COALESCE(r.status, '')) = 'approved' AND LOWER(COALESCE(r.payment_status, '')) = 'paid'
     )
   )
 ORDER BY r.created_at DESC
@@ -112,49 +118,77 @@ ORDER BY r.created_at DESC
       AND ( ? IS NULL OR LOWER(e.status) = LOWER(?) )
     ORDER BY e.created_at DESC
   `,
-
-  /* ---------- Vendors ---------- (no status column; keep as no-op so params shape stays consistent) ---------- */
+  /* ---------- Vendors ---------- (return DB columns as-is) ---------- */
   GET_VENDOR_REPORT: `
-    SELECT
-      v.vendor_id,
-      COALESCE(v.company_name, '') AS vendor_name,
-      COALESCE(v.contact1_name, '') AS contact_person,
-      COALESCE(v.contact1_mobile, '') AS phone,
-      COALESCE(v.contact1_email, '') AS email,
-      COALESCE(v.city, '') AS city,
-      COALESCE(v.gst_number, '') AS gst_number,
-      COALESCE(v.pan_number, '') AS pan_number,
-      '' AS status,
-      DATE_FORMAT(COALESCE(v.created_at, NOW()), '%Y-%m-%d %H:%i:%s') AS created_at
-    FROM vendors v
-    WHERE ( ? IS NULL OR (COALESCE(v.created_at, NOW()) >= ? ) )
-      AND ( ? IS NULL OR (COALESCE(v.created_at, NOW()) < DATE_ADD(?, INTERVAL 1 DAY) ) )
-      AND ( ? IS NULL OR 1=1 )
-      AND ( ? IS NULL OR 1=1 )
-    ORDER BY COALESCE(v.created_at, NOW()) DESC
-  `,
+  SELECT
+    v.vendor_id,
+    v.company_name,
+    v.registered_address,
+    v.city,
+    v.state,
+    v.pin_code,
+    v.gst_number,
+    v.pan_number,
+    v.company_type,
+    v.contact1_name,
+    v.contact1_designation,
+    v.contact1_mobile,
+    v.contact1_email,
+  
+    v.bank_name,
+    v.branch,
+    v.branch_address,
+    v.account_number,
+    v.ifsc_code,
+    v.nature_of_business,
+    v.product_category,
+    v.years_of_experience,
+    
+    v.cancelled_cheque,
+    
+    v.msme_status,
+   
+    v.created_at
+  FROM vendors v
+  WHERE ( ? IS NULL OR (COALESCE(v.created_at, NOW()) >= ? ) )
+    AND ( ? IS NULL OR (COALESCE(v.created_at, NOW()) < DATE_ADD(?, INTERVAL 1 DAY) ) )
+    /* keep placeholders for compatibility with existing param building (no-op) */
+    AND ( ? IS NULL OR 1=1 )
+    AND ( ? IS NULL OR 1=1 )
+  ORDER BY COALESCE(v.created_at, NOW()) DESC
+`,
 
-  /* ---------- Assets ---------- */
   GET_ASSET_REPORT: `
-    SELECT
-      a.asset_id,
-      a.asset_code AS asset_tag,
-      a.asset_name,
-      a.configuration,
-      a.category,
-      a.sub_category,
-      JSON_UNQUOTE(JSON_EXTRACT(a.assigned_to, CONCAT('$[', GREATEST(JSON_LENGTH(COALESCE(a.assigned_to, '[]')) - 1, 0), '].employeeId'))) AS assigned_to_employee_id,
-      JSON_UNQUOTE(JSON_EXTRACT(a.assigned_to, CONCAT('$[', GREATEST(JSON_LENGTH(COALESCE(a.assigned_to, '[]')) - 1, 0), '].name'))) AS assigned_to_name,
-      DATE_FORMAT(a.valuation_date, '%Y-%m-%d') AS valuation_date,
-      a.document_path,
-      a.status,
-      DATE_FORMAT(COALESCE(a.created_at, a.valuation_date, NOW()), '%Y-%m-%d %H:%i:%s') AS created_at
-    FROM assets a
-    WHERE ( ? IS NULL OR (COALESCE(a.created_at, a.valuation_date, NOW()) >= ? ) )
-      AND ( ? IS NULL OR (COALESCE(a.created_at, a.valuation_date, NOW()) < DATE_ADD(?, INTERVAL 1 DAY) ) )
-      AND ( ? IS NULL OR LOWER(a.status) = LOWER(?) )
-    ORDER BY COALESCE(a.created_at, a.valuation_date, NOW()) DESC
-  `,
+  SELECT
+    a.asset_id,
+    a.asset_name,
+    a.configuration,
+    a.valuation_date,
+    a.assigned_to,
+    a.document_path,
+    a.created_at,
+    a.category,
+    a.sub_category,
+    a.status,
+    a.count,
+    a.asset_code
+  FROM assets a
+  WHERE ( ? IS NULL OR (COALESCE(a.created_at, a.valuation_date, NOW()) >= ? ) )
+    AND ( ? IS NULL OR (COALESCE(a.created_at, a.valuation_date, NOW()) < DATE_ADD(?, INTERVAL 1 DAY) ) )
+    AND (
+      ? IS NULL -- if status param is null -> no status filter
+      OR (
+        LOWER(?) = 'all'
+        OR (LOWER(?) = 'assigned' AND LOWER(a.status) = 'in use')
+        OR (LOWER(?) = 'pending' AND LOWER(a.status) = 'not using')
+        OR (LOWER(?) = 'returned' AND LOWER(a.status) = 'returned')
+        OR (LOWER(?) IN ('decommionsed','decommissioned') AND LOWER(a.status) = 'decommissioned')
+        -- fallback: allow matching by exact DB value (case-insensitive), for example if caller passes 'In Use'
+        OR LOWER(a.status) = LOWER(?)
+      )
+    )
+  ORDER BY COALESCE(a.created_at, a.valuation_date, NOW()) DESC
+`,
 
   /* ---------- Attendance ---------- */
   GET_EMPLOYEE_ATTENDANCE_REPORT: `

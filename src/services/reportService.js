@@ -26,11 +26,13 @@ function normalizeStatusForQuery(status) {
 }
 
 // Replaces old buildDateStatusParams — returns params in the order your queries expect:
-// [start, start, end, end, status, status]
+// [start, start, end, end, status, status, ...]
+// Note: number of repeated status placeholders must match query's placeholders.
 function buildDateStatusParams(startDate, endDate, status) {
   const s = startDate || null;
   const e = endDate || null;
   const st = normalizeStatusForQuery(status);
+  // Generic 6-status repetition used by many queries — but reimbursement needs more.
   return [s, s, e, e, st, st];
 }
 
@@ -182,7 +184,9 @@ async function getReimbursementRows(startDate, endDate, status, fields) {
   const st =
     status && String(status).trim().toLowerCase() !== "all" ? status : null;
 
-  const params = [s, s, e, e, st, st, st, st, st];
+  // NOTE: GET_REIMBURSEMENT_REPORT uses 7 status placeholders (plus 4 date placeholders).
+  // Provide the status parameter repeated 7 times (or nulls) so placeholders align.
+  const params = [s, s, e, e, st, st, st, st, st, st, st];
 
   let rawRows;
   try {
@@ -210,7 +214,6 @@ async function getReimbursementRows(startDate, endDate, status, fields) {
     "total_amount",
     "payment_status",
     "approval_status",
-    "attachments",
     "created_at",
   ];
 
@@ -310,14 +313,21 @@ async function getVendorRows(startDate, endDate, status, fields) {
 
   const defaultOrder = [
     "vendor_id",
-    "vendor_name",
-    "contact_person",
-    "phone",
-    "email",
+    "company_name",
+    "registered_address",
     "city",
+    "state",
+    "pin_code",
     "gst_number",
     "pan_number",
-    "status",
+    "company_type",
+    "contact1_mobile",
+    "contact1_email",
+    "bank_name",
+    "branch",
+    "account_number",
+    "product_category",
+    "years_of_experience",
     "created_at",
   ];
 
@@ -326,7 +336,15 @@ async function getVendorRows(startDate, endDate, status, fields) {
 
 async function getAssetRows(startDate, endDate, status, fields) {
   const sql = queries.GET_ASSET_REPORT;
-  const params = buildDateStatusParams(startDate, endDate, status);
+
+  const s = startDate || null;
+  const e = endDate || null;
+  // normalize: treat 'all', '', null, undefined as no-filter (null)
+  const st =
+    status && String(status).trim().toLowerCase() !== "all" ? status : null;
+
+  // Provide status repeated 7 times to match the 7 status placeholders in SQL
+  const params = [s, s, e, e, st, st, st, st, st, st, st];
 
   let rows;
   try {
@@ -338,16 +356,16 @@ async function getAssetRows(startDate, endDate, status, fields) {
 
   const defaultOrder = [
     "asset_id",
-    "asset_tag",
+    "asset_code",
     "asset_name",
+    "configuration",
     "category",
     "sub_category",
-    "assigned_to_employee_id",
-    "assigned_to_name",
-    "location",
-    "purchase_date",
-    "value",
+    "assigned_to",
+    "document_path",
+    "valuation_date",
     "status",
+    "count",
     "created_at",
   ];
 
@@ -356,7 +374,7 @@ async function getAssetRows(startDate, endDate, status, fields) {
 
 /* ---------- Excel (XLSX) builder ---------- */
 /**
- * Helper: remove columns whose every cell is empty (\"\", null, undefined)
+ * Helper: remove columns whose every cell is empty ("", null, undefined)
  * Returns {columns, keptIndexes} where columns is array of {header,key,width}
  */
 function pruneEmptyColumnsFromData(rows, columns) {
@@ -496,22 +514,65 @@ function computeColumnPercents(rows) {
   return percents;
 }
 
-/**
- * rowsToHtml: print-friendly HTML with colgroup to stabilize widths
- * Dynamically reduces font-size/padding when lots of columns to help fit on page.
- */
 function rowsToHtml(title, rows) {
   const headerCols = rows && rows.length ? Object.keys(rows[0]) : [];
+  const colCount = headerCols.length || 0;
   const colPercents = computeColumnPercents(rows);
 
+  // Modes
+  const smallTableMode = colCount > 0 && colCount <= 3;
+  const treatAsSmall = colCount === 0 ? true : smallTableMode;
+
+  // ---------- FONT SIZES (edit these values) ----------
+  // Title above the table (the yellow-marked text in your screenshot)
+  const titleFontSizePx = 22; // change this to e.g. 20, 24, 26 etc.
+
+  // Table header (<th>) font size
+  const thFontSizePx = 10; // change this independently
+
+  // Table data (<td>) font size
+  const tdFontSizePx = 10; // change this independently
+  // ----------------------------------------------------
+
+  // Border and spacing
+  const cellBorderPx = 1;
+  const smallMode = colCount >= 8;
+  const cellPadding = smallMode ? "2px" : "4px";
+  const tableFont = "Arial, Helvetica, sans-serif";
+
+  // Build colgroup
   const colgroup = headerCols
     .map((h, i) => {
+      if (treatAsSmall) return `<col>`;
       const pct = colPercents[i] != null ? `${colPercents[i]}%` : null;
       return pct ? `<col style="width:${pct}">` : `<col>`;
     })
     .join("");
 
-  const head = headerCols.map((h) => `<th>${escapeHtml(h)}</th>`).join("");
+  // Inline styles for th and td (inline is most reliable for conversion)
+  const thInlineBase = [
+    `border:${cellBorderPx}px solid #000`,
+    `padding:${cellPadding}`,
+    `font-size:${thFontSizePx}px`,
+    `vertical-align:top`,
+    `background:#f6f8fa`,
+    `-webkit-print-color-adjust:exact`,
+    `text-align:${treatAsSmall ? "center" : "left"}`,
+  ].join("; ");
+
+  const tdInlineBase = [
+    `border:${cellBorderPx}px solid #000`,
+    `padding:${cellPadding}`,
+    `font-size:${tdFontSizePx}px`,
+    `vertical-align:top`,
+    `text-align:${treatAsSmall ? "center" : "left"}`,
+    `word-break:break-word`,
+  ].join("; ");
+
+  // Build table head and body using inline styles
+  const head = headerCols
+    .map((h) => `<th style="${thInlineBase}">${escapeHtml(h)}</th>`)
+    .join("");
 
   const body =
     rows && rows.length
@@ -521,40 +582,40 @@ function rowsToHtml(title, rows) {
               `<tr>${headerCols
                 .map((c) => {
                   const cell = r[c] == null ? "" : String(r[c]);
-                  return `<td>${escapeHtml(cell)}</td>`;
+                  return `<td style="${tdInlineBase}">${escapeHtml(cell)}</td>`;
                 })
                 .join("")}</tr>`
           )
           .join("")
       : `<tr><td colspan="${
           headerCols.length || 1
-        }" style="text-align:center;padding:12px">No data available</td></tr>`;
+        }" style="${tdInlineBase}; text-align:center">No data available</td></tr>`;
 
-  // Adaptive CSS: if many columns, reduce font size & padding and set small table-layout
-  const colCount = headerCols.length || 0;
-  const smallMode = colCount >= 8;
-  const fontSize = smallMode ? "8px" : "10px";
-  const headerFontSize = smallMode ? "9px" : "10px";
-  const cellPadding = smallMode ? "4px" : "6px";
-  const tableFont = "Arial, Helvetica, sans-serif";
+  // Table inline style (auto-size for small tables; full width for others)
+  const tableInlineStyle = treatAsSmall
+    ? `border:${cellBorderPx}px solid #000; border-collapse:collapse; margin:0 auto; table-layout:auto;`
+    : `border:${cellBorderPx}px solid #000; border-collapse:collapse; width:100%; table-layout:fixed;`;
 
+  // Minimal CSS – headers repeat, no global font sizing to avoid impacting title
   const css = `
-    @page { size: A4 ${colCount >= 6 ? "landscape" : "portrait"}; margin: 8mm; }
-    body { font-family: ${tableFont}; font-size:${fontSize}; color:#111; margin:0; padding:0; }
-    .wrap { padding:6px; box-sizing:border-box; width:100%; }
-    h2 { margin:0 0 6px 0; font-size:${headerFontSize}; }
-    .meta { margin-bottom:6px; font-size:9px; color:#444; }
-    table { border-collapse: collapse; width:100%; table-layout: fixed; font-size:${fontSize}; word-break:break-word; }
-    col { vertical-align: top; }
-    thead th { background:#f6f8fa; padding:${cellPadding}; text-align:left; vertical-align:top; font-weight:600; font-size:${headerFontSize}; }
-    th, td { border:1px solid #ddd; padding:${cellPadding}; vertical-align:top; word-break:break-word; overflow-wrap:break-word; white-space:normal; }
-    td { font-size:${fontSize}; }
+    @page { size: A4 ${
+      colCount >= 6 ? "landscape" : "portrait"
+    }; margin: 12mm; }
+    html, body { height: 100%; margin: 0; padding: 0; }
+    body { font-family: ${tableFont}; color:#111; margin:0; padding:0; -webkit-print-color-adjust: exact; }
+    .wrap { box-sizing: border-box; width: 100%; padding: 6px; margin: 0; overflow: visible; }
+    .meta { margin-bottom:8px; font-size:9px; color:#444; text-align: ${
+      treatAsSmall ? "center" : "left"
+    }; }
+    thead { display: table-header-group; }
+    tfoot { display: table-footer-group; }
     tr { page-break-inside: avoid; }
-    @media print {
-      thead th, td { padding:${cellPadding}; font-size:${fontSize}; }
-      h2 { font-size:${headerFontSize}; }
-    }
   `;
+
+  // Inline style for the H2 title (separate and independent)
+  const h2Inline = `font-size:${titleFontSizePx}px; font-weight:700; margin:0 0 10px 0; text-align:${
+    treatAsSmall ? "center" : "left"
+  }`;
 
   return `<!doctype html>
 <html>
@@ -565,9 +626,9 @@ function rowsToHtml(title, rows) {
   </head>
   <body>
     <div class="wrap">
-      <h2>${escapeHtml(title)}</h2>
-      <div class="meta">Generated: ${new Date().toISOString()}</div>
-      <table>
+      <h2 style="${h2Inline}">${escapeHtml(title)}</h2>
+      <div class="meta">Auto Generated: ${new Date().toISOString()}</div>
+      <table style="${tableInlineStyle}">
         <colgroup>${colgroup}</colgroup>
         <thead><tr>${head}</tr></thead>
         <tbody>${body}</tbody>

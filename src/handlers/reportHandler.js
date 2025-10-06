@@ -1,4 +1,3 @@
-// src/handlers/reportHandler.js
 const reportService = require("../services/reportService");
 
 /**
@@ -118,6 +117,77 @@ function safeFilename(base, ext) {
   return `${base}_${now}.${ext}`;
 }
 
+/* ---------- Range enforcement helpers (2-month limit) ---------- */
+const MAX_RANGE_DAYS = 62; // roughly two months (adjust if you prefer 60/61)
+
+// parse YYYY-MM-DD into a UTC Date (returns null for invalid)
+function parseDateISO(d) {
+  if (!d) return null;
+  if (typeof d !== "string") return null;
+  const parts = d.split("-");
+  if (parts.length !== 3) return null;
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10) - 1;
+  const day = parseInt(parts[2], 10);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(day))
+    return null;
+  // Use UTC to avoid timezone shift issues
+  return new Date(Date.UTC(y, m, day));
+}
+
+function daysBetweenInclusive(startIso, endIso) {
+  const s = parseDateISO(startIso);
+  const e = parseDateISO(endIso);
+  if (!s || !e) return Infinity;
+  const diffMs = e.getTime() - s.getTime();
+  return Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
+}
+
+// Ensure both start & end are present or default to last 2 months.
+// Returns { ok: true, startDate: 'YYYY-MM-DD', endDate: 'YYYY-MM-DD' }
+// or { ok: false, message }
+function ensureTwoMonthWindow(startDate, endDate) {
+  const now = new Date();
+
+  // If both missing -> default: start = today - 2 months, end = today
+  if (!startDate && !endDate) {
+    const end = now;
+    const start = new Date(now);
+    start.setMonth(start.getMonth() - 2);
+    const fmt = (d) => d.toISOString().slice(0, 10);
+    return { ok: true, startDate: fmt(start), endDate: fmt(end) };
+  }
+
+  // if only one provided -> error
+  if (!startDate || !endDate) {
+    return {
+      ok: false,
+      message:
+        "Please provide both startDate and endDate, or leave both empty to use the default last 2 months range.",
+    };
+  }
+
+  // validate format and order
+  const s = parseDateISO(startDate);
+  const e = parseDateISO(endDate);
+  if (!s || !e) {
+    return { ok: false, message: "Invalid date format. Use YYYY-MM-DD." };
+  }
+  if (s > e) {
+    return { ok: false, message: "Start date cannot be after End date." };
+  }
+
+  const numDays = daysBetweenInclusive(startDate, endDate);
+  if (numDays > MAX_RANGE_DAYS) {
+    return {
+      ok: false,
+      message: `Requested range is too large: ${numDays} days. Maximum allowed range is ${MAX_RANGE_DAYS} days (≈ 2 months).`,
+    };
+  }
+
+  return { ok: true, startDate, endDate };
+}
+
 /* ---------- Handlers (download + preview support) ---------- */
 
 async function downloadLeavesReport(req, res, next) {
@@ -126,9 +196,15 @@ async function downloadLeavesReport(req, res, next) {
     req.query
   );
   try {
-    const { startDate, endDate, status, format, fields } = parseDates(
-      req.query
-    );
+    const parsed = parseDates(req.query);
+    let { startDate, endDate, status, format, fields } = parsed;
+
+    // enforce/default 2-month constraint
+    const ensured = ensureTwoMonthWindow(startDate, endDate);
+    if (!ensured.ok) return res.status(400).json({ message: ensured.message });
+    startDate = ensured.startDate;
+    endDate = ensured.endDate;
+
     const rows = await reportService.getLeaveRows(
       startDate,
       endDate,
@@ -167,13 +243,11 @@ async function downloadLeavesReport(req, res, next) {
         { header: "Employee Name", key: "employee_name" },
         { header: "Department", key: "department_name" },
         { header: "Leave type", key: "leave_type" },
-
         { header: "Start Date", key: "start_date" },
         { header: "End Date", key: "end_date" },
         { header: "Status", key: "status" },
         { header: "Comments", key: "comments" },
         { header: "Reason", key: "reason" },
-
         { header: "Created at", key: "created_at" },
       ];
       const buf = await reportService.renderExcelBuffer(rows, headers);
@@ -206,9 +280,13 @@ async function downloadReimbursementsReport(req, res, next) {
     req.query
   );
   try {
-    const { startDate, endDate, status, format, fields } = parseDates(
-      req.query
-    );
+    const parsed = parseDates(req.query);
+    let { startDate, endDate, status, format, fields } = parsed;
+
+    const ensured = ensureTwoMonthWindow(startDate, endDate);
+    if (!ensured.ok) return res.status(400).json({ message: ensured.message });
+    startDate = ensured.startDate;
+    endDate = ensured.endDate;
 
     // For reimbursements, the backend query (GET_REIMBURSEMENT_REPORT) expects the
     // status param to match either r.status (approval) or r.payment_status (payment).
@@ -258,7 +336,6 @@ async function downloadReimbursementsReport(req, res, next) {
         { header: "Description", key: "claim_type" },
         { header: "Date", key: "created_at" },
         { header: "Total Amount", key: "total_amount" },
-        // prefer approval_status + payment_status fields in output if available
         { header: "Approval Status", key: "approval_status" },
         { header: "Payment Status", key: "payment_status" },
       ];
@@ -294,9 +371,14 @@ async function downloadEmployeesReport(req, res, next) {
     req.query
   );
   try {
-    const { startDate, endDate, status, format, fields } = parseDates(
-      req.query
-    );
+    const parsed = parseDates(req.query);
+    let { startDate, endDate, status, format, fields } = parsed;
+
+    const ensured = ensureTwoMonthWindow(startDate, endDate);
+    if (!ensured.ok) return res.status(400).json({ message: ensured.message });
+    startDate = ensured.startDate;
+    endDate = ensured.endDate;
+
     const rows = await reportService.getEmployeeRows(
       startDate,
       endDate,
@@ -382,9 +464,14 @@ async function downloadVendorsReport(req, res, next) {
     req.query
   );
   try {
-    const { startDate, endDate, status, format, fields } = parseDates(
-      req.query
-    );
+    const parsed = parseDates(req.query);
+    let { startDate, endDate, status, format, fields } = parsed;
+
+    const ensured = ensureTwoMonthWindow(startDate, endDate);
+    if (!ensured.ok) return res.status(400).json({ message: ensured.message });
+    startDate = ensured.startDate;
+    endDate = ensured.endDate;
+
     const rows = await reportService.getVendorRows(
       startDate,
       endDate,
@@ -418,16 +505,30 @@ async function downloadVendorsReport(req, res, next) {
       return res.send(buffer);
     } else if (format === "xlsx") {
       const headers = [
-        { header: "Vendor ID", key: "vendor_id" },
-        { header: "Vendor Name", key: "vendor_name" },
-        { header: "Contact Person", key: "contact_person" },
-        { header: "Phone", key: "phone" },
-        { header: "Email", key: "email" },
-        { header: "City", key: "city" },
-        { header: "GST Number", key: "gst_number" },
-        { header: "PAN Number", key: "pan_number" },
-        { header: "Status", key: "status" },
-        { header: "Created At", key: "created_at" },
+        { header: "vendor_id", key: "vendor_id" },
+        { header: "company_name", key: "company_name" },
+        { header: "registered_address", key: "registered_address" },
+        { header: "city", key: "city" },
+        { header: "state", key: "state" },
+        { header: "pin_code", key: "pin_code" },
+        { header: "gst_number", key: "gst_number" },
+        { header: "pan_number", key: "pan_number" },
+        { header: "company_type", key: "company_type" },
+        { header: "contact1_name", key: "contact1_name" },
+        { header: "contact1_designation", key: "contact1_designation" },
+        { header: "contact1_mobile", key: "contact1_mobile" },
+        { header: "contact1_email", key: "contact1_email" },
+        { header: "bank_name", key: "bank_name" },
+        { header: "branch", key: "branch" },
+        { header: "branch_address", key: "branch_address" },
+        { header: "account_number", key: "account_number" },
+        { header: "ifsc_code", key: "ifsc_code" },
+        { header: "nature_of_business", key: "nature_of_business" },
+        { header: "product_category", key: "product_category" },
+        { header: "years_of_experience", key: "years_of_experience" },
+        { header: "cancelled_cheque", key: "cancelled_cheque" },
+        { header: "msme_status", key: "msme_status" },
+        { header: "created_at", key: "created_at" },
       ];
 
       const buf = await reportService.renderExcelBuffer(rows, headers);
@@ -460,9 +561,14 @@ async function downloadAssetsReport(req, res, next) {
     req.query
   );
   try {
-    const { startDate, endDate, status, format, fields } = parseDates(
-      req.query
-    );
+    const parsed = parseDates(req.query);
+    let { startDate, endDate, status, format, fields } = parsed;
+
+    const ensured = ensureTwoMonthWindow(startDate, endDate);
+    if (!ensured.ok) return res.status(400).json({ message: ensured.message });
+    startDate = ensured.startDate;
+    endDate = ensured.endDate;
+
     const rows = await reportService.getAssetRows(
       startDate,
       endDate,
@@ -493,19 +599,20 @@ async function downloadAssetsReport(req, res, next) {
       return res.send(buffer);
     } else if (format === "xlsx") {
       const headers = [
-        { header: "Asset ID", key: "asset_id" },
-        { header: "Asset Tag", key: "asset_tag" },
-        { header: "Name", key: "asset_name" },
-        { header: "Category", key: "category" },
-        { header: "Sub Category", key: "sub_category" },
-        { header: "Assigned To (Emp ID)", key: "assigned_to_employee_id" },
-        { header: "Assigned To (Name)", key: "assigned_to_name" },
-        { header: "Location", key: "location" },
-        { header: "Purchase Date", key: "purchase_date" },
-        { header: "Value", key: "value" },
-        { header: "Status", key: "status" },
-        { header: "Created At", key: "created_at" },
+        { header: "asset_id", key: "asset_id" },
+        { header: "asset_code", key: "asset_code" },
+        { header: "asset_name", key: "asset_name" },
+        { header: "configuration", key: "configuration" },
+        { header: "category", key: "category" },
+        { header: "sub_category", key: "sub_category" },
+        { header: "assigned_to", key: "assigned_to" },
+        { header: "document_path", key: "document_path" },
+        { header: "valuation_date", key: "valuation_date" },
+        { header: "status", key: "status" },
+        { header: "count", key: "count" },
+        { header: "created_at", key: "created_at" },
       ];
+
       const buf = await reportService.renderExcelBuffer(rows, headers);
       const filename = safeFilename("assets_report", "xlsx");
       res.setHeader(
@@ -536,9 +643,14 @@ async function downloadAttendanceReport(req, res, next) {
     req.query
   );
   try {
-    const { startDate, endDate, status, format, fields } = parseDates(
-      req.query
-    );
+    const parsed = parseDates(req.query);
+    let { startDate, endDate, status, format, fields } = parsed;
+
+    const ensured = ensureTwoMonthWindow(startDate, endDate);
+    if (!ensured.ok) return res.status(400).json({ message: ensured.message });
+    startDate = ensured.startDate;
+    endDate = ensured.endDate;
+
     const rows = await reportService.getAttendanceRows(
       startDate,
       endDate,
