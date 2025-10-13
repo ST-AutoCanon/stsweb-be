@@ -74,7 +74,7 @@ const notificationsRouter = require("./routes/notifications");
 
 //vendors
 const vendorRoutes = require("./routes/vendorRoutes");
-
+const configRoutes = require("./routes/configRoutes");
 //generatepaysliproutes
 const oldEmployeeRoutes = require("./routes/oldEmployeeDetailsRoute");
 const oldEmployeeDetailsRoutes = require("./routes/oldEmployeeDetailsRoute");
@@ -94,6 +94,7 @@ const overtimeSummaryRoutes = require("./routes/overtimeSummaryRoutes");
 const employeeProjectsRoute = require("./routes/employeeProjectsRoute");
 const lossofPayCalculationRoutes = require("./routes/lossofPayCalculationRoutes");
 const incentivesRoutes = require("./routes/incentivesRoutes");
+const salaryRoutes2 = require('./routes/salaryCalculationPeriodRoutes');
 const app = express();
 const server = http.createServer(app);
 
@@ -148,10 +149,10 @@ app.use("/api/messages", taskMessagesRoutes);
 app.use("/api/supervisor", supervisorRoutes);
 app.use("/api/plans", planRoutes);
 app.use("/api/supervisor", supervisorEmployeesRoutes);
-
+app.use("/api", configRoutes);
 app.use("/api/task-emp-emp", taskEmployeesRoutes);
 app.use("/api/employee-tasks", employeeTaskRoutes);
-
+app.use('/api', salaryRoutes2);
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
 const assetsRoutesforreturn = require("./routes/assetsRoutes");
