@@ -239,7 +239,77 @@ async function getEmployeeAdvanceDetails() {
 
 const getEmployeeExtraHoursService = async (startDate, endDate) => {
   const [rows] = await pool.query(queries.GET_EMPLOYEE_EXTRA_HOURS, [startDate, endDate]);
-  return rows;
+
+  // Group by employee_id + date, splitting sessions across dates
+  const grouped = {};
+  rows.forEach((row) => {
+    const punchin = new Date(row.punchin_time);
+    const punchout = new Date(row.punchout_time);
+    let current = new Date(punchin);
+    while (current < punchout) {
+      const dayStart = new Date(current.getFullYear(), current.getMonth(), current.getDate());
+      const dayEnd = new Date(dayStart);
+      dayEnd.setDate(dayEnd.getDate() + 1);
+      const sessionStart = new Date(Math.max(current.getTime(), dayStart.getTime()));
+      const sessionEnd = new Date(Math.min(punchout.getTime(), dayEnd.getTime()));
+      const dayHours = (sessionEnd.getTime() - sessionStart.getTime()) / (1000 * 60 * 60); // ms to hours
+      const dateStr = dayStart.toISOString().split('T')[0];
+      const key = `${row.employee_id}-${dateStr}`;
+      if (!grouped[key]) {
+        grouped[key] = {
+          employee_id: row.employee_id,
+          work_date: dateStr,
+          total_hours_worked: 0,
+          extra_hours: 0,
+          sessions: [], // [{punch_id, apportioned_hours}]
+          projects: new Set(),
+          supervisors: new Set(),
+          comments: '',
+          status: 'Approved',
+          rate: 0, // Avg fallback
+        };
+      }
+      const group = grouped[key];
+      group.total_hours_worked += dayHours;
+      group.sessions.push({
+        punch_id: row.punch_id,
+        apportioned_hours: dayHours,
+      });
+      // Aggregate fallback fields
+      if (row.project) group.projects.add(row.project);
+      if (row.supervisor) group.supervisors.add(row.supervisor);
+      if (row.comments) {
+        group.comments += (group.comments ? '; ' : '') + row.comments;
+      }
+      // Simple rate avg (fallback; frontend overrides)
+      const rowRate = parseFloat(row.rate) || 0;
+      group.rate = group.rate === 0 ? rowRate : (group.rate + rowRate) / 2;
+      // Status: Pending if any session pending
+      if (row.status === 'Pending') {
+        group.status = 'Pending';
+      }
+      // Advance to next day
+      current = new Date(dayEnd);
+    }
+  });
+
+  // Finalize groups
+  Object.values(grouped).forEach((group) => {
+    group.total_hours_worked = Math.min(group.total_hours_worked, 24);
+    group.extra_hours = Math.max(0, group.total_hours_worked - 10);
+    group.projects = Array.from(group.projects).join(', ');
+    group.supervisors = Array.from(group.supervisors).join(', ');
+    // Apportion daily extra pro-rata to sessions on this date
+    const totalApportioned = group.sessions.reduce((sum, s) => sum + s.apportioned_hours, 0);
+    group.sessions.forEach((s) => {
+      s.extra_hours = totalApportioned > 0 ? (s.apportioned_hours / totalApportioned) * group.extra_hours : 0;
+    });
+  });
+
+  // Filter: Only days with total_hours_worked > 0 (show extra=0 as well)
+  const result = Object.values(grouped).filter((group) => group.total_hours_worked > 0);
+
+  return result;
 };
 
 async function addOvertimeDetailsBulk(dataArray) {

@@ -48,6 +48,30 @@ router.post('/advance', addEmployeeAdvanceHandler);
 // Get all employee advance details
 router.get('/advance-details', getEmployeeAdvanceDetailsHandler);
 
+router.get("/salary-cutoff", async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      "SELECT cutoff_date FROM salary_calculation_period WHERE id = 1"
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Cutoff date not found",
+      });
+    }
+    res.status(200).json({
+      success: true,
+      cutoff_date: rows[0].cutoff_date || 25, // Default to 25 if null
+    });
+  } catch (error) {
+    console.error("Error fetching salary cutoff:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch cutoff date",
+      details: error.message,
+    });
+  }
+});
 // Get all employee extra hours details
 router.get("/employee-extra-hours", fetchEmployeeExtraHours);
 

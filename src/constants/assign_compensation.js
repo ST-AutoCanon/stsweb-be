@@ -131,21 +131,15 @@ LIMIT 0, 1000;
   LIMIT 0, 1000
 `,
 
-  GET_EMPLOYEE_EXTRA_HOURS: `
+ GET_EMPLOYEE_EXTRA_HOURS: `
     SELECT 
       ea.punch_id,
       ea.employee_id,
       DATE(ea.punchin_time) AS work_date,
       ea.punch_status,
       ea.punchin_time,
-      ea.punchin_device,
-      ea.punchin_location,
       ea.punchout_time,
-      ea.punchout_device,
-      ea.punchout_location,
-      ea.punchmode,
       ROUND(TIMESTAMPDIFF(MINUTE, ea.punchin_time, ea.punchout_time) / 60.0, 2) AS hours_worked,
-      ROUND(TIMESTAMPDIFF(MINUTE, ea.punchin_time, ea.punchout_time) / 60.0 - 10, 2) AS extra_hours,
       od.rate,
       od.project,
       od.supervisor,
@@ -156,11 +150,10 @@ LIMIT 0, 1000;
     WHERE 
       ea.punchin_time IS NOT NULL
       AND ea.punchout_time IS NOT NULL
-      AND TIMESTAMPDIFF(HOUR, ea.punchin_time, ea.punchout_time) > 10
       AND ea.punchin_time >= ?
       AND ea.punchin_time <= ?
+    ORDER BY ea.employee_id, DATE(ea.punchin_time), ea.punchin_time
   `,
-
  
 ADD_OVERTIME_DETAILS_BULK: `
   INSERT INTO overtime_details (
@@ -214,41 +207,39 @@ ADD_OVERTIME_DETAILS_REJECTED: `
   )
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Rejected', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `,
- GET_ALL_OVERTIME_DETAILS :`
+GET_ALL_OVERTIME_DETAILS : `
   SELECT 
-  punch_id,
-  work_date,
-  employee_id,
-  extra_hours,
-  rate,
-  project,
-  supervisor,
-  comments,
-  status,
-  created_at,
-  updated_at
-FROM overtime_details
-WHERE 
-  (
-    created_at BETWEEN 
-      STR_TO_DATE(CONCAT(DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 MONTH), '%Y-%m-'), 
-                         (SELECT cutoff_date FROM salary_calculation_period WHERE id = 1)), '%Y-%m-%d')
-    AND 
-      STR_TO_DATE(CONCAT(DATE_FORMAT(CURDATE(), '%Y-%m-'), 
-                         (SELECT cutoff_date FROM salary_calculation_period WHERE id = 1)), '%Y-%m-%d')
-  )
-  OR
-  (
-    updated_at BETWEEN 
-      STR_TO_DATE(CONCAT(DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 MONTH), '%Y-%m-'), 
-                         (SELECT cutoff_date FROM salary_calculation_period WHERE id = 1)), '%Y-%m-%d')
-    AND 
-      STR_TO_DATE(CONCAT(DATE_FORMAT(CURDATE(), '%Y-%m-'), 
-                         (SELECT cutoff_date FROM salary_calculation_period WHERE id = 1)), '%Y-%m-%d')
-  )
-ORDER BY work_date DESC;
-
-`,
+    punch_id,
+    work_date,
+    employee_id,
+    extra_hours,
+    rate,
+    project,
+    supervisor,
+    comments,
+    status,
+    created_at,
+    updated_at
+  FROM overtime_details
+  WHERE 
+    (
+      CASE
+        WHEN DAY(CURDATE()) < (SELECT cutoff_date FROM salary_calculation_period WHERE id = 1)
+          THEN MONTH(work_date) = MONTH(CURDATE() - INTERVAL 1 MONTH)
+        ELSE MONTH(work_date) = MONTH(CURDATE())
+      END
+    )
+    AND
+    (
+      CASE
+        WHEN DAY(CURDATE()) < (SELECT cutoff_date FROM salary_calculation_period WHERE id = 1)
+          THEN YEAR(work_date) = YEAR(CURDATE() - INTERVAL 1 MONTH)
+        ELSE YEAR(work_date) = YEAR(CURDATE())
+      END
+    )
+  ORDER BY work_date DESC;
+`
+,
 
 // GET_ALL_OVERTIME_DETAILS: `
 //   SELECT 
