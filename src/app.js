@@ -96,6 +96,7 @@ const lossofPayCalculationRoutes = require("./routes/lossofPayCalculationRoutes"
 const incentivesRoutes = require("./routes/incentivesRoutes");
 const salaryRoutes2 = require('./routes/salaryCalculationPeriodRoutes');
 const salaryDetailsRoutes = require('./routes/salaryDetailsRoutes'); // Adjust path if needed
+const employeeBankReportRoutes = require('./routes/employeebankreportroute');
 const app = express();
 const server = http.createServer(app);
 
@@ -403,6 +404,7 @@ app.use("/api/compensations", compensationRoutes);
 app.use("/api/compensation", assignCompensationRoutes);
 app.use("/api", employeeRoutesforsalarybreakup);
 app.use('/api/salary-details', salaryDetailsRoutes);
+app.use('/api/compensation', employeeBankReportRoutes);
 ////////////
 
 // server side (app.js)
