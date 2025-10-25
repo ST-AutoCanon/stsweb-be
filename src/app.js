@@ -97,6 +97,7 @@ const incentivesRoutes = require("./routes/incentivesRoutes");
 const salaryRoutes2 = require('./routes/salaryCalculationPeriodRoutes');
 const salaryDetailsRoutes = require('./routes/salaryDetailsRoutes'); // Adjust path if needed
 const employeeBankReportRoutes = require('./routes/employeebankreportroute');
+
 const app = express();
 const server = http.createServer(app);
 
