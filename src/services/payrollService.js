@@ -85,11 +85,12 @@ const getEmployeeBankDetails = async (employee_id) => {
         throw error;
     }
 };
+
 const getEmployeeDetails = async (employee_id) => {
     try {
         console.log(`Fetching employee details for Employee ID: ${employee_id}`);
 
-        const [rows] = await db.execute(payrollQueries.GET_EMPLOYEE_DETAILS_QUERY, [employee_id]);
+        const [rows] = await db.execute(payrollQueries.GET_EMPLOYEE_PERSONAL_PROFESSIONAL_QUERY, [employee_id]);
 
         if (rows.length === 0) {
             console.log(`No employee found with ID: ${employee_id}`);
@@ -103,7 +104,4 @@ const getEmployeeDetails = async (employee_id) => {
     }
 };
 
-
-
-
-module.exports = { getSalarySlip,  getEmployeeBankDetails,getEmployeeDetails };
+module.exports = { getSalarySlip,  getEmployeeBankDetails, getEmployeeDetails };
