@@ -131,21 +131,15 @@ LIMIT 0, 1000;
   LIMIT 0, 1000
 `,
 
-  GET_EMPLOYEE_EXTRA_HOURS: `
+ GET_EMPLOYEE_EXTRA_HOURS: `
     SELECT 
       ea.punch_id,
       ea.employee_id,
       DATE(ea.punchin_time) AS work_date,
       ea.punch_status,
       ea.punchin_time,
-      ea.punchin_device,
-      ea.punchin_location,
       ea.punchout_time,
-      ea.punchout_device,
-      ea.punchout_location,
-      ea.punchmode,
       ROUND(TIMESTAMPDIFF(MINUTE, ea.punchin_time, ea.punchout_time) / 60.0, 2) AS hours_worked,
-      ROUND(TIMESTAMPDIFF(MINUTE, ea.punchin_time, ea.punchout_time) / 60.0 - 10, 2) AS extra_hours,
       od.rate,
       od.project,
       od.supervisor,
@@ -156,61 +150,11 @@ LIMIT 0, 1000;
     WHERE 
       ea.punchin_time IS NOT NULL
       AND ea.punchout_time IS NOT NULL
-      AND TIMESTAMPDIFF(HOUR, ea.punchin_time, ea.punchout_time) > 10
       AND ea.punchin_time >= ?
       AND ea.punchin_time <= ?
+    ORDER BY ea.employee_id, DATE(ea.punchin_time), ea.punchin_time
   `,
-
  
-//     GET_EMPLOYEE_EXTRA_HOURS : `
-//   SELECT 
-//     punch_id,
-//     employee_id,
-//     DATE(punchin_time) AS work_date,
-//     punch_status,
-//     punchin_time,
-//     punchin_device,
-//     punchin_location,
-//     punchout_time,
-//     punchout_device,
-//     punchout_location,
-//     punchmode,
-//     ROUND(TIMESTAMPDIFF(MINUTE, punchin_time, punchout_time) / 60.0, 2) AS hours_worked,
-//     ROUND(TIMESTAMPDIFF(MINUTE, punchin_time, punchout_time) / 60.0 - 10, 2) AS extra_hours
-//   FROM emp_attendence
-//   WHERE 
-//     punchin_time IS NOT NULL
-//     AND punchout_time IS NOT NULL
-//     AND TIMESTAMPDIFF(HOUR, punchin_time, punchout_time) > 10
-//     AND punchin_time >= DATE_FORMAT(CURDATE() - INTERVAL 1 MONTH, '%Y-%m-25')
-//     AND punchin_time <= DATE_FORMAT(CURDATE(), '%Y-%m-25');
-// `
-
-//  GET_EMPLOYEE_EXTRA_HOURS: `
-//   SELECT 
-//     punch_id,
-//     employee_id,
-//     DATE(punchin_time) AS work_date,
-//     punch_status,
-//     punchin_time,
-//     punchin_device,
-//     punchin_location,
-//     punchout_time,
-//     punchout_device,
-//     punchout_location,
-//     punchmode,
-//     ROUND(TIMESTAMPDIFF(MINUTE, punchin_time, punchout_time) / 60.0, 2) AS hours_worked,
-//     ROUND(TIMESTAMPDIFF(MINUTE, punchin_time, punchout_time) / 60.0 - 10, 2) AS extra_hours
-//   FROM emp_attendence
-//   WHERE 
-//     punchin_time IS NOT NULL
-//     AND punchout_time IS NOT NULL
-//     AND TIMESTAMPDIFF(HOUR, punchin_time, punchout_time) > 10
-//     AND punchin_time >= ?
-//     AND punchin_time <= ?
-// ` ,
-
-// Insert bulk overtime records with default status "Pending"
 ADD_OVERTIME_DETAILS_BULK: `
   INSERT INTO overtime_details (
     punch_id,
@@ -263,7 +207,7 @@ ADD_OVERTIME_DETAILS_REJECTED: `
   )
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Rejected', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `,
- GET_ALL_OVERTIME_DETAILS :`
+GET_ALL_OVERTIME_DETAILS : `
   SELECT 
     punch_id,
     work_date,
@@ -277,29 +221,103 @@ ADD_OVERTIME_DETAILS_REJECTED: `
     created_at,
     updated_at
   FROM overtime_details
-  ORDER BY work_date DESC
-`,
-GET_EMPLOYEE_LOP_DAYS_FOR_CURRENT_PERIOD :`
-  SELECT 
+  WHERE 
+    (
+      CASE
+        WHEN DAY(CURDATE()) < (SELECT cutoff_date FROM salary_calculation_period WHERE id = 1)
+          THEN MONTH(work_date) = MONTH(CURDATE() - INTERVAL 1 MONTH)
+        ELSE MONTH(work_date) = MONTH(CURDATE())
+      END
+    )
+    AND
+    (
+      CASE
+        WHEN DAY(CURDATE()) < (SELECT cutoff_date FROM salary_calculation_period WHERE id = 1)
+          THEN YEAR(work_date) = YEAR(CURDATE() - INTERVAL 1 MONTH)
+        ELSE YEAR(work_date) = YEAR(CURDATE())
+      END
+    )
+  ORDER BY work_date DESC;
+`
+,
+
+// GET_ALL_OVERTIME_DETAILS: `
+//   SELECT 
+//     o.punch_id,
+//     o.work_date,
+//     o.employee_id,
+//     o.extra_hours,
+//     o.rate,
+//     o.project,
+//     o.supervisor,
+//     o.comments,
+//     o.status,
+//     o.created_at,
+//     o.updated_at
+//   FROM overtime_details o
+//   CROSS JOIN (
+//     SELECT cutoff_date 
+//     FROM salary_calculation_period  -- Corrected: Matches schema (singular, underscored)
+//     ORDER BY updated_at DESC 
+//     LIMIT 1
+//   ) p
+//   WHERE o.status = 'Approved'
+//     AND YEAR(o.work_date) = YEAR(CURDATE())
+//     AND MONTH(o.work_date) = MONTH(CURDATE())
+//     AND DATE(o.updated_at) <= DATE(
+//       CONCAT(
+//         YEAR(CURDATE()), 
+//         '-', 
+//         LPAD(MONTH(CURDATE()), 2, '0'), 
+//         '-', 
+//         LPAD(p.cutoff_date, 2, '0')
+//       )
+//     )
+//   ORDER BY o.work_date DESC
+// `,
+// GET_EMPLOYEE_LOP_DAYS_FOR_CURRENT_PERIOD :`
+//   SELECT 
+//     employee_id,
+//     lop
+//   FROM sukalpadata.employee_monthly_lop
+//   WHERE 
+//     (
+//       CASE 
+//         WHEN DAY(CURDATE()) < 26 
+//           THEN month = MONTH(CURDATE() - INTERVAL 1 MONTH) 
+//         ELSE month = MONTH(CURDATE())
+//       END
+//     )
+//     AND 
+//     (
+//       CASE 
+//         WHEN DAY(CURDATE()) < 26 
+//           THEN year = YEAR(CURDATE() - INTERVAL 1 MONTH) 
+//         ELSE year = YEAR(CURDATE())
+//       END
+//     );
+// `
+GET_EMPLOYEE_LOP_DAYS_FOR_CURRENT_PERIOD: `
+  SELECT
     employee_id,
     lop
   FROM sukalpadata.employee_monthly_lop
-  WHERE 
+  WHERE
     (
-      CASE 
-        WHEN DAY(CURDATE()) < 26 
-          THEN month = MONTH(CURDATE() - INTERVAL 1 MONTH) 
+      CASE
+        WHEN DAY(CURDATE()) < (SELECT cutoff_date FROM salary_calculation_period WHERE id = 1)
+          THEN month = MONTH(CURDATE() - INTERVAL 1 MONTH)
         ELSE month = MONTH(CURDATE())
       END
     )
-    AND 
+    AND
     (
-      CASE 
-        WHEN DAY(CURDATE()) < 26 
-          THEN year = YEAR(CURDATE() - INTERVAL 1 MONTH) 
+      CASE
+        WHEN DAY(CURDATE()) < (SELECT cutoff_date FROM salary_calculation_period WHERE id = 1)
+          THEN year = YEAR(CURDATE() - INTERVAL 1 MONTH)
         ELSE year = YEAR(CURDATE())
       END
-    );
+    )
 `
 
   ,
@@ -316,6 +334,46 @@ WHERE JSON_CONTAINS(assigned_data, ?, '$.employee_id')
       assigned_date
     )
     VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+  `,
+
+
+  GET_WORKING_DAYS_CURRENT_MONTH: `
+    WITH RECURSIVE month_days AS (
+        SELECT DATE(CONCAT(YEAR(NOW()), '-', MONTH(NOW()), '-01')) AS work_date
+        UNION ALL
+        SELECT DATE_ADD(work_date, INTERVAL 1 DAY)
+        FROM month_days
+        WHERE work_date < LAST_DAY(NOW())
+    ),
+    all_saturdays AS (
+        SELECT work_date, ROW_NUMBER() OVER (ORDER BY work_date) AS sat_position
+        FROM month_days
+        WHERE WEEKDAY(work_date) = 5  -- Saturday
+    ),
+    saturday_list AS (
+        SELECT all_saturdays.work_date AS holiday_date
+        FROM all_saturdays
+        JOIN (
+            SELECT SUBSTRING_INDEX(SUBSTRING_INDEX(saturdays, ',', numbers.n), ',', -1) AS selected_sat
+            FROM saturday_holidays
+            JOIN (SELECT 1 n UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5) numbers
+            ON CHAR_LENGTH(saturdays) - CHAR_LENGTH(REPLACE(saturdays, ',', '')) >= numbers.n - 1
+            WHERE month_year = DATE_FORMAT(NOW(), '%m-%Y')
+        ) subquery
+        ON all_saturdays.sat_position = subquery.selected_sat
+    )
+    SELECT COUNT(*) AS total_working_days
+    FROM month_days
+    WHERE WEEKDAY(work_date) != 6  -- Exclude Sundays
+      AND work_date NOT IN (SELECT holiday_date FROM saturday_list)
+      AND work_date NOT IN (
+          SELECT date FROM holidays
+          WHERE MONTH(date) = MONTH(NOW()) 
+            AND YEAR(date) = YEAR(NOW())
+      );
   `
+
+
+
 };
 
