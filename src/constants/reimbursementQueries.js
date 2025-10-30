@@ -6,7 +6,9 @@ module.exports = {
          IF(r.from_date IS NOT NULL AND r.to_date IS NOT NULL, 
             CONCAT(r.from_date, ' - ', r.to_date), 
             r.date) AS date_range,
-         r.payment_status,
+         -- normalize status/payment_status so backend always returns lower-trimmed values
+         LOWER(TRIM(IFNULL(r.status, ''))) AS status,
+         LOWER(TRIM(IFNULL(r.payment_status, ''))) AS payment_status,
          r.paid_date
   FROM reimbursement r
   JOIN employees e ON r.employee_id = e.employee_id
@@ -21,6 +23,9 @@ module.exports = {
          IF(r.from_date IS NOT NULL AND r.to_date IS NOT NULL, 
             CONCAT(r.from_date, ' - ', r.to_date), 
             r.date) AS date_range,
+         -- include & normalize payment_status + status
+         LOWER(TRIM(IFNULL(r.status, ''))) AS status,
+         LOWER(TRIM(IFNULL(r.payment_status, ''))) AS payment_status,
          r.paid_date
   FROM reimbursement r
   JOIN employees e ON r.employee_id = e.employee_id
@@ -122,8 +127,6 @@ module.exports = {
   GET_ATTACHMENTS: `SELECT file_name, file_path FROM reimbursement_attachments WHERE reimbursement_id = ?`,
 
   GET_CLAIM_DETAILS: `SELECT * FROM reimbursement WHERE id = ?`,
-
-  GET_ATTACHMENTS: `SELECT file_name, file_path FROM reimbursement_attachments WHERE reimbursement_id = ?`,
 
   UPDATE_PAYMENT_STATUS: `
     UPDATE reimbursement
