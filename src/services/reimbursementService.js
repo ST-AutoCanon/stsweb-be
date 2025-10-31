@@ -2,7 +2,7 @@ const db = require("../config");
 const queries = require("../constants/reimbursementQueries");
 const path = require("path");
 
-// Turn any JS Date (from MySQL DATETIME) into local YYYY‑MM‑DD
+// Turn any JS Date (from MySQL DATETIME) into local YYYY-MM-DD
 const toLocalDateString = (dt) => {
   if (!dt) return null;
   const d = new Date(dt);
@@ -12,12 +12,24 @@ const toLocalDateString = (dt) => {
   return `${y}-${m}-${day}`;
 };
 
+// Normalize status/payment_status to consistent lowercase trimmed strings
+const normalizeRow = (r) => {
+  return {
+    ...r,
+    status: r.status ? String(r.status).toLowerCase().trim() : "",
+    payment_status: r.payment_status
+      ? String(r.payment_status).toLowerCase().trim()
+      : "",
+  };
+};
+
 exports.processUploadedFiles = async (files, reimbursementId) => {
   try {
     for (const file of files) {
       const ext = path.extname(file.originalname).toLowerCase();
 
       if (ext === ".pdf") {
+        // convertPdfToImages assumed defined elsewhere
         const imagePaths = await convertPdfToImages(
           file.path,
           path.dirname(file.path)
@@ -43,38 +55,49 @@ exports.processUploadedFiles = async (files, reimbursementId) => {
     throw error;
   }
 };
+
 exports.getReimbursementsByEmployee = async (
   employeeId,
   fromDate = null,
   toDate = null
 ) => {
-  let query = queries.GET_REIMBURSEMENTS_BY_EMPLOYEE;
-  let queryParams = [employeeId];
-  // … your dynamic filtering code …
+  try {
+    let query = queries.GET_REIMBURSEMENTS_BY_EMPLOYEE;
+    let queryParams = [employeeId];
+    // … your dynamic filtering code can be added here if needed …
 
-  const [rawRows] = await db.query(query, queryParams);
+    const [rawRows] = await db.query(query, queryParams);
 
-  if (!rawRows.length) return [];
-  // ── FORMAT ALL DATES INTO YYYY-MM-DD ─────────────────────────────────
-  const reimbursements = rawRows.map((r) => ({
-    ...r,
-    from_date: toLocalDateString(r.from_date),
-    to_date: toLocalDateString(r.to_date),
-    date: toLocalDateString(r.date),
-  }));
-  // ───────────────────────────────────────────────────────────────────────
+    if (!rawRows.length) return [];
 
-  // Then fetch attachments and return
-  const reimbursementIds = reimbursements.map((r) => r.id);
-  const [attachments] = await db.query(
-    queries.GET_ATTACHMENTS_BY_REIMBURSEMENT_IDS,
-    [reimbursementIds]
-  );
-  return mapAttachmentsToReimbursements(
-    reimbursements,
-    attachments,
-    employeeId
-  );
+    // Normalize and format dates
+    const reimbursements = rawRows.map((r) => {
+      const normalized = normalizeRow(r);
+      return {
+        ...normalized,
+        from_date: toLocalDateString(r.from_date),
+        to_date: toLocalDateString(r.to_date),
+        date: toLocalDateString(r.date),
+      };
+    });
+
+    // Then fetch attachments and return
+    const reimbursementIds = reimbursements.map((r) => r.id);
+    const safeIds = reimbursementIds.length ? reimbursementIds : [-1];
+    const [attachments] = await db.query(
+      queries.GET_ATTACHMENTS_BY_REIMBURSEMENT_IDS,
+      [safeIds]
+    );
+
+    return mapAttachmentsToReimbursements(
+      reimbursements,
+      attachments,
+      employeeId
+    );
+  } catch (err) {
+    console.error("Error in getReimbursementsByEmployee:", err);
+    throw err;
+  }
 };
 
 // Utility function for mapping attachments
@@ -104,7 +127,6 @@ const mapAttachmentsToReimbursements = (
 };
 
 // New service function to update payment status and paid_date
-// reimbursementService.js (service)
 exports.updatePaymentStatus = async (id, payment_status, paid_date) => {
   try {
     console.log("Service: Updating payment status...");
@@ -129,13 +151,14 @@ exports.updatePaymentStatus = async (id, payment_status, paid_date) => {
 };
 
 exports.getAttachmentsByReimbursementIds = async (reimbursementIds) => {
-  if (!reimbursementIds.length) return [];
+  if (!reimbursementIds || !reimbursementIds.length) return [];
   const [attachments] = await db.query(
     queries.GET_ATTACHMENTS_BY_REIMBURSEMENT_IDS,
     [reimbursementIds]
   );
   return attachments;
 };
+
 exports.getAllReimbursements = async (
   submittedFrom = null,
   submittedFromForBetween = null,
@@ -159,19 +182,23 @@ exports.getAllReimbursements = async (
       return [];
     }
 
-    // 2) FORMAT DATES INTO LOCAL YYYY-MM-DD
-    const reimbursements = rawRows.map((r) => ({
-      ...r,
-      from_date: toLocalDateString(r.from_date),
-      to_date: toLocalDateString(r.to_date),
-      date: toLocalDateString(r.date),
-    }));
+    // 2) FORMAT DATES INTO LOCAL YYYY-MM-DD and normalize status/payment_status
+    const reimbursements = rawRows.map((r) => {
+      const normalized = normalizeRow(r);
+      return {
+        ...normalized,
+        from_date: toLocalDateString(r.from_date),
+        to_date: toLocalDateString(r.to_date),
+        date: toLocalDateString(r.date),
+      };
+    });
 
     // 3) Fetch attachments for these reimbursements
     const reimbursementIds = reimbursements.map((r) => r.id);
+    const safeIds = reimbursementIds.length ? reimbursementIds : [-1];
     const [attachments] = await db.query(
       queries.GET_ATTACHMENTS_BY_REIMBURSEMENT_IDS,
-      [reimbursementIds]
+      [safeIds]
     );
 
     // 4) Map attachments onto reimbursements
@@ -366,8 +393,6 @@ exports.getAttachments = async (reimbursementId) => {
   return rows;
 };
 
-// In your reimbursementService.js
-
 exports.updateReimbursement = async (reimbursementId, updateData) => {
   try {
     console.log("Received updateData in service:", updateData);
@@ -465,53 +490,69 @@ exports.getTeamReimbursements = async (
   submittedTo,
   teamLeadId
 ) => {
-  const params = [
-    departmentId,
-    submittedFrom || null,
-    submittedFrom || null,
-    submittedTo || null,
-  ];
+  try {
+    const params = [
+      departmentId,
+      submittedFrom || null,
+      submittedFrom || null,
+      submittedTo || null,
+    ];
 
-  // Fetch reimbursements
-  const [reimbursements] = await db.query(
-    queries.GET_TEAM_REIMBURSEMENTS,
-    params
-  );
+    // Fetch reimbursements
+    const [reimbursementsRaw] = await db.query(
+      queries.GET_TEAM_REIMBURSEMENTS,
+      params
+    );
 
-  if (!reimbursements.length) return [];
+    if (!reimbursementsRaw.length) return [];
 
-  // Exclude reimbursements from the team lead (self)
-  const filteredReimbursements = reimbursements.filter(
-    (r) => r.employee_id !== teamLeadId
-  );
-
-  // Fetch attachments for these filtered reimbursements
-  const reimbursementIds = filteredReimbursements.map((r) => r.id);
-  const safeIds = reimbursementIds.length ? reimbursementIds : [-1];
-
-  const [attachments] = await db.query(
-    queries.GET_ATTACHMENTS_BY_REIMBURSEMENT_IDS,
-    [safeIds]
-  );
-
-  // Map attachments to reimbursements
-  const attachmentMap = {};
-  attachments.forEach((attachment) => {
-    if (!attachmentMap[attachment.reimbursement_id]) {
-      attachmentMap[attachment.reimbursement_id] = [];
-    }
-    attachmentMap[attachment.reimbursement_id].push({
-      filename: attachment.file_name,
-      url: `/reimbursement/${attachment.year}/${attachment.month}/${attachment.employee_id}/${attachment.file_name}`,
+    // Normalize status/payment_status and format dates
+    const normalized = reimbursementsRaw.map((r) => {
+      const n = normalizeRow(r);
+      return {
+        ...n,
+        from_date: toLocalDateString(r.from_date),
+        to_date: toLocalDateString(r.to_date),
+        date: toLocalDateString(r.date),
+      };
     });
-  });
 
-  // Attach the files to each reimbursement
-  filteredReimbursements.forEach((reimbursement) => {
-    reimbursement.attachments = attachmentMap[reimbursement.id] || [];
-  });
+    // Exclude reimbursements from the team lead (self)
+    const filteredReimbursements = normalized.filter(
+      (r) => r.employee_id !== teamLeadId
+    );
 
-  return filteredReimbursements;
+    // Fetch attachments for these filtered reimbursements
+    const reimbursementIds = filteredReimbursements.map((r) => r.id);
+    const safeIds = reimbursementIds.length ? reimbursementIds : [-1];
+
+    const [attachments] = await db.query(
+      queries.GET_ATTACHMENTS_BY_REIMBURSEMENT_IDS,
+      [safeIds]
+    );
+
+    // Map attachments to reimbursements
+    const attachmentMap = {};
+    attachments.forEach((attachment) => {
+      if (!attachmentMap[attachment.reimbursement_id]) {
+        attachmentMap[attachment.reimbursement_id] = [];
+      }
+      attachmentMap[attachment.reimbursement_id].push({
+        filename: attachment.file_name,
+        url: `/reimbursement/${attachment.year}/${attachment.month}/${attachment.employee_id}/${attachment.file_name}`,
+      });
+    });
+
+    // Attach the files to each reimbursement
+    filteredReimbursements.forEach((reimbursement) => {
+      reimbursement.attachments = attachmentMap[reimbursement.id] || [];
+    });
+
+    return filteredReimbursements;
+  } catch (err) {
+    console.error("Error in getTeamReimbursements:", err);
+    throw err;
+  }
 };
 
 exports.getAllProjects = async () => {
