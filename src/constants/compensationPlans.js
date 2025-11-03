@@ -55,10 +55,14 @@ const DELETE_COMPENSATION_WORKING_DAYS = `
 
 
 const GET_ALL_EMPLOYEE_FULL_NAMES = `
-  SELECT employee_id, CONCAT_WS(' ', first_name, last_name) AS full_name
+  SELECT 
+    employee_id, 
+    CONCAT_WS(' ', first_name, last_name) AS full_name
   FROM employees
+  WHERE status = 'active'
   ORDER BY first_name ASC;
 `;
+
 
 const GET_ALL_DEPARTMENT_NAMES = `
   SELECT id, name
@@ -67,12 +71,16 @@ const GET_ALL_DEPARTMENT_NAMES = `
 `;
 
 const GET_EMPLOYEES_BY_DEPARTMENT_ID = `
-  SELECT e.employee_id, CONCAT(e.first_name, ' ', e.last_name) AS full_name
+  SELECT 
+    e.employee_id, 
+    CONCAT(e.first_name, ' ', e.last_name) AS full_name
   FROM employees e
   JOIN employee_professional ep ON e.employee_id = ep.employee_id
   WHERE ep.department_id = ?
+    AND e.status = 'active'
   ORDER BY e.first_name ASC;
 `;
+
 
 /* ------------------- TDS Slab Queries ------------------- */
 
