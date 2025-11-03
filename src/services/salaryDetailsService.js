@@ -4,17 +4,23 @@ const {
   createTableQuery,
   deleteExistingData,
   insertSalaryData,
-  SALARY_COLUMNS,
+  getApprovedIdsQuery
 } = require("../constants/salaryDetailsQueries");
 const moment = require("moment");
 
-// Function to check if a table exists
 const tableExists = async (tableName) => {
   const [result] = await db.query(checkIfTableExists(tableName));
   return result[0].count > 0;
 };
 
-// Function to create table dynamically
+const getApprovedEmployeeIds = async () => {
+  const tableName = generateTableName();
+  if (!(await tableExists(tableName))) return [];
+
+  const [rows] = await db.query(getApprovedIdsQuery(tableName));
+  return rows.map(r => r.employee_id);
+};
+
 const createTableIfNotExists = async (tableName) => {
   const query = createTableQuery(tableName);
   try {
@@ -27,48 +33,46 @@ const createTableIfNotExists = async (tableName) => {
   }
 };
 
-// NEW: Ensure all required columns exist (migration for broken schemas)
 const ensureColumns = async (tableName) => {
-  const OTHER_COLUMNS = SALARY_COLUMNS.slice(1);
+  const OTHER_COLUMNS = require("../constants/salaryDetailsQueries").SALARY_COLUMNS.slice(1);
   const ALL_COLUMNS = ['employee_id', ...OTHER_COLUMNS];
-  const MONETARY_COLUMNS = require("../constants/salaryDetailsQueries").MONETARY_COLUMNS; // Import if needed
+  const MONETARY_COLUMNS = require("../constants/salaryDetailsQueries").MONETARY_COLUMNS;
 
   for (const col of ALL_COLUMNS) {
     try {
       const [rows] = await db.query(`SHOW COLUMNS FROM \`${tableName}\` LIKE '${col.replace(/`/g, '\\`')}';`);
       if (rows.length === 0) {
-        // Determine type
-        const type = col === 'employee_id' 
-          ? 'VARCHAR(50) UNIQUE NOT NULL'  // Special for PK-like
-          : MONETARY_COLUMNS.includes(col) 
+        let type;
+        if (col === 'employee_id') {
+          type = 'VARCHAR(50) UNIQUE NOT NULL';
+        } else if (col === 'status') {
+          type = 'VARCHAR(20) DEFAULT \'Pending\'';
+        } else {
+          type = MONETARY_COLUMNS.includes(col) 
             ? 'DECIMAL(12,2) DEFAULT NULL' 
             : 'VARCHAR(255) DEFAULT NULL';
+        }
         
-        // For employee_id NOT NULL, ok since we DELETE first (table empty)
         await db.query(`ALTER TABLE \`${tableName}\` ADD COLUMN \`${col}\` ${type};`);
         console.log(`Added missing column \`${col}\` to ${tableName}`);
       }
     } catch (error) {
       console.error(`Error ensuring column ${col}:`, error);
-      // Continue for other cols, but throw if critical
       if (col === 'employee_id') throw error;
     }
   }
   console.log(`Schema verified for ${tableName}`);
 };
 
-// Function to generate table name based on current month/year
 const generateTableName = () => {
   const now = moment();
-  const month = now.format('MMM').toLowerCase(); // e.g., 'oct'
-  const year = now.format('YYYY'); // e.g., '2025'
+  const month = now.format('MMM').toLowerCase();
+  const year = now.format('YYYY');
   return `salary_sts_${month}_${year}`;
 };
 
-// Function to delete existing data
 const deleteExistingSalaryData = async (tableName) => {
   try {
-    // Only DELETE if table exists
     if (await tableExists(tableName)) {
       await db.query(deleteExistingData(tableName));
       console.log(`Old data deleted from table: ${tableName}`);
@@ -81,7 +85,6 @@ const deleteExistingSalaryData = async (tableName) => {
   }
 };
 
-// Function to insert salary data (bulk)
 const insertSalaryRecords = async (tableName, rows) => {
   try {
     if (rows.length === 0) {
@@ -100,23 +103,16 @@ const insertSalaryRecords = async (tableName, rows) => {
   }
 };
 
-// Main service to save salary details
 const saveSalaryDetails = async (salaryData) => {
   const tableName = generateTableName();
   console.log(`Processing save for table: ${tableName}`);
 
-  // Create table if not exists
   if (!(await tableExists(tableName))) {
     await createTableIfNotExists(tableName);
   }
 
-  // NEW: Ensure schema is complete (adds missing columns)
   await ensureColumns(tableName);
-
-  // Delete existing
   await deleteExistingSalaryData(tableName);
-
-  // Insert new
   await insertSalaryRecords(tableName, salaryData);
 
   return { success: true, tableName, rowsInserted: salaryData.length };
@@ -129,5 +125,6 @@ module.exports = {
   createTableIfNotExists,
   deleteExistingSalaryData,
   insertSalaryRecords,
-  ensureColumns,  // Export if needed for manual calls
+  ensureColumns,
+  getApprovedEmployeeIds,
 };

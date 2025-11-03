@@ -1,19 +1,19 @@
-// Function to check if a table exists
+
 const checkIfTableExists = (tableName) => `
   SELECT COUNT(*) AS count FROM information_schema.tables 
   WHERE table_schema = DATABASE() AND table_name = '${tableName}';
 `;
 
-// Columns based on frontend (employee_id handled separately)
 const SALARY_COLUMNS = [
   'employee_id', 'full_name', 'annual_ctc', 'basic_salary', 'hra', 'lta',
   'other_allowances', 'incentives', 'overtime', 'statutory_bonus', 'bonus',
   'advance_recovery', 'employee_pf', 'employer_pf', 'esic', 'gratuity',
   'professional_tax', 'income_tax', 'insurance', 'lop_days', 'lop_deduction',
-  'gross_salary', 'net_salary'
+  'gross_salary', 'net_salary',
+  'status',
+  'payslip_generation'
 ];
 
-// Optional: Monetary columns for better typing (use DECIMAL)
 const MONETARY_COLUMNS = [
   'annual_ctc', 'basic_salary', 'hra', 'lta', 'other_allowances', 'incentives',
   'overtime', 'statutory_bonus', 'bonus', 'advance_recovery', 'employee_pf',
@@ -22,11 +22,17 @@ const MONETARY_COLUMNS = [
 ];
 
 const createTableQuery = (tableName) => {
-  // Exclude 'employee_id' from dynamic columns
   const OTHER_COLUMNS = SALARY_COLUMNS.slice(1);
   const columnDefinitions = OTHER_COLUMNS
     .map((col) => {
-      const type = MONETARY_COLUMNS.includes(col) ? 'DECIMAL(12,2) DEFAULT NULL' : 'VARCHAR(255) DEFAULT NULL';
+      let type;
+      if (col === 'status') {
+        type = 'VARCHAR(20) DEFAULT \'Pending\'';
+      } else if (col === 'payslip_generation') {
+        type = 'VARCHAR(10) DEFAULT \'disabled\'';
+      } else {
+        type = MONETARY_COLUMNS.includes(col) ? 'DECIMAL(12,2) DEFAULT NULL' : 'VARCHAR(255) DEFAULT NULL';
+      }
       return `\`${col}\` ${type}`;
     })
     .join(', ');
@@ -41,10 +47,8 @@ const createTableQuery = (tableName) => {
   `;
 };
 
-// Function to delete all data from a table
 const deleteExistingData = (tableName) => `DELETE FROM \`${tableName}\`;`;
 
-// Fixed: Proper multi-row INSERT with correct placeholders per row-set
 const insertSalaryData = (tableName, rows) => {
   if (rows.length === 0) return { query: '', values: [] };
 
@@ -53,11 +57,16 @@ const insertSalaryData = (tableName, rows) => {
   const valueSets = Array(rows.length).fill(`(${placeholders})`).join(', ');
   const query = `INSERT INTO \`${tableName}\` (${columnsStr}) VALUES ${valueSets}`;
 
-  // FlatMap values; use ?? for null/undefined
   const values = rows.flatMap(row => SALARY_COLUMNS.map(col => row[col] ?? null));
 
   return { query, values };
 };
+
+const getApprovedIdsQuery = (tableName) => `
+  SELECT DISTINCT employee_id 
+  FROM \`${tableName}\` 
+  WHERE status = 'Approved';
+`;
 
 module.exports = {
   checkIfTableExists,
@@ -65,5 +74,6 @@ module.exports = {
   deleteExistingData,
   insertSalaryData,
   SALARY_COLUMNS,
-  MONETARY_COLUMNS
+  MONETARY_COLUMNS,
+  getApprovedIdsQuery,
 };

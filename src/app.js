@@ -18,12 +18,7 @@ const weeklyTaskSupervisorRoutes = require("./routes/weekly_task_supervisor");
 const weekTaskRoutes = require("./routes/weekTaskRoutes");
 const report = require("./routes/reportRoutes");
 
-// const supervisorEmployeesRoutes = require("./routes/supervisorEmployeesRoutes");
 
-// const taskEmployeesRoutes = require("./routes/taskEmployeesRoutes");
-// const employeeTaskRoutes = require("./routes/employeeTaskUpdateRoutes");
-
-// const cron = require("node-cron");
 
 const EmployeeQueries = require("./services/employeeQueries");
 const chatService = require("./services/chatService");
@@ -97,7 +92,9 @@ const incentivesRoutes = require("./routes/incentivesRoutes");
 const salaryRoutes2 = require('./routes/salaryCalculationPeriodRoutes');
 const salaryDetailsRoutes = require('./routes/salaryDetailsRoutes'); // Adjust path if needed
 const employeeBankReportRoutes = require('./routes/employeebankreportroute');
-
+const salaryStatementRouter = require("./routes/salaryRoutes");
+// const salaryRoutes = require("./routes/salaryRoutes");
+const salaryDetailsRouter = require("./routes/salaryDetailsRouter");
 const app = express();
 const server = http.createServer(app);
 
@@ -157,6 +154,9 @@ app.use("/api/task-emp-emp", taskEmployeesRoutes);
 app.use("/api/employee-tasks", employeeTaskRoutes);
 app.use('/api', salaryRoutes2);
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
+app.use("/api/salary-statement", salaryStatementRouter);
+app.use("/api/salary-details", salaryDetailsRouter);
+app.use("/api/salary-details", salaryRoutes);
 
 const assetsRoutesforreturn = require("./routes/assetsRoutes");
 const chatRoutes = require("./routes/chatRoutes");
