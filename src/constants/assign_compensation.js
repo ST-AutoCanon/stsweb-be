@@ -209,94 +209,127 @@ ADD_OVERTIME_DETAILS_REJECTED: `
 `,
 GET_ALL_OVERTIME_DETAILS : `
   SELECT 
-    punch_id,
-    work_date,
-    employee_id,
-    extra_hours,
-    rate,
-    project,
-    supervisor,
-    comments,
-    status,
-    created_at,
-    updated_at
-  FROM overtime_details
-  WHERE 
+  punch_id,
+  work_date,
+  employee_id,
+  extra_hours,
+  rate,
+  project,
+  supervisor,
+  comments,
+  status,
+  created_at,
+  updated_at
+FROM overtime_details
+WHERE status = 'Approved'  
+  AND (
     (
-      CASE
-        WHEN DAY(CURDATE()) < (SELECT cutoff_date FROM salary_calculation_period WHERE id = 1)
-          THEN MONTH(work_date) = MONTH(CURDATE() - INTERVAL 1 MONTH)
-        ELSE MONTH(work_date) = MONTH(CURDATE())
-      END
+      MONTH(work_date) = (
+        SELECT 
+          IF(DAY(CURDATE()) < cutoff_date, 
+            IF(MONTH(CURDATE()) = 1, 12, MONTH(CURDATE()) - 1), 
+            MONTH(CURDATE())
+          ) 
+        FROM salary_calculation_period 
+        WHERE id = 1
+      )
+      AND YEAR(work_date) = (
+        SELECT 
+          IF(DAY(CURDATE()) < cutoff_date AND MONTH(CURDATE()) = 1, 
+            YEAR(CURDATE()) - 1, 
+            YEAR(CURDATE())
+          ) 
+        FROM salary_calculation_period 
+        WHERE id = 1
+      )
     )
-    AND
+    OR 
     (
-      CASE
-        WHEN DAY(CURDATE()) < (SELECT cutoff_date FROM salary_calculation_period WHERE id = 1)
-          THEN YEAR(work_date) = YEAR(CURDATE() - INTERVAL 1 MONTH)
-        ELSE YEAR(work_date) = YEAR(CURDATE())
-      END
+      (updated_at IS NOT NULL 
+       AND updated_at >= (
+         SELECT STR_TO_DATE(
+           CONCAT(
+             IF(DAY(CURDATE()) < cutoff_date AND MONTH(CURDATE()) = 1, YEAR(CURDATE()) - 1, YEAR(CURDATE())),
+             '-',
+             LPAD(
+               IF(DAY(CURDATE()) < cutoff_date, 
+                 IF(MONTH(CURDATE()) = 1, 12, MONTH(CURDATE()) - 1), 
+                 MONTH(CURDATE())
+               ), 
+               2, '0'
+             ),
+             '-',
+             LPAD(cutoff_date, 2, '0')
+           ), 
+           '%Y-%m-%d'
+         )
+         FROM salary_calculation_period 
+         WHERE id = 1
+       )
+       AND updated_at < (
+         SELECT STR_TO_DATE(
+           CONCAT(
+             IF(MONTH(CURDATE()) = 12, YEAR(CURDATE()) + 1, YEAR(CURDATE())),
+             '-',
+             LPAD(
+               IF(MONTH(CURDATE()) = 12, 1, MONTH(CURDATE()) + 1),
+               2, '0'
+             ),
+             '-',
+             LPAD(cutoff_date, 2, '0')
+           ), 
+           '%Y-%m-%d'
+         )
+         FROM salary_calculation_period 
+         WHERE id = 1
+       )
+      )
+      OR 
+      (updated_at IS NULL 
+       AND created_at >= (
+         SELECT STR_TO_DATE(
+           CONCAT(
+             IF(DAY(CURDATE()) < cutoff_date AND MONTH(CURDATE()) = 1, YEAR(CURDATE()) - 1, YEAR(CURDATE())),
+             '-',
+             LPAD(
+               IF(DAY(CURDATE()) < cutoff_date, 
+                 IF(MONTH(CURDATE()) = 1, 12, MONTH(CURDATE()) - 1), 
+                 MONTH(CURDATE())
+               ), 
+               2, '0'
+             ),
+             '-',
+             LPAD(cutoff_date, 2, '0')
+           ), 
+           '%Y-%m-%d'
+         )
+         FROM salary_calculation_period 
+         WHERE id = 1
+       )
+       AND created_at < (
+         SELECT STR_TO_DATE(
+           CONCAT(
+             IF(MONTH(CURDATE()) = 12, YEAR(CURDATE()) + 1, YEAR(CURDATE())),
+             '-',
+             LPAD(
+               IF(MONTH(CURDATE()) = 12, 1, MONTH(CURDATE()) + 1),
+               2, '0'
+             ),
+             '-',
+             LPAD(cutoff_date, 2, '0')
+           ), 
+           '%Y-%m-%d'
+         )
+         FROM salary_calculation_period 
+         WHERE id = 1
+       )
+      )
     )
-  ORDER BY work_date DESC;
+  )
+ORDER BY work_date DESC, updated_at DESC;
 `
 ,
 
-// GET_ALL_OVERTIME_DETAILS: `
-//   SELECT 
-//     o.punch_id,
-//     o.work_date,
-//     o.employee_id,
-//     o.extra_hours,
-//     o.rate,
-//     o.project,
-//     o.supervisor,
-//     o.comments,
-//     o.status,
-//     o.created_at,
-//     o.updated_at
-//   FROM overtime_details o
-//   CROSS JOIN (
-//     SELECT cutoff_date 
-//     FROM salary_calculation_period  -- Corrected: Matches schema (singular, underscored)
-//     ORDER BY updated_at DESC 
-//     LIMIT 1
-//   ) p
-//   WHERE o.status = 'Approved'
-//     AND YEAR(o.work_date) = YEAR(CURDATE())
-//     AND MONTH(o.work_date) = MONTH(CURDATE())
-//     AND DATE(o.updated_at) <= DATE(
-//       CONCAT(
-//         YEAR(CURDATE()), 
-//         '-', 
-//         LPAD(MONTH(CURDATE()), 2, '0'), 
-//         '-', 
-//         LPAD(p.cutoff_date, 2, '0')
-//       )
-//     )
-//   ORDER BY o.work_date DESC
-// `,
-// GET_EMPLOYEE_LOP_DAYS_FOR_CURRENT_PERIOD :`
-//   SELECT 
-//     employee_id,
-//     lop
-//   FROM sukalpadata.employee_monthly_lop
-//   WHERE 
-//     (
-//       CASE 
-//         WHEN DAY(CURDATE()) < 26 
-//           THEN month = MONTH(CURDATE() - INTERVAL 1 MONTH) 
-//         ELSE month = MONTH(CURDATE())
-//       END
-//     )
-//     AND 
-//     (
-//       CASE 
-//         WHEN DAY(CURDATE()) < 26 
-//           THEN year = YEAR(CURDATE() - INTERVAL 1 MONTH) 
-//         ELSE year = YEAR(CURDATE())
-//       END
-//     );
-// `
 GET_EMPLOYEE_LOP_DAYS_FOR_CURRENT_PERIOD: `
   SELECT
     employee_id,
