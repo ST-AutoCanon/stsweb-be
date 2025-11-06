@@ -171,22 +171,20 @@ function computeColumnPercents(rows) {
   const headers = Object.keys(rows[0] || {});
   if (!headers.length) return [];
   const count = headers.length;
-  const base = Math.max(6, Math.round((100 / count) * 10) / 10);
+  // Base percent as floating point with high precision then distribute remainder.
+  const base = 100 / count;
   const percents = headers.map(() => base);
+  // Now normalize to avoid floating rounding issues — distribute remainder to last column
   const sum = percents.reduce((s, v) => s + v, 0);
-  const diff = Math.round((100 - sum) * 10) / 10;
-  if (Math.abs(diff) >= 0.1) {
-    percents[0] = Math.round((percents[0] + diff) * 10) / 10;
-  }
-  return percents;
+  const diff = 100 - sum;
+  if (Math.abs(diff) > 1e-9)
+    percents[percents.length - 1] = percents[percents.length - 1] + diff;
+  // Round to 2 decimal places for safety
+  return percents.map((p) => Math.round(p * 100) / 100);
 }
 
 /* ------------------ Timestamp / meta helpers (Asia/Kolkata) ------------------ */
 
-/**
- * formatTimestampAsiaKolkata()
- * Returns timestamp string in "YYYY-MM-DD HH:mm:ss (Asia/Kolkata)".
- */
 function formatTimestampAsiaKolkata(d = new Date()) {
   try {
     const s = d.toLocaleString("en-GB", {
@@ -213,28 +211,58 @@ function formatTimestampAsiaKolkata(d = new Date()) {
 
 /**
  * generateMetaHeaderHtml(headerInfo)
- * headerInfo: { status?, department?, employeeName? }
- * Returns HTML snippet (string) that displays left meta items and right timestamp.
- *
- * Ordering rule:
- * - If status === "all" (case-insensitive), order: Employee, Department, Status
- * - Otherwise: Status, Department, Employee
+ * accepts strings or objects for department/employee/status and renders readable string.
+ * If headerInfo._smallCentered === true then it will center the meta block.
  */
 function generateMetaHeaderHtml(headerInfo) {
-  const status =
-    headerInfo && headerInfo.status ? String(headerInfo.status).trim() : "";
-  const dept =
-    headerInfo && headerInfo.department
-      ? String(headerInfo.department).trim()
-      : "";
-  const employee =
-    headerInfo && headerInfo.employeeName
-      ? String(headerInfo.employeeName).trim()
-      : "";
+  const rawStatus =
+    headerInfo && headerInfo.status ? headerInfo.status : headerInfo?.status;
+  let status = rawStatus;
+  if (typeof status === "object" && status !== null) {
+    status =
+      status.name ||
+      status.status ||
+      (status.value ? String(status.value) : "");
+  }
+  status = status ? String(status).trim() : "";
+
+  let dept = "";
+  if (headerInfo && headerInfo.department) {
+    if (typeof headerInfo.department === "string") dept = headerInfo.department;
+    else if (
+      typeof headerInfo.department === "object" &&
+      headerInfo.department
+    ) {
+      dept =
+        headerInfo.department.name ||
+        headerInfo.department.department_name ||
+        headerInfo.department.departmentName ||
+        headerInfo.department.id ||
+        "";
+    } else dept = String(headerInfo.department || "");
+  } else if (headerInfo && headerInfo.departmentName) {
+    dept = String(headerInfo.departmentName || "");
+  }
+
+  let employee = "";
+  if (headerInfo && headerInfo.employeeName) {
+    employee = String(headerInfo.employeeName || "");
+  } else if (headerInfo && headerInfo.employee) {
+    if (typeof headerInfo.employee === "string") employee = headerInfo.employee;
+    else if (typeof headerInfo.employee === "object" && headerInfo.employee) {
+      employee =
+        headerInfo.employee.name ||
+        headerInfo.employee.employee_name ||
+        headerInfo.employee.full_name ||
+        headerInfo.employee.email ||
+        headerInfo.employee.id ||
+        "";
+    }
+  } else if (headerInfo && headerInfo.employee_name) {
+    employee = String(headerInfo.employee_name || "");
+  }
 
   const timestamp = escapeHtml(formatTimestampAsiaKolkata(new Date()));
-
-  // determine ordering
   const isAllStatus =
     typeof status === "string" && status.trim().toLowerCase() === "all";
 
@@ -283,10 +311,13 @@ function generateMetaHeaderHtml(headerInfo) {
     ? leftItems.join("")
     : `<div class="meta-item"><em>No filters</em></div>`;
 
+  const centerMeta = headerInfo && headerInfo._smallCentered === true;
+
   const html = `
     <div class="report-meta" style="margin: 8px 0 12px 0; font-family: Arial, Helvetica, sans-serif;">
       <style>
         .report-meta { display: flex; justify-content: space-between; align-items: flex-start; width: 100%; box-sizing: border-box; }
+        .report-meta.center { justify-content: center; align-items: center; text-align: center; }
         .report-meta .meta-left { display: flex; flex-direction: column; gap: 4px; }
         .report-meta .meta-item { font-size: 12px; color: #333; line-height: 1.2; }
         .report-meta .meta-right { text-align: right; min-width: 200px; }
@@ -306,21 +337,42 @@ function generateMetaHeaderHtml(headerInfo) {
       </div>
     </div>
   `;
+
+  if (centerMeta) {
+    return html.replace('class="report-meta"', 'class="report-meta center"');
+  }
   return html;
+}
+/**
+ * Insert zero-width-space (\u200B) into long continuous tokens so renderers can wrap them.
+ * Example: breakLongWords("aaaaaaaa...long...", 40) -> inserts \u200B every 40 chars
+ */
+function breakLongWords(s, limit = 40) {
+  if (!s || typeof s !== "string") return s;
+  // If there are spaces/newlines, tokens are naturally breakable — only worry about long tokens
+  const tokens = s.split(/(\s+)/); // keep separators
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i];
+    if (!tok || tok.length <= limit) continue;
+    // Only modify tokens that do not contain whitespace
+    if (!/\s/.test(tok)) {
+      let out = "";
+      for (let j = 0; j < tok.length; j += limit) {
+        out += tok.slice(j, j + limit);
+        if (j + limit < tok.length) out += "\u200B";
+      }
+      tokens[i] = out;
+    }
+  }
+  return tokens.join("");
 }
 
 /**
- * rowsToHtml
- *
- * Generates HTML used for LibreOffice conversion to PDF (and for HTML-based PDF generation).
- * - headers are centered
- * - print-friendly color palette is applied
- * - small-table behavior preserved
- *
- * This version supports an optional "special header row" convention:
- * If the first row in `rows` is an object with `_is_report_header: true`, it's removed
- * from the data and its `status`, `department`, and `employeeName` properties are
- * rendered in the left meta block above the table (instead of an in-table spanning header).
+ * rowsToHtml - improved for overflow handling:
+ * - uses pixel widths to avoid LibreOffice shrink
+ * - strong wrapping rules (overflow-wrap, word-break, hyphens)
+ * - inserts zero-width-space into very long tokens
+ * - centers headers & data
  */
 function rowsToHtml(title, rows) {
   const inputRows = Array.isArray(rows) ? rows.map((r) => ({ ...r })) : [];
@@ -333,36 +385,50 @@ function rowsToHtml(title, rows) {
   const headerCols =
     inputRows && inputRows.length ? Object.keys(inputRows[0]) : [];
   const colCount = headerCols.length || 0;
-  const colPercents = computeColumnPercents(inputRows);
-  const smallTableMode = colCount > 0 && colCount <= 3;
-  const treatAsSmall = colCount === 0 ? true : smallTableMode;
+
+  // Pixel-based layout
+  const pageContentWidthPx = 760;
+  const minColPx = 120;
+  let computedColPx =
+    colCount > 0 ? Math.floor(pageContentWidthPx / colCount) : minColPx;
+  if (computedColPx < minColPx) computedColPx = minColPx;
+  const maxTableWidthPx = 1200;
+  const tableWidthPx = Math.min(
+    Math.max(computedColPx * Math.max(1, colCount), pageContentWidthPx),
+    maxTableWidthPx
+  );
+
+  const colgroup = headerCols
+    .map((h, i) => {
+      const widthPx =
+        i === headerCols.length - 1
+          ? Math.max(
+              minColPx,
+              tableWidthPx - computedColPx * (headerCols.length - 1)
+            )
+          : computedColPx;
+      return `<col style="width:${widthPx}px; min-width:${widthPx}px; box-sizing:border-box">`;
+    })
+    .join("");
+
+  const colors = {
+    titleColor: "#153243",
+    metaColor: "#4a5568",
+    headerBg: "#2E86AB",
+    headerText: "#ffffff",
+    rowOddBg: "#ffffff",
+    rowEvenBg: "#f7fbff",
+    borderColor: "#d1d5db",
+    tableText: "#111827",
+  };
+
   const titleFontSizePx = 22;
   const thFontSizePx = 10;
   const tdFontSizePx = 10;
   const cellBorderPx = 1;
   const smallMode = colCount >= 8;
-  const cellPadding = smallMode ? "2px" : "4px";
+  const cellPadding = smallMode ? "2px" : "6px";
   const tableFont = "Arial, Helvetica, sans-serif";
-  const colgroup = headerCols
-    .map((h, i) => {
-      if (treatAsSmall) return `<col>`;
-      const pct = colPercents[i] != null ? `${colPercents[i]}%` : null;
-      return pct ? `<col style="width:${pct}">` : `<col>`;
-    })
-    .join("");
-
-  // === Color palette (edit these to change the colors) ===
-  const colors = {
-    titleColor: "#153243", // Title text color
-    metaColor: "#4a5568", // Sub-meta color
-    headerBg: "#2E86AB", // Header background (print-friendly blue)
-    headerText: "#ffffff", // Header text color
-    rowOddBg: "#ffffff", // Odd row background
-    rowEvenBg: "#f7fbff", // Even row background (subtle)
-    borderColor: "#d1d5db", // Light border color
-    tableText: "#111827", // Main table text color
-  };
-  // =======================================================
 
   const thInlineBase = [
     `border:${cellBorderPx}px solid ${colors.borderColor}`,
@@ -372,34 +438,82 @@ function rowsToHtml(title, rows) {
     `background:${colors.headerBg}`,
     `color:${colors.headerText}`,
     `-webkit-print-color-adjust:exact`,
-    `text-align:center`, // center header labels
+    `text-align:center`,
     `font-weight:600`,
+    `box-sizing:border-box`,
+    `overflow:hidden`,
+    `white-space:normal`, // allow header wrap if needed
+    `word-break:break-word`,
+    `overflow-wrap:anywhere`,
+    `hyphens:auto`,
   ].join("; ");
 
   const tdInlineBase = [
     `border:${cellBorderPx}px solid ${colors.borderColor}`,
     `padding:${cellPadding}`,
     `font-size:${tdFontSizePx}px`,
-    `vertical-align:top`,
-    `text-align:${treatAsSmall ? "center" : "left"}`, // keep body alignment as before
+    `vertical-align:middle`,
+    `text-align:center`, // center the input data horizontally
     `word-break:break-word`,
+    `overflow-wrap:anywhere`,
+    `white-space:pre-wrap`, // preserve newlines but allow wrapping
+    `hyphens:auto`,
     `color:${colors.tableText}`,
+    `box-sizing:border-box`,
   ].join("; ");
 
+  const headerDisplayMap =
+    headerInfo && headerInfo._field_display_map
+      ? headerInfo._field_display_map
+      : null;
+
   const head = headerCols
-    .map((h) => `<th style="${thInlineBase}">${escapeHtml(h)}</th>`)
+    .map((h, i) => {
+      const label =
+        headerDisplayMap && headerDisplayMap[h] ? headerDisplayMap[h] : h;
+      const widthPx = headerCols.length
+        ? i === headerCols.length - 1
+          ? Math.max(
+              minColPx,
+              tableWidthPx - computedColPx * (headerCols.length - 1)
+            )
+          : computedColPx
+        : computedColPx;
+      return `<th style="${thInlineBase}; width:${widthPx}px;">${escapeHtml(
+        breakLongWords(String(label), 40)
+      )}</th>`;
+    })
     .join("");
 
-  // build rows with alternating background colors to improve readability
   const body =
     inputRows && inputRows.length
       ? inputRows
           .map((r, rowIndex) => {
             const bg = rowIndex % 2 === 0 ? colors.rowOddBg : colors.rowEvenBg;
             const tds = headerCols
-              .map((c) => {
-                const cell = r[c] == null ? "" : String(r[c]);
-                return `<td style="${tdInlineBase}; background:${bg}">${escapeHtml(
+              .map((c, i) => {
+                let cell = r[c];
+                if (cell === null || typeof cell === "undefined") cell = "";
+                if (typeof cell === "object" && cell !== null) {
+                  cell =
+                    cell.name ||
+                    cell.employee_name ||
+                    cell.department_name ||
+                    cell.value ||
+                    JSON.stringify(cell);
+                }
+                // insert soft-breaks into very long tokens to avoid unbreakable strings
+                cell = breakLongWords(String(cell), 40);
+                const widthPx = headerCols.length
+                  ? i === headerCols.length - 1
+                    ? Math.max(
+                        minColPx,
+                        tableWidthPx - computedColPx * (headerCols.length - 1)
+                      )
+                    : computedColPx
+                  : computedColPx;
+                // escapeHtml will convert & < > etc.
+                return `<td style="${tdInlineBase}; background:${bg}; width:${widthPx}px;">${escapeHtml(
                   cell
                 )}</td>`;
               })
@@ -413,9 +527,12 @@ function rowsToHtml(title, rows) {
           colors.rowOddBg
         }">No data available</td></tr>`;
 
-  const tableInlineStyle = treatAsSmall
-    ? `border:${cellBorderPx}px solid ${colors.borderColor}; border-collapse:collapse; margin:0 auto; table-layout:auto;`
-    : `border:${cellBorderPx}px solid ${colors.borderColor}; border-collapse:collapse; width:100%; table-layout:fixed;`;
+  // Force explicit pixel width and center the table
+  const tableInlineStyle = `border:${cellBorderPx}px solid ${colors.borderColor}; border-collapse:collapse; width:${tableWidthPx}px; max-width:100%; margin:0 auto; table-layout:fixed;`;
+
+  if (headerInfo) {
+    headerInfo._smallCentered = colCount <= 3;
+  }
 
   const css = `
     @page { size: A4 ${
@@ -425,25 +542,25 @@ function rowsToHtml(title, rows) {
     body { font-family: ${tableFont}; color:${
     colors.tableText
   }; margin:0; padding:0; -webkit-print-color-adjust: exact; }
-    .wrap { box-sizing: border-box; width: 100%; padding: 6px; margin: 0; overflow: visible; }
+    .wrap { box-sizing: border-box; width: 100%; padding: 6px; margin: 0; overflow: visible; display:block; }
     .meta { margin-bottom:8px; font-size:9px; color:${
       colors.metaColor
-    }; text-align: ${treatAsSmall ? "center" : "left"}; }
+    }; text-align:left; }
     thead { display: table-header-group; }
     tfoot { display: table-footer-group; }
     tr { page-break-inside: avoid; }
     th { text-transform: none; }
+    td, th { box-sizing: border-box; overflow-wrap:anywhere; word-break:break-word; hyphens:auto; }
+    @media (max-width: 480px) {
+      .meta { font-size: 11px; }
+      table { width: 100% !important; }
+    }
   `;
 
   const h2Inline = `font-size:${titleFontSizePx}px; font-weight:700; margin:0 0 10px 0; text-align:center; color:${colors.titleColor}`;
 
-  // NOTE: intentionally do NOT render headerInfoRowHtml inside the table.
-  // The headerInfo (if present) will be used only to render the meta block above the table.
-
-  // generate meta header snippet (left meta items + right timestamp)
   const metaHeaderHtml = generateMetaHeaderHtml(headerInfo);
 
-  // build thead (without the in-table header info)
   const theadHtml = `<thead><tr>${
     head || `<th style="${thInlineBase}">Data</th>`
   }</tr></thead>`;
@@ -668,12 +785,10 @@ async function renderXlsxBufferToPdfBuffer(xlsxBuffer, title, meta) {
     throw new Error("Converted PDF is empty");
   }
 
-  // If no meta provided, return the converted PDF as-is
   if (!meta || Object.keys(meta).length === 0) {
     return pdfBuf;
   }
 
-  // Otherwise create a small HTML cover page containing the meta and merge it in front
   try {
     const headerRow = [{ _is_report_header: true, ...meta }];
     const coverHtml = rowsToHtml(title || "Report", headerRow);
@@ -681,7 +796,6 @@ async function renderXlsxBufferToPdfBuffer(xlsxBuffer, title, meta) {
     const merged = await mergePdfBuffers([coverPdf, pdfBuf]);
     return merged;
   } catch (e) {
-    // If merging fails, return the original PDF but log error
     console.error(
       "[reportRenders] failed to attach meta cover page:",
       e && e.message
@@ -711,7 +825,6 @@ async function mergePdfBuffers(buffers) {
 }
 
 async function renderPdfBuffer(title, rows, meta) {
-  // if meta provided, use special header row convention so rowsToHtml renders it (as left meta, not table header)
   const rowsCopy = Array.isArray(rows) ? rows.map((r) => ({ ...r })) : [];
   if (meta && Object.keys(meta).length > 0) {
     rowsCopy.unshift({ _is_report_header: true, ...meta });
@@ -767,7 +880,6 @@ function createPdfFromPng(pngPath) {
 }
 
 async function renderTasksPdfBufferUsingHtml(tasksRows, weeklyRows, meta) {
-  // If meta provided, ensure both sections display the meta on their own cover rows
   const tasksRowsCopy = Array.isArray(tasksRows)
     ? tasksRows.map((r) => ({ ...r }))
     : [];

@@ -9,7 +9,7 @@ const reportMeta = require("./reportMeta");
  * Note on wrappers:
  * - Many render functions in reportRenders accept meta/title for metadata injection.
  * - To keep callers simple, the wrappers below accept `options` as the last argument.
- *   options = { title?: string, meta?: { status?, department?, departmentName?, employeeName?, employee? }, req?: ExpressRequest, query?: {} }
+ *   options = { title?: string, meta?: { status?, department?, departmentName?, employeeName?, _field_display_map? }, req?: ExpressRequest, query?: {}, component?: 'employees'|'attendance'|... }
  *
  * The normalizeMetaForRender helper will try to pick meta from:
  *   1) options.meta
@@ -96,6 +96,50 @@ function normalizeMetaForRender(raw) {
   return out;
 }
 
+/**
+ * Given a title or explicit component name, try to infer which component mapping to use
+ * for pretty header labels. Acceptable components: employees, leaves, reimbursements, attendance, tasks, weekly_tasks, vendors, assets
+ */
+function inferComponentFromTitle(title) {
+  if (!title || typeof title !== "string") return null;
+  const t = title.toLowerCase();
+  if (t.includes("employee")) return "employees";
+  if (t.includes("leave")) return "leaves";
+  if (t.includes("reimburse") || t.includes("claim")) return "reimbursements";
+  if (t.includes("attendance") || t.includes("punch")) return "attendance";
+  if (t.includes("task") && t.includes("weekly")) return "weekly_tasks";
+  if (t.includes("task")) return "tasks";
+  if (t.includes("vendor")) return "vendors";
+  if (t.includes("asset")) return "assets";
+  return null;
+}
+
+/**
+ * Ensure meta contains a _field_display_map (if a component mapping is available).
+ * options.component explicit override preferred, then infer from title.
+ */
+function attachFieldDisplayMapToMeta(meta, options = {}) {
+  const outMeta = Object.assign({}, meta || {});
+  try {
+    const component =
+      (options && options.component) ||
+      inferComponentFromTitle(options && options.title);
+    if (component && typeof reports.getFieldDisplayNames === "function") {
+      const map = reports.getFieldDisplayNames(component);
+      if (map && typeof map === "object" && Object.keys(map).length > 0) {
+        outMeta._field_display_map = map;
+      }
+    }
+  } catch (e) {
+    // don't break rendering if mapping fails
+    console.warn(
+      "[reportIndex] attachFieldDisplayMapToMeta failed:",
+      e && e.message
+    );
+  }
+  return outMeta;
+}
+
 // ----------------- exports -----------------
 module.exports = {
   // utils
@@ -123,6 +167,7 @@ module.exports = {
   getWeeklyTaskRows: reports.getWeeklyTaskRows,
   getDepartments: reports.getDepartments,
   searchEmployees: reports.searchEmployees,
+  getFieldDisplayNames: reports.getFieldDisplayNames,
 
   // ----------------- renderers (wrappers) -----------------
 
@@ -133,13 +178,15 @@ module.exports = {
   /**
    * HTML -> PDF
    * Usage:
-   *   renderPdfBuffer(title, rows, { meta: { status, departmentName, employeeName } })
+   *   renderPdfBuffer(title, rows, { meta: { status, departmentName, employeeName }, component: 'employees' })
    *
    * This wrapper will accept meta in several shapes so handlers don't need to always build opts.meta.
+   * It will attach a `_field_display_map` into meta using reports.getFieldDisplayNames(component).
    */
   renderPdfBuffer: async (title, rows, options) => {
     const opts = withDefaultOptions(options);
     const meta = normalizeMetaForRender(opts);
+
     // debug: if meta empty, also try options.req?.query and options.query explicitly
     if (
       !meta.status &&
@@ -157,7 +204,6 @@ module.exports = {
         Object.assign(meta, metaFromReq);
       }
     }
-    // If still empty, try top-level options keys (some callers pass keys directly)
     if (!meta.status && !meta.department && !meta.employeeName) {
       const metaFromTop = normalizeMetaForRender(opts);
       if (
@@ -169,10 +215,19 @@ module.exports = {
       }
     }
 
+    // attach field display map (component-aware)
+    const metaWithMap = attachFieldDisplayMapToMeta(meta, {
+      component: opts.component,
+      title,
+    });
+
     // small debug help (no-op in production; you can remove or replace with proper logger)
-    if (!meta.status && !meta.department && !meta.employeeName) {
+    if (
+      !metaWithMap.status &&
+      !metaWithMap.department &&
+      !metaWithMap.employeeName
+    ) {
       try {
-        // eslint-disable-next-line no-console
         console.debug(
           "[reportIndex] renderPdfBuffer called without meta or query-derived filters."
         );
@@ -180,18 +235,17 @@ module.exports = {
     }
 
     // renderPdfBuffer in renders expects (title, rows, meta)
-    return await renders.renderPdfBuffer(title, rows, meta);
+    return await renders.renderPdfBuffer(title, rows, metaWithMap);
   },
 
   /**
    * Excel -> PDF (via LibreOffice)
    * Usage:
-   *   renderExcelToPdfBuffer(rows, headers, { title: 'Title', meta: { status, departmentName } })
+   *   renderExcelToPdfBuffer(rows, headers, { title: 'Title', meta: { status, departmentName }, component: 'attendance' })
    */
   renderExcelToPdfBuffer: async (rows, headers, options) => {
     const opts = withDefaultOptions(options);
     const meta = normalizeMetaForRender(opts);
-    // also try req.query fallback
     if (
       !meta.status &&
       !meta.department &&
@@ -201,11 +255,15 @@ module.exports = {
     ) {
       Object.assign(meta, normalizeMetaForRender({ query: opts.req.query }));
     }
+    const metaWithMap = attachFieldDisplayMapToMeta(meta, {
+      component: opts.component,
+      title: opts.title,
+    });
     return await renders.renderExcelToPdfBuffer(
       rows,
       headers,
       opts.title,
-      meta
+      metaWithMap
     );
   },
 
@@ -218,7 +276,7 @@ module.exports = {
 
   /**
    * If you already have an XLSX buffer and want to attach meta:
-   *   renderXlsxBufferToPdfBuffer(xlsxBuffer, { title: 'Title', meta: {...} })
+   *   renderXlsxBufferToPdfBuffer(xlsxBuffer, { title: 'Title', meta: {...}, component: 'employees' })
    */
   renderXlsxBufferToPdfBuffer: async (xlsxBuffer, options) => {
     const opts = withDefaultOptions(options);
@@ -232,10 +290,14 @@ module.exports = {
     ) {
       Object.assign(meta, normalizeMetaForRender({ query: opts.req.query }));
     }
+    const metaWithMap = attachFieldDisplayMapToMeta(meta, {
+      component: opts.component,
+      title: opts.title,
+    });
     return await renders.renderXlsxBufferToPdfBuffer(
       xlsxBuffer,
       opts.title,
-      meta
+      metaWithMap
     );
   },
 
@@ -252,7 +314,15 @@ module.exports = {
     ) {
       Object.assign(meta, normalizeMetaForRender({ query: opts.req.query }));
     }
-    return await renders.renderTasksPdfBuffer(tasksRows, weeklyRows, meta);
+    const metaWithMap = attachFieldDisplayMapToMeta(meta, {
+      component: opts.component || "weekly_tasks",
+      title: opts.title || "Tasks",
+    });
+    return await renders.renderTasksPdfBuffer(
+      tasksRows,
+      weeklyRows,
+      metaWithMap
+    );
   },
 
   renderTasksPdfBufferUsingHtml: async (tasksRows, weeklyRows, options) => {
@@ -267,10 +337,14 @@ module.exports = {
     ) {
       Object.assign(meta, normalizeMetaForRender({ query: opts.req.query }));
     }
+    const metaWithMap = attachFieldDisplayMapToMeta(meta, {
+      component: opts.component || "weekly_tasks",
+      title: opts.title || "Tasks",
+    });
     return await renders.renderTasksPdfBufferUsingHtml(
       tasksRows,
       weeklyRows,
-      meta
+      metaWithMap
     );
   },
 
