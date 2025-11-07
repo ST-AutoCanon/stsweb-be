@@ -14,7 +14,7 @@ function coerceToString(val, fallback = null) {
   if (val === undefined || val === null) return fallback;
   if (Array.isArray(val)) val = val[val.length - 1];
   try {
-    const s = String(val);
+    const s = String(val).trim();
     return s.length ? s : fallback;
   } catch (e) {
     return fallback;
@@ -31,110 +31,94 @@ function escapeHtml(str) {
 }
 
 /* ----------------- Status normalizer for DB query params -------------- */
+
+/**
+ * normalizeStatusForQuery
+ * - Accepts many UI inputs and returns a canonical token (or null for "no filter").
+ * - Returns null for "all", empty, undefined.
+ * - Returned tokens are lower-case / slash-separated for consistency (e.g. "approved/paid", "punch in", "in progress").
+ */
 function normalizeStatusForQuery(status) {
   if (status === undefined || status === null) return null;
-  if (typeof status !== "string") return status;
-  const s = status.trim();
-  if (s === "") return null;
+  const s = typeof status === "string" ? status.trim() : String(status).trim();
+  if (!s) return null;
   const low = s.toLowerCase();
 
-  // treat 'all' as a special case (no filtering)
-  if (low === "all" || low === "null" || low === "undefined") return null;
+  // treat 'all' and obvious non-values as no filter
+  if (["all", "null", "undefined", "none", "any"].includes(low)) return null;
 
-  // Accept many synonyms/use-cases used in UI for different modules
-  const accepted = new Set([
+  // Normalize separators and whitespace
+  let normalized = low
+    .replace(/[_\s-]+/g, " ")
+    .replace(/\s*\/\s*/g, "/")
+    .trim();
+
+  // quick mapping of common variants
+  const map = {
+    // reimbursements / generic
+    approve: "approved",
+    approved: "approved",
+    rejecting: "rejected",
+    reject: "rejected",
+    rejected: "rejected",
+    pending: "pending",
+    paid: "paid",
+    unpaid: "unpaid",
+    "approved/paid": "approved/paid",
+    "approved/pending": "approved/pending",
+    "approved/unpaid": "approved/unpaid",
     // attendance
-    "punch in",
-    "punch out",
+    "punch in": "punch in",
+    "punch out": "punch out",
+    // tasks
+    "yet to start": "yet to start",
+    "in progress": "in progress",
+    "on hold": "on hold",
+    "add on": "add on",
+    "add-on": "add on",
+    "re work": "re work",
+    "re-work": "re work",
+    rework: "re work",
+    incomplete: "incomplete",
+    // employees
+    active: "active",
+    inactive: "inactive",
+    // assets
+    assigned: "assigned",
+    "in use": "in use",
+    returned: "returned",
+    decommissioned: "decommissioned",
+  };
 
-    // generic / workflow
-    "pending",
-    "inprogress",
-    "in progress",
-    "completed",
-    "rejected",
-    "approved",
-    "onhold",
-    "on hold",
-    "paid",
-    "unpaid",
-    "approved/paid",
-    "approved/pending",
-    "approved/unpaid",
-    "active",
-    "inactive",
-    "assigned",
-    "in use",
-    "returned",
-    "decommissioned",
+  if (map[normalized]) return map[normalized];
 
-    // tasks - employee driven (weekly_tasks)
-    "completed",
-    "add on",
-    "add-on",
-    "addon",
-    "re work",
-    "rework",
-    "re-work",
-    "incomplete",
-    "incompleted",
+  // if slash exists keep as-is (but normalized)
+  if (normalized.includes("/")) return normalized;
 
-    // tasks - supervisor driven (tasks)
-    "yet to start",
-    "yet_to_start",
-    "in progress",
-    "inprogress",
-    "on hold",
-    "onhold",
-  ]);
-
-  if (!accepted.has(low)) {
-    console.warn(
-      `[reportFilters] Invalid status value: ${s}. Using null instead.`
-    );
-    return null;
-  }
-
-  // Canonicalize common variants into stable tokens used downstream.
-  switch (low) {
-    case "punch in":
-      return "Punch In";
-    case "punch out":
-      return "Punch Out";
-
-    case "add-on":
-    case "addon":
-    case "add on":
-      return "Add on";
-    case "rework":
-    case "re-work":
-    case "re work":
-      return "Re work";
-    case "incomplete":
-    case "incompleted":
-      return "Incomplete";
-
-    case "yet to start":
-    case "yet_to_start":
-      return "Yet to Start";
-    case "in progress":
-    case "inprogress":
-      return "In Progress";
-    case "on hold":
-    case "onhold":
-      return "On Hold";
-
-    default:
-      return s;
-  }
+  // otherwise return normalized (best-effort)
+  return normalized;
 }
 
 /* ----------------- buildDateStatusParams (used by SQL fetchers) ---------------- */
 
+/**
+ * buildDateStatusParams(startDate, endDate, status)
+ *
+ * Many of your SQL queries use a pattern like:
+ *   WHERE (? IS NULL OR <date> >= ?) AND (? IS NULL OR <date> < DATE_ADD(?, INTERVAL 1 DAY))
+ *   ... AND ( ? IS NULL OR LOWER(col) = LOWER(?) )
+ *
+ * To make "All" behave as "no filter", this function returns null placeholders
+ * when status is null/empty/'all'.
+ */
 function buildDateStatusParams(startDate, endDate, status) {
   const s = startDate || null;
   const e = endDate || null;
   const st = normalizeStatusForQuery(status);
+  if (!st) {
+    // provide nulls so SQL clauses written as (? IS NULL OR LOWER(col)=LOWER(?)) work as expected
+    return [s, s, e, e, null, null];
+  }
   return [s, s, e, e, st, st];
 }
 
@@ -170,7 +154,7 @@ function keepOnlyFields(rows, requestedFields, defaultOrder) {
           (k) => String(k).toLowerCase() === lower
         );
         if (foundKey) obj[f] = r[foundKey];
-        else obj[f] = "";
+        else obj[f] = ""; // preserve column but empty value
       }
     }
     return obj;
@@ -371,24 +355,63 @@ async function applyEmployeeAndDepartmentFilters(
 
 /* ------------------ Status matching utilities ----------------- */
 
+/**
+ * normalizeForCompare
+ * removes non-alphanumeric characters and collapses to lowercase for robust comparisons.
+ */
 function normalizeForCompare(s) {
   if (s === undefined || s === null) return "";
   return String(s)
     .toLowerCase()
     .trim()
-    .replace(/[\s\-_]+/g, "");
+    .replace(/[^\w\/]+/g, "") // keep slashes for compound statuses
+    .replace(/_+/g, "")
+    .replace(/-+/g, "");
 }
 
+/**
+ * statusMatches(requestedStatus, rowStatusCandidates)
+ *
+ * - requestedStatus: token returned by normalizeStatusForQuery (string or null)
+ * - rowStatusCandidates: array of values from the row (e.g. [r.status, r.payment_status])
+ *
+ * Returns true when:
+ *  - requestedStatus is null -> no filter (true)
+ *  - requestedStatus contains "/" -> split into parts and require every part to appear (partial match allowed)
+ *  - otherwise require any candidate to match or contain the token
+ */
 function statusMatches(requestedStatus, rowStatusCandidates = []) {
-  const req = normalizeForCompare(requestedStatus || "");
-  if (!req) return true;
-  for (const cand of rowStatusCandidates) {
-    if (!cand) continue;
-    const n = normalizeForCompare(cand);
-    if (n === req) return true;
-    if (n.includes(req) || req.includes(n)) return true;
+  if (!requestedStatus) return true;
+  const reqRaw = String(requestedStatus || "").trim();
+  if (!reqRaw) return true;
+  const req = normalizeForCompare(reqRaw);
+
+  // collect normalized candidates
+  const normalizedRowVals = (
+    Array.isArray(rowStatusCandidates) ? rowStatusCandidates : []
+  )
+    .map((v) => (v === null || v === undefined ? "" : String(v)))
+    .filter(Boolean)
+    .map(normalizeForCompare);
+
+  if (normalizedRowVals.length === 0) return false;
+
+  // compound: require all parts to be present in at least one candidate or across candidates
+  if (req.includes("/")) {
+    const parts = req
+      .split("/")
+      .map((p) => p.trim())
+      .filter(Boolean)
+      .map(normalizeForCompare);
+    if (parts.length === 0) return false;
+    // every part must be found in at least one candidate (not necessarily same)
+    return parts.every((part) =>
+      normalizedRowVals.some((rv) => rv === part || rv.includes(part))
+    );
   }
-  return false;
+
+  // single token: match if any candidate matches exactly or contains token
+  return normalizedRowVals.some((rv) => rv === req || rv.includes(req));
 }
 
 /* ------------------ Preview helpers ------------------ */
@@ -618,10 +641,8 @@ function parseDates(q) {
   const format = (rawFormat || "xlsx").toLowerCase();
 
   const rawStatus = coerceToString(q.status, null);
-  const statusCandidate =
-    rawStatus && String(rawStatus).trim().toLowerCase() === "all"
-      ? null
-      : rawStatus;
+  // if raw is "all" -> treated as null below by normalizeStatusForQuery
+  const statusCandidate = rawStatus || null;
   const status = normalizeStatusForQuery(statusCandidate);
 
   const startDate = coerceToString(q.startDate, null);
@@ -678,7 +699,7 @@ module.exports = {
   // filtering
   applyEmployeeAndDepartmentFilters,
 
-  // status matcher
+  // status matcher (compat)
   normalizeForCompare,
   statusMatches,
 };

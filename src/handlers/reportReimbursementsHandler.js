@@ -12,14 +12,131 @@ const {
   sendPreviewResponse,
 } = require("../services/reportFilters");
 
+const db = require("../config");
+
 /**
- * Helper: build meta object from req.query and optionally resolve ids to names.
- * Returns { status?, department?, employeeName? }
+ * dbExec - supports both promise-style and callback-style mysql clients.
+ * - Sanitizes params (undefined -> null).
+ * - Prefers db.query (promise or callback) and falls back to db.execute.
+ * Returns [rows, fields] or throws.
  */
+async function dbExec(sql, params = []) {
+  try {
+    if (!Array.isArray(params)) params = [params];
+    params = params.map((p) => (typeof p === "undefined" ? null : p));
+
+    if (db && typeof db.query === "function") {
+      const maybePromise = db.query(sql, params);
+      if (maybePromise && typeof maybePromise.then === "function") {
+        const result = await maybePromise;
+        if (Array.isArray(result)) return result;
+        return [result, null];
+      } else {
+        return await new Promise((resolve, reject) => {
+          db.query(sql, params, (err, rows, fields) => {
+            if (err) return reject(err);
+            resolve([rows, fields]);
+          });
+        });
+      }
+    }
+
+    if (db && typeof db.execute === "function") {
+      const maybePromise = db.execute(sql, params);
+      if (maybePromise && typeof maybePromise.then === "function") {
+        const result = await maybePromise;
+        if (Array.isArray(result)) return result;
+        return [result, null];
+      } else {
+        return await new Promise((resolve, reject) => {
+          db.execute(sql, params, (err, rows, fields) => {
+            if (err) return reject(err);
+            resolve([rows, fields]);
+          });
+        });
+      }
+    }
+
+    throw new Error("DB client has no execute/query method");
+  } catch (e) {
+    console.error(
+      "[reportReimbursementsHandler][dbExec] error:",
+      e && (e.stack || e.message)
+    );
+    throw e;
+  }
+}
+
+function findEmployeeIdInRequest(req) {
+  const safe = (v) =>
+    v === undefined || v === null ? null : String(v).trim() || null;
+  const headers = [
+    "x-employee-id",
+    "x-employeeid",
+    "x-emp-id",
+    "x-user-id",
+    "x-user",
+  ];
+  for (const h of headers) {
+    const v = safe(req.headers && req.headers[h]);
+    if (v) return v;
+  }
+  const r1 = safe(
+    req.employeeId ?? req.employee_id ?? req.userId ?? req.user_id
+  );
+  if (r1) return r1;
+  const user = req.user || req.authUser || req.auth || req.session?.user;
+  if (user && typeof user === "object") {
+    const cand =
+      safe(user.employee_id) ||
+      safe(user.employeeId) ||
+      safe(user.id) ||
+      safe(user.user_id) ||
+      safe(user.email);
+    if (cand) return cand;
+  }
+  const auth = safe(req.headers && req.headers.authorization);
+  if (auth && auth.toLowerCase().startsWith("bearer ")) {
+    const token = auth.slice(7).trim();
+    try {
+      if (token.split(".").length === 3) {
+        const payload = JSON.parse(
+          Buffer.from(token.split(".")[1], "base64").toString("utf8")
+        );
+        const cand =
+          safe(payload.employee_id) ||
+          safe(payload.employeeId) ||
+          safe(payload.sub) ||
+          safe(payload.id);
+        if (cand) return cand;
+      }
+    } catch (e) {}
+  }
+  const qCandidate =
+    safe(req.query && (req.query.employee_id || req.query.employeeId)) ||
+    safe(req.body && (req.body.employee_id || req.body.employeeId));
+  if (qCandidate) return qCandidate;
+  return null;
+}
+
+async function lookupDeptForEmployee(employeeId) {
+  try {
+    if (!employeeId) return null;
+    const sql = `SELECT department_id FROM employee_professional WHERE employee_id = ? LIMIT 1`;
+    const [rows] = await dbExec(sql, [employeeId]);
+    if (Array.isArray(rows) && rows[0] && rows[0].department_id != null)
+      return String(rows[0].department_id);
+  } catch (e) {
+    console.warn(
+      "[reportReimbursementsHandler] lookupDeptForEmployee failed:",
+      e && e.message
+    );
+  }
+  return null;
+}
+
 async function buildMetaFromReqQuery(query = {}) {
   const meta = {};
-
-  // Normalize status (use reportFilters helper to canonicalize if possible)
   const rawStatus =
     coerceToString(query.status, null) ||
     coerceToString(query.approval_status, null);
@@ -31,12 +148,10 @@ async function buildMetaFromReqQuery(query = {}) {
     }
   }
 
-  // Employee: prefer explicit employee_name then try resolve employee_id -> name
   const typedEmployeeName =
     coerceToString(query.employee_name, null) ||
     coerceToString(query.employeeName, null) ||
     coerceToString(query.employee, null);
-
   if (typedEmployeeName) {
     meta.employeeName = typedEmployeeName;
   } else {
@@ -44,52 +159,40 @@ async function buildMetaFromReqQuery(query = {}) {
       coerceToString(query.employee_id, null) ||
       coerceToString(query.employeeId, null);
     if (empId) {
-      // Try resolving via reportService.searchEmployees/getEmployeeRows if available
       try {
         if (typeof reportService.searchEmployees === "function") {
-          // searchEmployees may accept id or partial name — adapt if necessary
           const found = await reportService.searchEmployees(empId);
-          if (Array.isArray(found) && found[0]) {
-            meta.employeeName =
-              found[0].employee_name ||
-              `${(found[0].first_name || "").trim()} ${(
-                found[0].last_name || ""
-              ).trim()}`.trim() ||
-              empId;
-          } else {
-            meta.employeeName = empId;
-          }
+          meta.employeeName =
+            Array.isArray(found) && found[0]
+              ? found[0].employee_name ||
+                `${(found[0].first_name || "").trim()} ${(
+                  found[0].last_name || ""
+                ).trim()}`.trim() ||
+                empId
+              : empId;
         } else if (typeof reportService.getEmployeeRows === "function") {
           const er = await reportService.getEmployeeRows(empId);
-          if (Array.isArray(er) && er[0]) {
-            meta.employeeName =
-              er[0].employee_name ||
-              `${(er[0].first_name || "").trim()} ${(
-                er[0].last_name || ""
-              ).trim()}`.trim() ||
-              empId;
-          } else {
-            meta.employeeName = empId;
-          }
-        } else {
-          meta.employeeName = empId;
-        }
+          meta.employeeName =
+            Array.isArray(er) && er[0]
+              ? er[0].employee_name ||
+                `${(er[0].first_name || "").trim()} ${(
+                  er[0].last_name || ""
+                ).trim()}`.trim() ||
+                empId
+              : empId;
+        } else meta.employeeName = empId;
       } catch (e) {
-        // resolution failed - fall back to id
         meta.employeeName = empId;
       }
     }
   }
 
-  // Department: prefer explicit department_name then try resolve department_id -> name
-  const typedDeptName =
+  const typedDept =
     coerceToString(query.department_name, null) ||
     coerceToString(query.departmentName, null) ||
     coerceToString(query.department, null);
-
-  if (typedDeptName) {
-    meta.department = typedDeptName;
-  } else {
+  if (typedDept) meta.department = typedDept;
+  else {
     const deptId =
       coerceToString(query.department_id, null) ||
       coerceToString(query.departmentId, null);
@@ -102,29 +205,14 @@ async function buildMetaFromReqQuery(query = {}) {
               (d) =>
                 d &&
                 (String(d.id) === String(deptId) ||
-                  String(
-                    d.department_id || d.departmentId || d.department_id || d.id
-                  ) === String(deptId) ||
-                  String(d.name || d.department_name || d.department) ===
-                    String(deptId))
+                  String(d.department_id || d.id) === String(deptId))
             );
             meta.department =
               (found &&
                 (found.name || found.department_name || found.department)) ||
               deptId;
-          } else {
-            meta.department = deptId;
-          }
-        } else if (
-          typeof reportService.getDepartments === "undefined" &&
-          typeof reportService.getDepartments === "function"
-        ) {
-          // defensive - unlikely to happen, fallback to id
-          meta.department = deptId;
-        } else {
-          // no departments helper - fallback to id
-          meta.department = deptId;
-        }
+          } else meta.department = deptId;
+        } else meta.department = deptId;
       } catch (e) {
         meta.department = deptId;
       }
@@ -139,20 +227,38 @@ async function downloadReimbursementsReport(req, res) {
     "[reportReimbursementsHandler] downloadReimbursementsReport called - query:",
     req.query
   );
+  const startTs = Date.now();
   try {
     const parsed = parseDates(req.query || {});
     let { startDate, endDate, status, format, fields } = parsed;
 
-    const employeeId = coerceToString(req.query.employee_id, null);
-    const departmentId = coerceToString(req.query.department_id, null);
+    let employeeId = coerceToString(req.query.employee_id, null);
+    let departmentId = coerceToString(req.query.department_id, null);
+
+    // derive department if needed from requester
+    const requesterEmpId = findEmployeeIdInRequest(req);
+    if (!departmentId && requesterEmpId) {
+      const derived = await lookupDeptForEmployee(requesterEmpId);
+      if (derived) {
+        departmentId = derived;
+        console.debug(
+          "[reportReimbursementsHandler] derived department for requester:",
+          departmentId
+        );
+      }
+    }
 
     const ensured = ensureTwoMonthWindow(startDate, endDate);
     if (!ensured.ok) return res.status(400).json({ message: ensured.message });
     startDate = ensured.startDate;
     endDate = ensured.endDate;
 
-    if (typeof reportService.getReimbursementRows !== "function")
+    if (typeof reportService.getReimbursementRows !== "function") {
+      console.error(
+        "[reportReimbursementsHandler] reportService.getReimbursementRows missing"
+      );
       return res.status(500).json({ message: "Server misconfiguration" });
+    }
 
     const rawReimbursements = await reportService.getReimbursementRows(
       startDate,
@@ -162,7 +268,38 @@ async function downloadReimbursementsReport(req, res) {
       employeeId,
       departmentId
     );
-    const rows = Array.isArray(rawReimbursements) ? rawReimbursements : [];
+    let rows = Array.isArray(rawReimbursements) ? rawReimbursements : [];
+
+    // If service returns broad rows but scoping required, filter locally
+    if ((employeeId || departmentId || requesterEmpId) && rows.length > 0) {
+      rows = rows.filter((r) => {
+        if (
+          employeeId &&
+          String(r.employee_id).trim() !== String(employeeId).trim()
+        )
+          return false;
+        if (departmentId) {
+          const rowDept =
+            r.department_id ??
+            r.pr_department_id ??
+            r.department_id ??
+            r.departmentName ??
+            r.department_name ??
+            "";
+          if (!rowDept) return false;
+          if (
+            String(rowDept) !== String(departmentId) &&
+            String(rowDept).toLowerCase() !== String(departmentId).toLowerCase()
+          )
+            return false;
+        }
+        return true;
+      });
+      console.debug(
+        "[reportReimbursementsHandler] rows after local scoping:",
+        rows.length
+      );
+    }
 
     if (isPreviewRequest(req)) {
       const msg =
@@ -172,13 +309,13 @@ async function downloadReimbursementsReport(req, res) {
       return sendPreviewResponse(req, res, rows, msg);
     }
 
-    if (!Array.isArray(rawReimbursements))
+    if (!Array.isArray(rows))
       return res
         .status(500)
         .json({ message: "Failed to fetch reimbursement data" });
 
     const statusCandidate = normalizeStatusForQuery(status);
-    const filtered = rawReimbursements.filter((r) =>
+    const filtered = rows.filter((r) =>
       statusMatches(statusCandidate, [
         r.status,
         r.payment_status,
@@ -192,10 +329,7 @@ async function downloadReimbursementsReport(req, res) {
         .json({ message: "No reimbursement data for selected date range" });
 
     const reimbursementsToExport = pickFields(filtered, fields);
-
-    // Build meta and ensure we pass it to renderers (so header shows filters)
     const meta = await buildMetaFromReqQuery(req.query || {});
-    // Debug log so you can verify meta contents in server logs
     console.debug("[reportReimbursementsHandler] render meta:", meta);
 
     if (format === "xlsx") {
@@ -203,7 +337,6 @@ async function downloadReimbursementsReport(req, res) {
         return res
           .status(500)
           .json({ message: "Excel renderer not available" });
-
       const buf = await reportService.renderExcelBuffer(
         reimbursementsToExport,
         null
@@ -222,12 +355,10 @@ async function downloadReimbursementsReport(req, res) {
     } else if (format === "pdf") {
       if (typeof reportService.renderPdfBuffer !== "function")
         return res.status(500).json({ message: "PDF renderer not available" });
-
-      // IMPORTANT: pass meta explicitly as third parameter (renderPdfBuffer(title, rows, options))
       const pdfBuf = await reportService.renderPdfBuffer(
         "Reimbursements Report",
         reimbursementsToExport,
-        { meta } // <<-- pass normalized meta here
+        { meta }
       );
       const filename = safeFilename("reimbursements_report", "pdf");
       res.setHeader("Content-Type", "application/pdf");
@@ -237,15 +368,19 @@ async function downloadReimbursementsReport(req, res) {
       );
       res.setHeader("Content-Length", pdfBuf.length);
       return res.send(pdfBuf);
-    } else {
-      return res.status(400).json({ message: "Invalid format" });
-    }
+    } else return res.status(400).json({ message: "Invalid format" });
   } catch (err) {
     console.error(
       "[reportReimbursementsHandler] Error rendering Reimbursements report:",
       err && (err.stack || err)
     );
     return res.status(500).json({ message: "Internal Server Error" });
+  } finally {
+    console.debug(
+      "[reportReimbursementsHandler] finished in",
+      Date.now() - startTs,
+      "ms"
+    );
   }
 }
 

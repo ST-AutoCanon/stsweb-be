@@ -1,204 +1,631 @@
 // src/handlers/reportLeavesHandler.js
 const reportService = require("../services/reportIndex");
+const { coerceToString } = require("../services/reportUtils");
 const {
-  coerceToString,
-  isPreviewRequest,
-  sendPreviewResponse,
-  safeFilename,
   parseDates,
   ensureTwoMonthWindow,
-  pickFields,
-  normalizeStatusForQuery,
-  statusMatches,
+  isPreviewRequest,
+  sendPreviewResponse,
 } = require("../services/reportFilters");
+const db = require("../config");
 
-async function buildMetaFromReqQuery(query = {}) {
-  const meta = {};
-  const rawStatus =
-    coerceToString(query.status, null) ||
-    coerceToString(query.approval_status, null);
-  if (rawStatus) {
+/* helper to run raw exec returning [rows, fields] using db.execute/query */
+async function dbExecRaw(sql, params = []) {
+  if (!Array.isArray(params)) params = [params];
+  if (db && typeof db.execute === "function") {
+    return await db.execute(sql, params); // returns [rows, fields]
+  }
+  if (db && typeof db.query === "function") {
+    return await db.query(sql, params); // returns [rows, fields]
+  }
+  return new Promise((resolve, reject) => {
+    if (db && typeof db.query === "function") {
+      db.query(sql, params, (err, rows, fields) => {
+        if (err) return reject(err);
+        resolve([rows, fields]);
+      });
+    } else reject(new Error("DB client missing execute/query"));
+  });
+}
+
+/* grab employee id from request headers/body (robust) */
+function tryParseCandidate(raw) {
+  if (raw === null || typeof raw === "undefined") return null;
+  if (typeof raw === "object") {
     try {
-      meta.status =
-        typeof reportService.normalizeStatusForQuery === "function"
-          ? reportService.normalizeStatusForQuery(rawStatus) || rawStatus
-          : rawStatus;
+      return (
+        coerceToString(raw.employee_id, null) ||
+        coerceToString(raw.employeeId, null) ||
+        coerceToString(raw.id, null) ||
+        coerceToString(raw.user_id, null) ||
+        coerceToString(raw.email, null) ||
+        null
+      );
+    } catch (e) {}
+  }
+  const s = String(raw).trim();
+  if (!s) return null;
+  if (s.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(s);
+      if (parsed) {
+        return (
+          coerceToString(parsed.employee_id, null) ||
+          coerceToString(parsed.employeeId, null) ||
+          coerceToString(parsed.id, null) ||
+          coerceToString(parsed.user_id, null) ||
+          coerceToString(parsed.email, null) ||
+          null
+        );
+      }
+    } catch (e) {}
+  }
+  return s;
+}
+function findEmployeeIdInRequest(req) {
+  try {
+    const headerCandidates = [
+      "x-employee-id",
+      "x-employeeid",
+      "x-emp-id",
+      "x-user-id",
+      "x-user",
+    ];
+    for (const h of headerCandidates) {
+      const raw = req.headers && req.headers[h];
+      const candidate = tryParseCandidate(raw);
+      if (candidate) return candidate;
+    }
+    const r1 = req.employeeId ?? req.employee_id ?? req.userId ?? req.user_id;
+    const cand1 = tryParseCandidate(r1);
+    if (cand1) return cand1;
+    const u = req.user || req.authUser || req.session?.user;
+    if (u) {
+      const cand =
+        coerceToString(u.employee_id, null) ||
+        coerceToString(u.employeeId, null) ||
+        coerceToString(u.id, null) ||
+        coerceToString(u.user_id, null) ||
+        coerceToString(u.email, null);
+      if (cand) return cand;
+    }
+    const qCandidate =
+      tryParseCandidate(
+        req.query &&
+          (req.query.employee_id || req.query.employeeId || req.query.employee)
+      ) ||
+      tryParseCandidate(
+        req.body &&
+          (req.body.employee_id || req.body.employeeId || req.body.employee)
+      );
+    if (qCandidate) return qCandidate;
+  } catch (e) {}
+  return null;
+}
+
+/* find departments managed by managerEmpId (defensive) */
+async function findDepartmentsManagedBy(managerEmpId) {
+  if (!managerEmpId) return [];
+  const out = [];
+
+  // 1) attempt SHOW COLUMNS (robustly)
+  try {
+    const [cols] = await dbExecRaw("SHOW COLUMNS FROM departments");
+    const colNames = Array.isArray(cols)
+      ? cols
+          .map((c) => {
+            return String(
+              c.Field || c.field || c.COLUMN_NAME || c.column_name || ""
+            ).trim();
+          })
+          .filter(Boolean)
+      : [];
+
+    if (colNames.includes("manager_employee_id")) {
+      try {
+        const [rows] = await dbExecRaw(
+          "SELECT id FROM departments WHERE manager_employee_id = ?",
+          [managerEmpId]
+        );
+        if (Array.isArray(rows)) {
+          for (const r of rows) if (r && r.id != null) out.push(String(r.id));
+          if (out.length) return Array.from(new Set(out));
+        }
+      } catch (e) {
+        console.warn(
+          "[reportLeavesHandler] query on manager_employee_id failed:",
+          e && e.message
+        );
+      }
+    }
+
+    if (colNames.includes("manager_id")) {
+      try {
+        const [rows] = await dbExecRaw(
+          "SELECT id FROM departments WHERE manager_id = ?",
+          [managerEmpId]
+        );
+        if (Array.isArray(rows)) {
+          for (const r of rows) if (r && r.id != null) out.push(String(r.id));
+          if (out.length) return Array.from(new Set(out));
+        }
+      } catch (e) {
+        console.warn(
+          "[reportLeavesHandler] query on manager_id failed:",
+          e && e.message
+        );
+      }
+    }
+  } catch (e) {
+    console.warn("[reportLeavesHandler] SHOW COLUMNS failed:", e && e.message);
+  }
+
+  // 2) fallback: check employee_professional supervisor mapping (common)
+  try {
+    const [rows] = await dbExecRaw(
+      "SELECT DISTINCT department_id AS id FROM employee_professional WHERE supervisor_id = ? AND department_id IS NOT NULL",
+      [managerEmpId]
+    );
+    if (Array.isArray(rows) && rows.length) {
+      for (const r of rows) {
+        const id = r && (r.id ?? r.department_id);
+        if (id != null) out.push(String(id));
+      }
+    }
+  } catch (e) {
+    console.warn(
+      "[reportLeavesHandler] fallback department query failed:",
+      e && e.message
+    );
+  }
+
+  return Array.from(new Set(out));
+}
+
+/* normalize candidate to plain string (handles object/json/id/name) */
+function normalizeToPlainString(candidate, kind = "generic") {
+  if (candidate === null || typeof candidate === "undefined") return null;
+  if (typeof candidate === "object") {
+    const o = candidate;
+    if (o.employee_name || o.name || o.first_name || o.last_name) {
+      const name =
+        o.employee_name ||
+        `${(o.first_name || "").trim()} ${(o.last_name || "").trim()}`.trim() ||
+        o.name ||
+        null;
+      const id = o.employee_id || o.employeeId || o.id || null;
+      return id && name ? `${name} (${id})` : name || String(id || "");
+    }
+    if (o.department_name || o.name) {
+      return o.department_name || o.name || (o.id ? String(o.id) : null);
+    }
+    try {
+      return JSON.stringify(o);
     } catch (e) {
-      meta.status = rawStatus;
+      return String(o);
     }
   }
+  if (typeof candidate === "string" && candidate.trim().startsWith("{")) {
+    try {
+      const parsed = JSON.parse(candidate);
+      return normalizeToPlainString(parsed, kind);
+    } catch (e) {
+      // continue
+    }
+  }
+  return String(candidate);
+}
 
-  const typedEmployeeName =
-    coerceToString(query.employee_name, null) ||
-    coerceToString(query.employeeName, null) ||
-    coerceToString(query.employee, null);
-  if (typedEmployeeName) {
-    meta.employeeName = typedEmployeeName;
-  } else {
-    const empId =
-      coerceToString(query.employee_id, null) ||
-      coerceToString(query.employeeId, null);
-    if (empId) {
-      try {
-        if (typeof reportService.searchEmployees === "function") {
-          const found = await reportService.searchEmployees(empId);
-          meta.employeeName =
-            Array.isArray(found) && found[0]
-              ? found[0].employee_name ||
-                `${(found[0].first_name || "").trim()} ${(
-                  found[0].last_name || ""
-                ).trim()}`.trim() ||
-                empId
-              : empId;
-        } else if (typeof reportService.getEmployeeRows === "function") {
-          const er = await reportService.getEmployeeRows(empId);
-          meta.employeeName =
-            Array.isArray(er) && er[0]
-              ? er[0].employee_name ||
-                `${(er[0].first_name || "").trim()} ${(
-                  er[0].last_name || ""
-                ).trim()}`.trim() ||
-                empId
-              : empId;
-        } else meta.employeeName = empId;
-      } catch (e) {
-        meta.employeeName = empId;
+/* simple meta builder that produces only human-readable strings */
+async function buildMetaFromReqQuery(query = {}) {
+  const meta = {
+    filters: [],
+    status: null,
+    employee: null,
+    department: null,
+  };
+
+  try {
+    const startDate =
+      coerceToString(query.startDate, null) ||
+      coerceToString(query.start_date, null) ||
+      coerceToString(query.from, null) ||
+      coerceToString(query.fromDate, null);
+    const endDate =
+      coerceToString(query.endDate, null) ||
+      coerceToString(query.end_date, null) ||
+      coerceToString(query.to, null) ||
+      coerceToString(query.toDate, null);
+    if (startDate || endDate) {
+      if (startDate && endDate)
+        meta.filters.push(`Date: ${startDate} → ${endDate}`);
+      else if (startDate) meta.filters.push(`From: ${startDate}`);
+      else meta.filters.push(`To: ${endDate}`);
+    }
+
+    const rawStatus =
+      coerceToString(query.status, null) ||
+      coerceToString(query.approval_status, null) ||
+      coerceToString(query.state, null);
+    if (rawStatus) {
+      meta.status = normalizeToPlainString(rawStatus, "status");
+      meta.filters.push(`Status: ${meta.status}`);
+    }
+
+    let empCandidate =
+      query.employee_id ??
+      query.employeeId ??
+      query.employee ??
+      query.employee_name ??
+      query.employeeName ??
+      null;
+    if (typeof empCandidate === "string" && empCandidate.trim() === "")
+      empCandidate = null;
+
+    if (empCandidate) {
+      const idCandidate = tryParseCandidate(empCandidate);
+      if (idCandidate) {
+        try {
+          const [rows] = await dbExecRaw(
+            "SELECT employee_id, first_name, last_name, email FROM employees WHERE employee_id = ? LIMIT 1",
+            [idCandidate]
+          );
+          const er = Array.isArray(rows) && rows[0] ? rows[0] : null;
+          if (er) {
+            const name =
+              `${(er.first_name || "").trim()} ${(
+                er.last_name || ""
+              ).trim()}`.trim() ||
+              er.email ||
+              er.employee_id;
+            meta.employee = `${name} (${er.employee_id})`;
+            meta.filters.push(`Employee: ${meta.employee}`);
+          } else {
+            meta.employee = normalizeToPlainString(empCandidate, "employee");
+            meta.filters.push(`Employee: ${meta.employee}`);
+          }
+        } catch (e) {
+          meta.employee = normalizeToPlainString(empCandidate, "employee");
+          meta.filters.push(`Employee: ${meta.employee}`);
+        }
+      } else {
+        meta.employee = normalizeToPlainString(empCandidate, "employee");
+        meta.filters.push(`Employee: ${meta.employee}`);
       }
     }
-  }
 
-  const typedDept =
-    coerceToString(query.department_name, null) ||
-    coerceToString(query.departmentName, null) ||
-    coerceToString(query.department, null);
-  if (typedDept) {
-    meta.department = typedDept;
-  } else {
-    const deptId =
-      coerceToString(query.department_id, null) ||
-      coerceToString(query.departmentId, null);
-    if (deptId) {
-      try {
-        if (typeof reportService.getDepartments === "function") {
-          const depts = await reportService.getDepartments();
-          if (Array.isArray(depts)) {
-            const found = depts.find(
-              (d) =>
-                d &&
-                (String(d.id) === String(deptId) ||
-                  String(d.department_id || d.id) === String(deptId))
+    let deptCandidate =
+      query.department_id ??
+      query.departmentId ??
+      query.department ??
+      query.department_name ??
+      query.departmentName ??
+      null;
+    if (typeof deptCandidate === "string" && deptCandidate.trim() === "")
+      deptCandidate = null;
+
+    if (deptCandidate) {
+      const deptIdStr = coerceToString(deptCandidate, null);
+      if (deptIdStr && /^\d+$/.test(String(deptIdStr))) {
+        try {
+          const [drows] = await dbExecRaw(
+            "SELECT id, name FROM departments WHERE id = ? LIMIT 1",
+            [deptIdStr]
+          );
+          const dr = Array.isArray(drows) && drows[0] ? drows[0] : null;
+          if (dr) {
+            meta.department = `${dr.name}`;
+            meta.filters.push(`Department: ${meta.department}`);
+          } else {
+            meta.department = normalizeToPlainString(
+              deptCandidate,
+              "department"
             );
-            meta.department =
-              (found &&
-                (found.name || found.department_name || found.department)) ||
-              deptId;
-          } else meta.department = deptId;
-        } else meta.department = deptId;
-      } catch (e) {
-        meta.department = deptId;
+            meta.filters.push(`Department: ${meta.department}`);
+          }
+        } catch (e) {
+          meta.department = normalizeToPlainString(deptCandidate, "department");
+          meta.filters.push(`Department: ${meta.department}`);
+        }
+      } else {
+        meta.department = normalizeToPlainString(deptCandidate, "department");
+        meta.filters.push(`Department: ${meta.department}`);
       }
     }
-  }
 
+    if (meta.filters.length === 0) meta.filters.push("No explicit filters");
+  } catch (e) {
+    console.warn(
+      "[reportLeavesHandler] buildMetaFromReqQuery failed:",
+      e && e.message
+    );
+    if (meta.filters.length === 0)
+      meta.filters.push("No explicit filters (meta build failed)");
+  }
   return meta;
 }
 
+/* helper to detect explicit manager-scope intent */
+function isExplicitManagerScope(req) {
+  try {
+    const header = String(
+      (req.headers && (req.headers["x-force-manager-scope"] || "")) || ""
+    ).toLowerCase();
+    const q1 = String(
+      (req.query &&
+        (req.query.forceManager ||
+          req.query.manager_scope ||
+          req.query.managerScope ||
+          "")) ||
+        ""
+    ).toLowerCase();
+    if (header === "1" || header === "true") return true;
+    if (q1 === "1" || q1 === "true") return true;
+    const u = req.user || req.authUser || req.session?.user;
+    if (u && u.role && /manager|supervisor|lead/i.test(String(u.role)))
+      return true;
+  } catch (e) {}
+  return false;
+}
+
+/* main handler */
 async function downloadLeavesReport(req, res) {
   console.log(
     "[reportLeavesHandler] downloadLeavesReport called - query:",
-    req.query
+    req.query || {}
   );
   try {
     const parsed = parseDates(req.query || {});
     let { startDate, endDate, status, format, fields } = parsed;
-    const employeeId = coerceToString(req.query.employee_id, null);
-    const departmentId = coerceToString(req.query.department_id, null);
+
+    const employeeIdQuery = coerceToString(
+      req.query.employee_id ?? req.query.employeeId ?? req.query.employee,
+      null
+    );
+    let departmentIdQuery = coerceToString(
+      req.query.department_id ?? req.query.departmentId ?? req.query.department,
+      null
+    );
+
+    const requesterEmpId = findEmployeeIdInRequest(req);
+    if (requesterEmpId)
+      console.debug(
+        "[reportLeavesHandler] requester employee id discovered:",
+        requesterEmpId
+      );
+
+    // admin detection (only when req.user exists)
+    let isAdmin = false;
+    try {
+      const u = req.user || req.authUser || req.session?.user;
+      if (u)
+        isAdmin = !!(
+          u.is_admin ||
+          u.isAdmin ||
+          u.role === "admin" ||
+          (Array.isArray(u.roles) && u.roles.includes("admin"))
+        );
+    } catch (e) {
+      isAdmin = false;
+    }
+
+    // derive department if not provided
+    let managerEmpId = null;
+    if (!departmentIdQuery && requesterEmpId) {
+      try {
+        const [r] = await dbExecRaw(
+          "SELECT department_id FROM employee_professional WHERE employee_id = ? LIMIT 1",
+          [requesterEmpId]
+        );
+        if (Array.isArray(r) && r[0] && r[0].department_id != null) {
+          departmentIdQuery = String(r[0].department_id);
+          console.debug(
+            "[reportLeavesHandler] derived department for requester:",
+            departmentIdQuery
+          );
+        } else {
+          if (
+            !isAdmin &&
+            !isPreviewRequest(req) &&
+            isExplicitManagerScope(req)
+          ) {
+            managerEmpId = requesterEmpId;
+            console.debug(
+              "[reportLeavesHandler] explicit manager scoping enabled via flag/role:",
+              managerEmpId
+            );
+          } else {
+            console.debug(
+              "[reportLeavesHandler] skipping manager scoping for requester (no explicit scope or admin/preview)"
+            );
+          }
+        }
+      } catch (e) {
+        if (!isAdmin && !isPreviewRequest(req) && isExplicitManagerScope(req)) {
+          managerEmpId = requesterEmpId;
+          console.debug(
+            "[reportLeavesHandler] fallback: explicit manager scoping enabled via flag/role:",
+            managerEmpId
+          );
+        } else {
+          console.debug(
+            "[reportLeavesHandler] skipping manager scoping for requester (derivation failed)"
+          );
+        }
+      }
+    }
 
     const ensured = ensureTwoMonthWindow(startDate, endDate);
     if (!ensured.ok) return res.status(400).json({ message: ensured.message });
     startDate = ensured.startDate;
     endDate = ensured.endDate;
 
-    if (typeof reportService.getLeaveRows !== "function")
-      return res.status(500).json({ message: "Server misconfiguration" });
+    let rows = [];
 
-    const rawLeaves = await reportService.getLeaveRows(
-      startDate,
-      endDate,
-      status,
-      null,
-      employeeId,
-      departmentId
-    );
-    if (!Array.isArray(rawLeaves))
-      return res.status(500).json({ message: "Failed to fetch leave data" });
+    if (employeeIdQuery || departmentIdQuery) {
+      // explicit scoping -> call service directly
+      rows = await reportService.getLeaveRows(
+        startDate,
+        endDate,
+        status,
+        fields,
+        employeeIdQuery,
+        departmentIdQuery
+      );
+      rows = Array.isArray(rows) ? rows : [];
+    } else if (managerEmpId) {
+      // manager scoping
+      let managedDeptIds = [];
+      try {
+        managedDeptIds = await findDepartmentsManagedBy(managerEmpId);
+      } catch (e) {
+        console.warn(
+          "[reportLeavesHandler] findDepartmentsManagedBy attempt failed:",
+          e && e.message
+        );
+      }
 
-    const statusCandidate = normalizeStatusForQuery(status);
-    const filtered = rawLeaves.filter((l) =>
-      statusMatches(statusCandidate, [l.status])
-    );
+      if (managedDeptIds.length > 0) {
+        const merged = [];
+        for (const d of managedDeptIds) {
+          try {
+            const part = await reportService.getLeaveRows(
+              startDate,
+              endDate,
+              status,
+              fields,
+              null,
+              d
+            );
+            if (Array.isArray(part) && part.length) merged.push(...part);
+          } catch (e) {
+            console.warn(
+              "[reportLeavesHandler] per-dept getLeaveRows failed for dept",
+              d,
+              e && e.message
+            );
+          }
+        }
+        const map = new Map();
+        for (const p of merged)
+          if (p && p.leave_id) map.set(String(p.leave_id), p);
+        rows = Array.from(map.values());
+      } else {
+        // fallback: fetch all and filter by supervisor mapping
+        try {
+          const all = await reportService.getLeaveRows(
+            startDate,
+            endDate,
+            status,
+            fields
+          );
+          const allArr = Array.isArray(all) ? all : [];
+          const empIds = Array.from(
+            new Set(allArr.map((x) => x.employee_id).filter(Boolean))
+          );
+          if (empIds.length) {
+            const placeholders = empIds.map(() => "?").join(",");
+            const [profRows] = await dbExecRaw(
+              `SELECT employee_id, supervisor_id FROM employee_professional WHERE employee_id IN (${placeholders})`,
+              empIds
+            );
+            const supMap = {};
+            for (const pr of Array.isArray(profRows) ? profRows : []) {
+              if (pr && pr.employee_id)
+                supMap[String(pr.employee_id)] = pr.supervisor_id;
+            }
+            rows = allArr.filter((r) => {
+              const id = r.employee_id ? String(r.employee_id) : null;
+              const sup = id ? supMap[id] : null;
+              return sup != null && String(sup) === String(managerEmpId);
+            });
+          } else rows = [];
+        } catch (e) {
+          console.error(
+            "[reportLeavesHandler] fallback JS filtering failed:",
+            e && e.message
+          );
+          rows = [];
+        }
+      }
+    } else {
+      // no scoping - full fetch
+      rows = await reportService.getLeaveRows(
+        startDate,
+        endDate,
+        status,
+        fields
+      );
+      rows = Array.isArray(rows) ? rows : [];
+    }
 
-    // Preview handling — always 200 JSON, include friendly message if no rows
+    // Preview
     if (isPreviewRequest(req)) {
-      const rows = Array.isArray(filtered) ? filtered : [];
+      console.debug(
+        "[reportLeavesHandler] preview rows:",
+        rows.length,
+        "status param:",
+        status
+      );
       const msg =
         rows.length === 0 ? "No leave data for selected date range" : undefined;
       return sendPreviewResponse(req, res, rows, msg);
     }
 
-    // Non-preview downloads: preserve existing behavior (404 when empty)
-    if (filtered.length === 0)
+    if (!rows || rows.length === 0) {
       return res
         .status(404)
         .json({ message: "No leave data for selected date range" });
+    }
 
-    const leavesToExport = pickFields(filtered, fields);
-
-    // build meta
+    // Build meta (so PDF header shows applied filters, employee/department names)
     const meta = await buildMetaFromReqQuery(req.query || {});
-    console.debug("[reportLeavesHandler] render meta:", meta);
+    console.debug("[reportLeavesHandler] PDF meta:", meta);
 
-    if (format === "xlsx") {
+    // Output format handling (pdf/xlsx)
+    if (format === "pdf") {
+      if (typeof reportService.renderPdfBuffer !== "function")
+        return res.status(500).json({ message: "PDF renderer not available" });
+      const pdfBuf = await reportService.renderPdfBuffer(
+        "Leaves Report",
+        rows,
+        { meta }
+      );
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="leaves_report.pdf"`
+      );
+      res.setHeader("Content-Length", pdfBuf.length);
+      return res.send(pdfBuf);
+    } else if (format === "xlsx") {
       if (typeof reportService.renderExcelBuffer !== "function")
         return res
           .status(500)
           .json({ message: "Excel renderer not available" });
-      const buf = await reportService.renderExcelBuffer(leavesToExport, null);
-      const filename = safeFilename("leaves_report", "xlsx");
+      const buf = await reportService.renderExcelBuffer(rows, null);
       res.setHeader(
         "Content-Type",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
       );
       res.setHeader(
         "Content-Disposition",
-        `attachment; filename="${filename}"`
+        `attachment; filename="leaves_report.xlsx"`
       );
       res.setHeader("Content-Length", buf.length);
       return res.send(buf);
-    } else if (format === "pdf") {
-      if (typeof reportService.renderPdfBuffer !== "function")
-        return res.status(500).json({ message: "PDF renderer not available" });
-      const pdfBuf = await reportService.renderPdfBuffer(
-        "Leaves Report",
-        leavesToExport,
-        { meta }
-      );
-      const filename = safeFilename("leaves_report", "pdf");
-      res.setHeader("Content-Type", "application/pdf");
-      res.setHeader(
-        "Content-Disposition",
-        `attachment; filename="${filename}"`
-      );
-      res.setHeader("Content-Length", pdfBuf.length);
-      return res.send(pdfBuf);
-    } else return res.status(400).json({ message: "Invalid format" });
+    } else {
+      return res.status(400).json({ message: "Invalid format" });
+    }
   } catch (err) {
     console.error(
-      "[reportLeavesHandler] Error rendering Leaves report:",
-      err && (err.stack || err)
+      "[reportLeavesHandler] Error:",
+      err && (err.stack || err.message)
     );
     return res.status(500).json({ message: "Internal Server Error" });
   }
 }
 
-module.exports = { downloadLeavesReport };
+module.exports = {
+  downloadLeavesReport,
+};

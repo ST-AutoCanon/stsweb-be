@@ -7,6 +7,17 @@
 const path = require("path");
 const fs = require("fs");
 
+let reportsService = null;
+try {
+  reportsService = require("../services/reports");
+} catch (e) {
+  console.warn(
+    "[reportsHandlerIndex] Could not require services/reports:",
+    e && e.message
+  );
+  reportsService = null;
+}
+
 /**
  * Attempts to require a module relative to this file.
  * Returns null on failure (and logs a warning).
@@ -14,11 +25,9 @@ const fs = require("fs");
  */
 function safeRequire(relPath) {
   try {
-    // resolve an absolute file path (allow providing with or without .js)
     const absCandidate = path.join(__dirname, relPath);
     let abs = null;
 
-    // Try common file variants
     const variants = [
       absCandidate,
       absCandidate + ".js",
@@ -35,20 +44,14 @@ function safeRequire(relPath) {
       throw new Error(`File not found for require: ${relPath}`);
     }
 
-    // Use the absolute path to require to avoid relative-resolve issues
+    // require using absolute path
     const mod = require(abs);
-
-    // If module exports a function directly, return it as-is (caller will handle)
     return mod;
   } catch (err) {
-    // Print full stack for debugging, but keep server running
     console.warn(
       `[reportsHandlerIndex] Could not require '${relPath}': ${err.message}`
     );
-    if (err && err.stack) {
-      // show stack at debug level so you can investigate startup requires
-      console.debug(err.stack);
-    }
+    if (err && err.stack) console.debug(err.stack);
     return null;
   }
 }
@@ -83,11 +86,9 @@ function getExport(mod, name) {
 
   // If module itself is a function and name === 'default' or module.name matches, try that
   if (typeof mod === "function") {
-    // If requested name is "default" accept the function, otherwise warn and fallback.
     if (name === "default" || name === mod.name) {
       return mod;
     }
-    // no named export available
     console.warn(
       `[reportsHandlerIndex] Module is a function but does not expose '${name}'. Using fallback.`
     );
@@ -102,8 +103,7 @@ function getExport(mod, name) {
     return mod[name];
   }
 
-  // Some modules export the handler directly on `module.exports = { downloadSomething }`
-  // but could be nested under `.default` when transpiled. Try `.default[name]` and `.default`.
+  // Try default export forms
   if (mod.default) {
     if (
       typeof mod.default === "function" &&
@@ -126,8 +126,6 @@ function getExport(mod, name) {
 }
 
 /* --------- Attempt to require each handler module --------- */
-
-// adjust these file names if your actual handler files have different names/casing
 const attendanceMod = safeRequire("./reportAttendanceHandler") || {};
 const assetsMod = safeRequire("./reportAssetsHandler") || {};
 const departmentsMod = safeRequire("./reportDepartmentsHandler") || {};
@@ -137,9 +135,108 @@ const reimbursementsMod = safeRequire("./reportReimbursementsHandler") || {};
 const tasksMod = safeRequire("./reportTasksHandler") || {};
 const vendorsMod = safeRequire("./reportVendorsHandler") || {};
 
-/* --------- Exports expected by your routes --------- */
+/* --------- Service-backed fallback handlers (when handlers are missing) --------- */
 
-module.exports = {
+/**
+ * Fallback for searchEmployees:
+ * - Accepts q, limit, department_id in query
+ * - Returns { results: [...], total: N } (or 501 if service not available)
+ */
+async function svc_searchEmployees(req, res) {
+  try {
+    console.debug(
+      "[reportsHandlerIndex] svc_searchEmployees called - query:",
+      req.query || {}
+    );
+    const q = (req.query.q || req.query.query || "").toString().trim();
+    const limitRaw = req.query.limit || req.query.limit || req.query.l || 10;
+    let limit = Number(limitRaw);
+    if (!Number.isFinite(limit) || limit <= 0) limit = 10;
+    const departmentId =
+      req.query.department_id ||
+      req.query.departmentId ||
+      req.query.dept ||
+      null;
+
+    if (
+      !reportsService ||
+      typeof reportsService.searchEmployees !== "function"
+    ) {
+      console.error(
+        "[reportsHandlerIndex] reportsService.searchEmployees not available - cannot serve searchEmployees"
+      );
+      return res.status(501).json({
+        message: "Handler 'searchEmployees' not implemented on server",
+      });
+    }
+
+    // If no query provided, be tolerant — return empty results
+    if (!q) {
+      return res.json({ results: [], total: 0 });
+    }
+
+    // reportsService.searchEmployees supports string or object style
+    const svcArg = { q, limit, departmentId };
+    const svcResult = await reportsService.searchEmployees(svcArg);
+
+    if (Array.isArray(svcResult)) {
+      return res.json({ results: svcResult, total: svcResult.length });
+    }
+    if (svcResult && typeof svcResult === "object") {
+      const results = Array.isArray(svcResult.results) ? svcResult.results : [];
+      const total = Number.isFinite(Number(svcResult.total))
+        ? Number(svcResult.total)
+        : results.length;
+      return res.json({ results, total });
+    }
+
+    // Unexpected shape
+    return res.json({ results: [], total: 0 });
+  } catch (err) {
+    console.error(
+      "[reportsHandlerIndex] svc_searchEmployees error:",
+      err && (err.stack || err.message)
+    );
+    return res.status(500).json({
+      message: err && err.message ? err.message : "Internal Server Error",
+    });
+  }
+}
+
+/**
+ * Fallback for getDepartments:
+ * - Calls reportsService.getDepartments() when handler missing.
+ */
+async function svc_getDepartments(req, res) {
+  try {
+    console.debug("[reportsHandlerIndex] svc_getDepartments called");
+    if (
+      !reportsService ||
+      typeof reportsService.getDepartments !== "function"
+    ) {
+      console.error(
+        "[reportsHandlerIndex] reportsService.getDepartments not available - cannot serve getDepartments"
+      );
+      return res.status(501).json({
+        message: "Handler 'getDepartments' not implemented on server",
+      });
+    }
+    const rows = await reportsService.getDepartments();
+    return res.json(Array.isArray(rows) ? rows : []);
+  } catch (err) {
+    console.error(
+      "[reportsHandlerIndex] svc_getDepartments error:",
+      err && (err.stack || err.message)
+    );
+    return res.status(500).json({
+      message: err && err.message ? err.message : "Internal Server Error",
+    });
+  }
+}
+
+/* --------- Build exports: prefer handler modules; if missing, provide sensible service fallbacks where possible --------- */
+
+const exportObj = {
   // Attendance
   downloadAttendanceReport: getExport(
     attendanceMod,
@@ -150,10 +247,19 @@ module.exports = {
   downloadAssetsReport: getExport(assetsMod, "downloadAssetsReport"),
 
   // Departments & Employees
-  getDepartments: getExport(departmentsMod, "getDepartments"),
-  searchEmployees: getExport(employeesMod, "searchEmployees"),
+  // Prefer department handler's getDepartments if present; otherwise fallback to service wrapper
+  getDepartments:
+    departmentsMod && typeof departmentsMod.getDepartments === "function"
+      ? getExport(departmentsMod, "getDepartments")
+      : svc_getDepartments,
 
-  // Employees download
+  // Employee search: prefer employeesMod.searchEmployees else fallback to service wrapper
+  searchEmployees:
+    employeesMod && typeof employeesMod.searchEmployees === "function"
+      ? getExport(employeesMod, "searchEmployees")
+      : svc_searchEmployees,
+
+  // Employees download (prefer handler; fallback to generic 501 handler if not present)
   downloadEmployeesReport: getExport(employeesMod, "downloadEmployeesReport"),
 
   // Leaves
@@ -178,3 +284,5 @@ module.exports = {
   // Vendors
   downloadVendorsReport: getExport(vendorsMod, "downloadVendorsReport"),
 };
+
+module.exports = exportObj;

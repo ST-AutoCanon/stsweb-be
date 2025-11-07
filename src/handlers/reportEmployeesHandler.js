@@ -1,154 +1,591 @@
 // src/handlers/reportEmployeesHandler.js
 const reportService = require("../services/reportIndex");
+const { coerceToString } = require("../services/reportUtils");
 const {
-  coerceToString,
   parseDates,
   ensureTwoMonthWindow,
   isPreviewRequest,
   sendPreviewResponse,
   safeFilename,
   pickFields,
-  normalizeStatusForQuery,
-  statusMatches,
 } = require("../services/reportFilters");
+const db = require("../config");
 
-const db = require("../config"); // DB fallback
+/* db raw exec helper */
+async function dbExecRaw(sql, params = []) {
+  if (!Array.isArray(params)) params = [params];
+  if (db && typeof db.execute === "function") {
+    return await db.execute(sql, params);
+  }
+  if (db && typeof db.query === "function") {
+    return await db.query(sql, params);
+  }
+  return new Promise((resolve, reject) => {
+    if (db && typeof db.query === "function") {
+      db.query(sql, params, (err, rows, fields) => {
+        if (err) return reject(err);
+        resolve([rows, fields]);
+      });
+    } else reject(new Error("DB client missing execute/query"));
+  });
+}
 
-async function buildMetaFromReqQuery(query = {}) {
-  const meta = {};
-  const rawStatus =
-    coerceToString(query.status, null) ||
-    coerceToString(query.approval_status, null);
-  if (rawStatus) {
+/* robust employee id extraction */
+function tryParseCandidate(raw) {
+  if (raw === null || typeof raw === "undefined") return null;
+  // If it's already an object, try to pull common fields
+  if (typeof raw === "object") {
     try {
-      meta.status =
-        typeof reportService.normalizeStatusForQuery === "function"
-          ? reportService.normalizeStatusForQuery(rawStatus) || rawStatus
-          : rawStatus;
-    } catch (e) {
-      meta.status = rawStatus;
-    }
+      return (
+        coerceToString(raw.employee_id, null) ||
+        coerceToString(raw.employeeId, null) ||
+        coerceToString(raw.id, null) ||
+        coerceToString(raw.user_id, null) ||
+        coerceToString(raw.email, null) ||
+        null
+      );
+    } catch (e) {}
   }
+  const s = String(raw).trim();
+  if (!s) return null;
+  if (s.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(s);
+      if (parsed) {
+        return (
+          coerceToString(parsed.employee_id, null) ||
+          coerceToString(parsed.employeeId, null) ||
+          coerceToString(parsed.id, null) ||
+          coerceToString(parsed.user_id, null) ||
+          coerceToString(parsed.email, null) ||
+          null
+        );
+      }
+    } catch (e) {}
+  }
+  return s;
+}
+function findEmployeeIdInRequest(req) {
+  try {
+    const headerCandidates = [
+      "x-employee-id",
+      "x-employeeid",
+      "x-emp-id",
+      "x-user-id",
+      "x-user",
+    ];
+    for (const h of headerCandidates) {
+      const raw = req.headers && req.headers[h];
+      const candidate = tryParseCandidate(raw);
+      if (candidate) return candidate;
+    }
+    const r1 = req.employeeId ?? req.employee_id ?? req.userId ?? req.user_id;
+    const cand1 = tryParseCandidate(r1);
+    if (cand1) return cand1;
+    const u = req.user || req.authUser || req.session?.user;
+    if (u) {
+      const cand =
+        coerceToString(u.employee_id, null) ||
+        coerceToString(u.employeeId, null) ||
+        coerceToString(u.id, null) ||
+        coerceToString(u.user_id, null) ||
+        coerceToString(u.email, null);
+      if (cand) return cand;
+    }
+    const qCandidate =
+      tryParseCandidate(
+        req.query &&
+          (req.query.employee_id || req.query.employeeId || req.query.employee)
+      ) ||
+      tryParseCandidate(
+        req.body &&
+          (req.body.employee_id || req.body.employeeId || req.body.employee)
+      );
+    if (qCandidate) return qCandidate;
+  } catch (e) {}
+  return null;
+}
 
-  const typedEmployeeName =
-    coerceToString(query.employee_name, null) ||
-    coerceToString(query.employeeName, null) ||
-    coerceToString(query.employee, null);
-  if (typedEmployeeName) {
-    meta.employeeName = typedEmployeeName;
-  } else {
-    const empId = coerceToString(query.employee_id ?? query.employeeId, null);
-    if (empId) {
+/* find departments managed by managerEmpId (defensive) */
+async function findDepartmentsManagedBy(managerEmpId) {
+  if (!managerEmpId) return [];
+  const out = [];
+  try {
+    const [cols] = await dbExecRaw("SHOW COLUMNS FROM departments");
+    const colNames = Array.isArray(cols)
+      ? cols
+          .map((c) =>
+            String(
+              c.Field || c.field || c.COLUMN_NAME || c.column_name || ""
+            ).trim()
+          )
+          .filter(Boolean)
+      : [];
+
+    if (colNames.includes("manager_employee_id")) {
       try {
-        if (typeof reportService.searchEmployees === "function") {
-          const found = await reportService.searchEmployees(empId);
-          meta.employeeName =
-            Array.isArray(found) && found[0]
-              ? found[0].employee_name ||
-                `${(found[0].first_name || "").trim()} ${(
-                  found[0].last_name || ""
-                ).trim()}`.trim() ||
-                empId
-              : empId;
-        } else if (typeof reportService.getEmployeeRows === "function") {
-          const er = await reportService.getEmployeeRows(empId);
-          meta.employeeName =
-            Array.isArray(er) && er[0]
-              ? er[0].employee_name ||
-                `${(er[0].first_name || "").trim()} ${(
-                  er[0].last_name || ""
-                ).trim()}`.trim() ||
-                empId
-              : empId;
-        } else meta.employeeName = empId;
+        const [rows] = await dbExecRaw(
+          "SELECT id FROM departments WHERE manager_employee_id = ?",
+          [managerEmpId]
+        );
+        if (Array.isArray(rows) && rows.length) {
+          for (const r of rows) if (r && r.id != null) out.push(String(r.id));
+          if (out.length) return Array.from(new Set(out));
+        }
       } catch (e) {
-        meta.employeeName = empId;
+        console.warn(
+          "[reportEmployeesHandler] query on manager_employee_id failed:",
+          e && e.message
+        );
       }
     }
-  }
 
-  const typedDept =
-    coerceToString(query.department_name, null) ||
-    coerceToString(query.departmentName, null) ||
-    coerceToString(query.department, null);
-  if (typedDept) {
-    meta.department = typedDept;
-  } else {
-    const deptId = coerceToString(
-      query.department_id ?? query.departmentId,
-      null
+    if (colNames.includes("manager_id")) {
+      try {
+        const [rows] = await dbExecRaw(
+          "SELECT id FROM departments WHERE manager_id = ?",
+          [managerEmpId]
+        );
+        if (Array.isArray(rows) && rows.length) {
+          for (const r of rows) if (r && r.id != null) out.push(String(r.id));
+          if (out.length) return Array.from(new Set(out));
+        }
+      } catch (e) {
+        console.warn(
+          "[reportEmployeesHandler] query on manager_id failed:",
+          e && e.message
+        );
+      }
+    }
+  } catch (e) {
+    console.warn(
+      "[reportEmployeesHandler] SHOW COLUMNS failed:",
+      e && e.message
     );
-    if (deptId) {
-      try {
-        if (typeof reportService.getDepartments === "function") {
-          const depts = await reportService.getDepartments();
-          if (Array.isArray(depts)) {
-            const found = depts.find(
-              (d) =>
-                d &&
-                (String(d.id) === String(deptId) ||
-                  String(d.department_id || d.id) === String(deptId))
-            );
-            meta.department =
-              (found &&
-                (found.name || found.department_name || found.department)) ||
-              deptId;
-          } else meta.department = deptId;
-        } else meta.department = deptId;
-      } catch (e) {
-        meta.department = deptId;
-      }
-    }
   }
 
+  // fallback to employee_professional mapping
+  try {
+    const [rows] = await dbExecRaw(
+      "SELECT DISTINCT department_id AS id FROM employee_professional WHERE supervisor_id = ? AND department_id IS NOT NULL",
+      [managerEmpId]
+    );
+    if (Array.isArray(rows) && rows.length) {
+      for (const r of rows) {
+        const id = r && (r.id ?? r.department_id);
+        if (id != null) out.push(String(id));
+      }
+    }
+  } catch (e) {
+    console.warn(
+      "[reportEmployeesHandler] fallback department query failed:",
+      e && e.message
+    );
+  }
+  return Array.from(new Set(out));
+}
+
+/* normalize candidate (id/name/object/json) to plain string */
+function normalizeToPlainString(candidate, kind = "generic") {
+  if (candidate === null || typeof candidate === "undefined") return null;
+  // if object -> try common fields
+  if (typeof candidate === "object") {
+    const o = candidate;
+    // employee-like
+    if (o.employee_name || o.name || o.first_name || o.last_name) {
+      const name =
+        o.employee_name ||
+        `${(o.first_name || "").trim()} ${(o.last_name || "").trim()}`.trim() ||
+        o.name ||
+        null;
+      const id = o.employee_id || o.employeeId || o.id || null;
+      return id && name ? `${name} (${id})` : name || String(id || "");
+    }
+    // department-like
+    if (o.department_name || o.name) {
+      return o.department_name || o.name || (o.id ? String(o.id) : null);
+    }
+    // fallback to JSON string
+    try {
+      return JSON.stringify(o);
+    } catch (e) {
+      return String(o);
+    }
+  }
+  // if string that looks like JSON, try parse
+  if (typeof candidate === "string" && candidate.trim().startsWith("{")) {
+    try {
+      const parsed = JSON.parse(candidate);
+      return normalizeToPlainString(parsed, kind);
+    } catch (e) {
+      // not valid json, continue
+    }
+  }
+  // otherwise simple string
+  return String(candidate);
+}
+
+/* small meta builder used by downloads - defensive and returns simple strings */
+async function buildMetaFromReqQuery(query = {}) {
+  const meta = {
+    filters: [],
+    status: null,
+    employee: null,
+    department: null,
+  };
+
+  try {
+    // date range
+    const startDate =
+      coerceToString(query.startDate, null) ||
+      coerceToString(query.start_date, null) ||
+      coerceToString(query.from, null) ||
+      coerceToString(query.fromDate, null);
+    const endDate =
+      coerceToString(query.endDate, null) ||
+      coerceToString(query.end_date, null) ||
+      coerceToString(query.to, null) ||
+      coerceToString(query.toDate, null);
+
+    if (startDate || endDate) {
+      if (startDate && endDate)
+        meta.filters.push(`Date: ${startDate} → ${endDate}`);
+      else if (startDate) meta.filters.push(`From: ${startDate}`);
+      else meta.filters.push(`To: ${endDate}`);
+    }
+
+    // status - coerce to plain string
+    const rawStatus =
+      coerceToString(query.status, null) ||
+      coerceToString(query.approval_status, null) ||
+      coerceToString(query.state, null);
+    if (rawStatus) {
+      meta.status = normalizeToPlainString(rawStatus, "status");
+      meta.filters.push(`Status: ${meta.status}`);
+    }
+
+    // employee: accept id OR object OR typed name
+    let empCandidate =
+      query.employee_id ??
+      query.employeeId ??
+      query.employee ??
+      query.employee_name ??
+      query.employeeName ??
+      null;
+    // if empty string convert to null
+    if (typeof empCandidate === "string" && empCandidate.trim() === "")
+      empCandidate = null;
+
+    if (empCandidate) {
+      // if it's an id-like primitive, try to resolve to readble name from DB
+      const idCandidate = tryParseCandidate(empCandidate);
+      if (idCandidate) {
+        // attempt DB lookup
+        try {
+          const [rows] = await dbExecRaw(
+            "SELECT employee_id, first_name, last_name, email FROM employees WHERE employee_id = ? LIMIT 1",
+            [idCandidate]
+          );
+          const er = Array.isArray(rows) && rows[0] ? rows[0] : null;
+          if (er) {
+            const name =
+              `${(er.first_name || "").trim()} ${(
+                er.last_name || ""
+              ).trim()}`.trim() ||
+              er.email ||
+              er.employee_id;
+            meta.employee = `${name} (${er.employee_id})`;
+            meta.filters.push(`Employee: ${meta.employee}`);
+          } else {
+            // not found - normalize input to string
+            meta.employee = normalizeToPlainString(empCandidate, "employee");
+            meta.filters.push(`Employee: ${meta.employee}`);
+          }
+        } catch (e) {
+          meta.employee = normalizeToPlainString(empCandidate, "employee");
+          meta.filters.push(`Employee: ${meta.employee}`);
+        }
+      } else {
+        meta.employee = normalizeToPlainString(empCandidate, "employee");
+        meta.filters.push(`Employee: ${meta.employee}`);
+      }
+    }
+
+    // department: accept id or object or typed name
+    let deptCandidate =
+      query.department_id ??
+      query.departmentId ??
+      query.department ??
+      query.department_name ??
+      query.departmentName ??
+      null;
+    if (typeof deptCandidate === "string" && deptCandidate.trim() === "")
+      deptCandidate = null;
+
+    if (deptCandidate) {
+      // if candidate looks like id, attempt lookup
+      const deptIdStr = coerceToString(deptCandidate, null);
+      if (deptIdStr && /^\d+$/.test(String(deptIdStr))) {
+        try {
+          const [drows] = await dbExecRaw(
+            "SELECT id, name FROM departments WHERE id = ? LIMIT 1",
+            [deptIdStr]
+          );
+          const dr = Array.isArray(drows) && drows[0] ? drows[0] : null;
+          if (dr) {
+            meta.department = `${dr.name}`;
+            meta.filters.push(`Department: ${meta.department}`);
+          } else {
+            meta.department = normalizeToPlainString(
+              deptCandidate,
+              "department"
+            );
+            meta.filters.push(`Department: ${meta.department}`);
+          }
+        } catch (e) {
+          meta.department = normalizeToPlainString(deptCandidate, "department");
+          meta.filters.push(`Department: ${meta.department}`);
+        }
+      } else {
+        meta.department = normalizeToPlainString(deptCandidate, "department");
+        meta.filters.push(`Department: ${meta.department}`);
+      }
+    }
+
+    if (meta.filters.length === 0) meta.filters.push("No explicit filters");
+  } catch (e) {
+    console.warn(
+      "[reportEmployeesHandler] buildMetaFromReqQuery failed:",
+      e && e.message
+    );
+    if (meta.filters.length === 0)
+      meta.filters.push("No explicit filters (meta build failed)");
+  }
   return meta;
 }
 
+/* helper to detect explicit manager-scope intent */
+function isExplicitManagerScope(req) {
+  try {
+    const header = String(
+      (req.headers && (req.headers["x-force-manager-scope"] || "")) || ""
+    ).toLowerCase();
+    const q1 = String(
+      (req.query &&
+        (req.query.forceManager ||
+          req.query.manager_scope ||
+          req.query.managerScope ||
+          "")) ||
+        ""
+    ).toLowerCase();
+    if (header === "1" || header === "true") return true;
+    if (q1 === "1" || q1 === "true") return true;
+    // if req.user exists and role implies manager, treat as explicit
+    const u = req.user || req.authUser || req.session?.user;
+    if (u && u.role && /manager|supervisor|lead/i.test(String(u.role)))
+      return true;
+  } catch (e) {}
+  return false;
+}
+
+/* main handler */
 async function downloadEmployeesReport(req, res) {
   console.log(
     "[reportEmployeesHandler] downloadEmployeesReport called - query:",
-    req.query
+    req.query || {}
   );
   try {
     const parsed = parseDates(req.query || {});
     let { startDate, endDate, status, format, fields } = parsed;
 
-    const employeeId = coerceToString(
-      req.query.employee_id ?? req.query.employeeId,
+    const employeeIdQuery = coerceToString(
+      req.query.employee_id ?? req.query.employeeId ?? req.query.employee,
       null
     );
-    const departmentId = coerceToString(
-      req.query.department_id ?? req.query.departmentId,
+    let departmentIdQuery = coerceToString(
+      req.query.department_id ?? req.query.departmentId ?? req.query.department,
       null
     );
 
-    // ensure date window rules
-    const ensured = ensureTwoMonthWindow(startDate, endDate);
-    if (!ensured.ok) {
-      return res.status(400).json({ message: ensured.message });
+    const requesterEmpId = findEmployeeIdInRequest(req);
+    if (requesterEmpId)
+      console.debug(
+        "[reportEmployeesHandler] requester employee id discovered:",
+        requesterEmpId
+      );
+
+    // admin detection (only when req.user exists)
+    let isAdmin = false;
+    try {
+      const u = req.user || req.authUser || req.session?.user;
+      if (u)
+        isAdmin = !!(
+          u.is_admin ||
+          u.isAdmin ||
+          u.role === "admin" ||
+          (Array.isArray(u.roles) && u.roles.includes("admin"))
+        );
+    } catch (e) {
+      isAdmin = false;
     }
+
+    // derive department if not provided
+    let managerEmpId = null;
+    if (!departmentIdQuery && requesterEmpId) {
+      try {
+        const [r] = await dbExecRaw(
+          "SELECT department_id FROM employee_professional WHERE employee_id = ? LIMIT 1",
+          [requesterEmpId]
+        );
+        if (Array.isArray(r) && r[0] && r[0].department_id != null) {
+          departmentIdQuery = String(r[0].department_id);
+          console.debug(
+            "[reportEmployeesHandler] derived department for requester:",
+            departmentIdQuery
+          );
+        } else {
+          // only perform manager scoping if explicitly requested OR user role indicates manager
+          if (
+            !isAdmin &&
+            !isPreviewRequest(req) &&
+            isExplicitManagerScope(req)
+          ) {
+            managerEmpId = requesterEmpId;
+            console.debug(
+              "[reportEmployeesHandler] explicit manager scoping enabled via flag/role:",
+              managerEmpId
+            );
+          } else {
+            console.debug(
+              "[reportEmployeesHandler] skipping manager scoping for requester (no explicit scope or admin/preview)"
+            );
+          }
+        }
+      } catch (e) {
+        if (!isAdmin && !isPreviewRequest(req) && isExplicitManagerScope(req)) {
+          managerEmpId = requesterEmpId;
+          console.debug(
+            "[reportEmployeesHandler] fallback: explicit manager scoping enabled via flag/role:",
+            managerEmpId
+          );
+        } else {
+          console.debug(
+            "[reportEmployeesHandler] skipping manager scoping for requester (derivation failed)"
+          );
+        }
+      }
+    }
+
+    const ensured = ensureTwoMonthWindow(startDate, endDate);
+    if (!ensured.ok) return res.status(400).json({ message: ensured.message });
     startDate = ensured.startDate;
     endDate = ensured.endDate;
 
-    if (typeof reportService.getEmployeeRows !== "function") {
-      console.error(
-        "[reportEmployeesHandler] reportService.getEmployeeRows missing"
+    let rows = [];
+
+    if (employeeIdQuery || departmentIdQuery) {
+      rows = await reportService.getEmployeeRows(
+        startDate,
+        endDate,
+        status,
+        fields,
+        employeeIdQuery,
+        departmentIdQuery
       );
-      return res.status(500).json({ message: "Server misconfiguration" });
+      rows = Array.isArray(rows) ? rows : [];
+    } else if (managerEmpId) {
+      // manager scoping
+      let managedDeptIds = [];
+      try {
+        managedDeptIds = await findDepartmentsManagedBy(managerEmpId);
+      } catch (e) {
+        console.warn(
+          "[reportEmployeesHandler] findDepartmentsManagedBy attempt failed:",
+          e && e.message
+        );
+      }
+
+      if (managedDeptIds.length > 0) {
+        const merged = [];
+        for (const d of managedDeptIds) {
+          try {
+            const part = await reportService.getEmployeeRows(
+              startDate,
+              endDate,
+              status,
+              fields,
+              null,
+              d
+            );
+            if (Array.isArray(part) && part.length) merged.push(...part);
+          } catch (e) {
+            console.warn(
+              "[reportEmployeesHandler] per-dept getEmployeeRows failed for dept",
+              d,
+              e && e.message
+            );
+          }
+        }
+        const map = new Map();
+        for (const p of merged)
+          if (p && p.employee_id) map.set(String(p.employee_id), p);
+        rows = Array.from(map.values());
+      } else {
+        // fallback: fetch all and filter by supervisor mapping
+        try {
+          const all = await reportService.getEmployeeRows(
+            startDate,
+            endDate,
+            status,
+            fields
+          );
+          const allArr = Array.isArray(all) ? all : [];
+          const ids = Array.from(
+            new Set(allArr.map((x) => x.employee_id).filter(Boolean))
+          );
+          if (ids.length) {
+            const placeholders = ids.map(() => "?").join(",");
+            const [profRows] = await dbExecRaw(
+              `SELECT employee_id, supervisor_id FROM employee_professional WHERE employee_id IN (${placeholders})`,
+              ids
+            );
+            const supMap = {};
+            for (const pr of Array.isArray(profRows) ? profRows : []) {
+              if (pr && pr.employee_id)
+                supMap[String(pr.employee_id)] = pr.supervisor_id;
+            }
+            rows = allArr.filter((r) => {
+              const id = r.employee_id ? String(r.employee_id) : null;
+              const sup = id ? supMap[id] : null;
+              return sup != null && String(sup) === String(managerEmpId);
+            });
+          } else rows = [];
+        } catch (e) {
+          console.error(
+            "[reportEmployeesHandler] fallback filtering failed:",
+            e && e.message
+          );
+          rows = [];
+        }
+      }
+    } else {
+      rows = await reportService.getEmployeeRows(
+        startDate,
+        endDate,
+        status,
+        fields
+      );
+      rows = Array.isArray(rows) ? rows : [];
     }
 
-    const rawRows = await reportService.getEmployeeRows(
-      startDate,
-      endDate,
-      status,
-      null,
-      employeeId,
-      departmentId
-    );
-    const rows = Array.isArray(rawRows) ? rawRows : [];
-
-    // preview: send friendly message when empty
+    // preview
     if (isPreviewRequest(req)) {
+      console.debug(
+        "[reportEmployeesHandler] preview rows:",
+        rows.length,
+        "status param:",
+        status
+      );
       const msg =
         rows.length === 0
           ? "No employee data for selected date range"
@@ -156,39 +593,22 @@ async function downloadEmployeesReport(req, res) {
       return sendPreviewResponse(req, res, rows, msg);
     }
 
-    if (!Array.isArray(rawRows)) {
-      return res.status(500).json({ message: "Failed to fetch employee data" });
-    }
-
-    // apply status filtering (if frontend sent status)
-    const statusCandidate = normalizeStatusForQuery(status);
-    const filtered = rawRows.filter((r) =>
-      statusMatches(statusCandidate, [
-        r.status,
-        r.emp_status,
-        r.approval_status,
-      ])
-    );
-
-    if (filtered.length === 0) {
+    if (!rows || rows.length === 0) {
       return res
         .status(404)
         .json({ message: "No employee data for selected date range" });
     }
 
-    // pick only requested fields (if any)
-    const rowsToExport = pickFields(filtered, fields);
-
-    // build meta
+    // apply pickFields and produce output
+    const rowsToExport = pickFields(rows, fields);
     const meta = await buildMetaFromReqQuery(req.query || {});
-    console.debug("[reportEmployeesHandler] render meta:", meta);
+    console.debug("[reportEmployeesHandler] PDF meta:", meta);
 
     if (format === "xlsx") {
-      if (typeof reportService.renderExcelBuffer !== "function") {
+      if (typeof reportService.renderExcelBuffer !== "function")
         return res
           .status(500)
           .json({ message: "Excel renderer not available" });
-      }
       const buf = await reportService.renderExcelBuffer(rowsToExport, null);
       const filename = safeFilename("employees_report", "xlsx");
       res.setHeader(
@@ -202,9 +622,8 @@ async function downloadEmployeesReport(req, res) {
       res.setHeader("Content-Length", buf.length);
       return res.send(buf);
     } else if (format === "pdf") {
-      if (typeof reportService.renderPdfBuffer !== "function") {
+      if (typeof reportService.renderPdfBuffer !== "function")
         return res.status(500).json({ message: "PDF renderer not available" });
-      }
       const pdfBuf = await reportService.renderPdfBuffer(
         "Employees Report",
         rowsToExport,
@@ -224,174 +643,12 @@ async function downloadEmployeesReport(req, res) {
   } catch (err) {
     console.error(
       "[reportEmployeesHandler] Error rendering Employees report:",
-      err && (err.stack || err)
+      err && (err.stack || err.message)
     );
     return res.status(500).json({ message: "Internal Server Error" });
   }
 }
 
-/**
- * searchEmployees - typeahead endpoint
- */
-async function searchEmployees(req, res) {
-  try {
-    const qRaw = coerceToString(req.query.q, "");
-    const q = qRaw.trim();
-    const rawLimit = parseInt(req.query.limit || "10", 10);
-    const limit = Math.min(Number.isNaN(rawLimit) ? 10 : rawLimit, 500);
-    const departmentId = coerceToString(
-      req.query.department_id ?? req.query.departmentId,
-      null
-    );
-
-    if (!q) {
-      return res.json({ results: [], total: 0 });
-    }
-
-    if (reportService && typeof reportService.searchEmployees === "function") {
-      try {
-        const svcRes = await reportService.searchEmployees({
-          q,
-          limit,
-          departmentId,
-          req,
-        });
-        if (!svcRes) return res.json({ results: [], total: 0 });
-
-        if (Array.isArray(svcRes)) {
-          return res.json({ results: svcRes, total: svcRes.length });
-        }
-        if (Array.isArray(svcRes.results)) {
-          return res.json({
-            results: svcRes.results,
-            total: Number.isFinite(Number(svcRes.total))
-              ? Number(svcRes.total)
-              : svcRes.results.length,
-          });
-        }
-        if (Array.isArray(svcRes.data)) {
-          return res.json({
-            results: svcRes.data,
-            total: Number.isFinite(Number(svcRes.total))
-              ? Number(svcRes.total)
-              : svcRes.data.length,
-          });
-        }
-        return res.json({ results: [svcRes], total: 1 });
-      } catch (svcErr) {
-        console.error(
-          "[reportEmployeesHandler] reportService.searchEmployees error:",
-          svcErr && (svcErr.stack || svcErr)
-        );
-      }
-    }
-
-    if (!db || typeof db.execute !== "function") {
-      console.error(
-        "[reportEmployeesHandler] No DB available for search fallback"
-      );
-      return res
-        .status(501)
-        .json({ message: "Search not implemented on server" });
-    }
-
-    const safe = q.replace(/%/g, "\\%");
-    const wildcard = `%${safe}%`;
-    const sql = `
-      SELECT
-        e.employee_id AS employee_id,
-        CONCAT_WS(' ', e.first_name, e.last_name) AS employee_name,
-        e.email AS email,
-        ep.department_id AS department_id,
-        COALESCE(d.name, '') AS department_name
-      FROM employees e
-      INNER JOIN employee_professional ep ON e.employee_id = ep.employee_id
-      LEFT JOIN departments d ON ep.department_id = d.id
-      WHERE (CONCAT_WS(' ', e.first_name, e.last_name) LIKE ? OR e.email LIKE ? OR e.employee_id LIKE ?)
-      ${departmentId ? " AND ep.department_id = ?" : ""}
-      ORDER BY employee_name ASC
-      LIMIT ?
-    `;
-    const params = [wildcard, wildcard, wildcard];
-    if (departmentId) params.push(departmentId);
-    params.push(limit);
-
-    let rows = [];
-    try {
-      const [resultRows] = await db.execute(sql, params);
-      rows = Array.isArray(resultRows) ? resultRows : [];
-    } catch (mainErr) {
-      console.warn(
-        "[reportEmployeesHandler] Search main query failed, trying fallback (without departments):",
-        mainErr && mainErr.message
-      );
-      const altSql = `
-        SELECT
-          e.employee_id AS employee_id,
-          CONCAT_WS(' ', e.first_name, e.last_name) AS employee_name,
-          e.email AS email,
-          ep.department_id AS department_id,
-          '' AS department_name
-        FROM employees e
-        INNER JOIN employee_professional ep ON e.employee_id = ep.employee_id
-        WHERE (CONCAT_WS(' ', e.first_name, e.last_name) LIKE ? OR e.email LIKE ? OR e.employee_id LIKE ?)
-        ${departmentId ? " AND ep.department_id = ?" : ""}
-        ORDER BY employee_name ASC
-        LIMIT ?
-      `;
-      const altParams = [wildcard, wildcard, wildcard];
-      if (departmentId) altParams.push(departmentId);
-      altParams.push(limit);
-      const [altRows] = await db.execute(altSql, altParams);
-      rows = Array.isArray(altRows) ? altRows : [];
-    }
-
-    let total = rows.length;
-    if (rows.length === limit) {
-      try {
-        let countSql = `
-          SELECT COUNT(*) AS cnt
-          FROM employees e
-          INNER JOIN employee_professional ep ON e.employee_id = ep.employee_id
-          WHERE (CONCAT_WS(' ', e.first_name, e.last_name) LIKE ? OR e.email LIKE ? OR e.employee_id LIKE ?)
-        `;
-        const countParams = [wildcard, wildcard, wildcard];
-        if (departmentId) {
-          countSql += " AND ep.department_id = ?";
-          countParams.push(departmentId);
-        }
-        const [cntRows] = await db.execute(countSql, countParams);
-        if (
-          Array.isArray(cntRows) &&
-          cntRows[0] &&
-          typeof cntRows[0].cnt !== "undefined"
-        ) {
-          total = Number(cntRows[0].cnt);
-        }
-      } catch (cntErr) {
-        console.warn(
-          "[reportEmployeesHandler] search count query failed:",
-          cntErr && cntErr.message
-        );
-      }
-    }
-
-    const results = rows.map((r) => ({
-      employee_id: r.employee_id ?? null,
-      employee_name: r.employee_name ?? "",
-      email: r.email ?? "",
-      department_id: r.department_id ?? null,
-      department_name: r.department_name ?? "",
-    }));
-
-    return res.json({ results, total });
-  } catch (err) {
-    console.error(
-      "[reportEmployeesHandler] searchEmployees error:",
-      err && (err.stack || err)
-    );
-    return res.status(500).json({ message: "Search failed" });
-  }
-}
-
-module.exports = { downloadEmployeesReport, searchEmployees };
+module.exports = {
+  downloadEmployeesReport,
+};

@@ -12,15 +12,36 @@ const {
   sendPreviewResponse,
 } = require("../services/reportFilters");
 
+const db = require("../config");
+const mysql = require("mysql2");
+
+async function dbExec(sql, params = []) {
+  try {
+    if (!Array.isArray(params)) params = [params];
+    const finalSql = mysql.format(sql, params);
+    if (db && typeof db.query === "function") {
+      return new Promise((resolve, reject) => {
+        db.query(finalSql, (err, rows, fields) => {
+          if (err) return reject(err);
+          resolve([rows, fields]);
+        });
+      });
+    } else if (db && typeof db.execute === "function") {
+      return db.execute(finalSql);
+    } else throw new Error("DB client has no query/execute");
+  } catch (e) {
+    console.error(
+      "[reportTasksHandler][dbExec] error:",
+      e && (e.stack || e.message)
+    );
+    throw e;
+  }
+}
+
 const MAX_DOWNLOAD_FIELDS_TASKS = 13;
 
-/**
- * Build normalized meta from query and try to resolve ids to names.
- * Returns { status?, department?, employeeName? }
- */
 async function buildMetaFromReqQuery(query = {}) {
   const meta = {};
-
   const rawStatus =
     coerceToString(query.status, null) ||
     coerceToString(query.task_status, null);
@@ -39,9 +60,8 @@ async function buildMetaFromReqQuery(query = {}) {
     coerceToString(query.employee_name, null) ||
     coerceToString(query.employeeName, null) ||
     coerceToString(query.employee, null);
-  if (typedEmployeeName) {
-    meta.employeeName = typedEmployeeName;
-  } else {
+  if (typedEmployeeName) meta.employeeName = typedEmployeeName;
+  else {
     const empId =
       coerceToString(query.employee_id, null) ||
       coerceToString(query.employeeId, null);
@@ -74,9 +94,7 @@ async function buildMetaFromReqQuery(query = {}) {
                 ).trim()}`.trim() ||
                 empId
               : empId;
-        } else {
-          meta.employeeName = empId;
-        }
+        } else meta.employeeName = empId;
       } catch (e) {
         meta.employeeName = empId;
       }
@@ -87,9 +105,8 @@ async function buildMetaFromReqQuery(query = {}) {
     coerceToString(query.department_name, null) ||
     coerceToString(query.departmentName, null) ||
     coerceToString(query.department, null);
-  if (typedDept) {
-    meta.department = typedDept;
-  } else {
+  if (typedDept) meta.department = typedDept;
+  else {
     const deptId =
       coerceToString(query.department_id, null) ||
       coerceToString(query.departmentId, null);
@@ -120,6 +137,7 @@ async function buildMetaFromReqQuery(query = {}) {
   return meta;
 }
 
+/* Supervisor-driven tasks */
 async function downloadTasksSupervisorReport(req, res) {
   console.log(
     "[reportTasksHandler] downloadTasksSupervisorReport called - query:",
@@ -145,18 +163,16 @@ async function downloadTasksSupervisorReport(req, res) {
     if (typeof reportService.getTaskRows !== "function")
       return res.status(500).json({ message: "Server misconfiguration" });
 
-    // IMPORTANT: pass status and fields into service so SQL-level filtering works
     const rawTasks = await reportService.getTaskRows(
       startDate,
       endDate,
-      status, // parsed status (may be null for 'All')
-      fields, // requested fields
+      status,
+      fields,
       employeeId,
       departmentId
     );
     const rows = Array.isArray(rawTasks) ? rawTasks : [];
 
-    // preview support (returns JSON preview matching UI)
     if (isPreviewRequest(req)) {
       const filteredPreview = rows.filter((t) =>
         statusMatches(normalizeStatusForQuery(status), [t.status])
@@ -168,55 +184,19 @@ async function downloadTasksSupervisorReport(req, res) {
       return sendPreviewResponse(req, res, filteredPreview, msg);
     }
 
-    // For actual download: filter similarly (status matching)
     const filtered = rows.filter((t) =>
       statusMatches(normalizeStatusForQuery(status), [t.status])
     );
-
     if (filtered.length === 0)
       return res
         .status(404)
         .json({ message: "No task data for selected date range" });
 
-    // For Excel use pickFields (honor requested fields)
     const tasksForExcel = pickFields(filtered, fields);
-
-    // For PDF render, use the full filtered rows (not pickFields) so HTML table has proper headers & rows
     const tasksForPdf = filtered;
 
     const meta = await buildMetaFromReqQuery(req.query || {});
     console.debug("[reportTasksHandler] render meta (supervisor):", meta);
-
-    // --- NEW: diagnostics just before rendering ---
-    console.debug(
-      "[reportTasksHandler] supervisor PDF render - rows count:",
-      tasksForPdf.length
-    );
-    if (tasksForPdf.length > 0) {
-      try {
-        console.debug(
-          "[reportTasksHandler] supervisor PDF render - sample row keys:",
-          Object.keys(tasksForPdf[0]).slice(0, 12)
-        );
-        const sample = Object.fromEntries(
-          Object.entries(tasksForPdf[0]).map(([k, v]) => [
-            k,
-            v && String(v).length > 200
-              ? String(v).slice(0, 200) + "…(truncated)"
-              : v,
-          ])
-        );
-        console.debug(
-          "[reportTasksHandler] supervisor PDF render - sample row:",
-          sample
-        );
-      } catch (e) {
-        console.debug(
-          "[reportTasksHandler] error printing sample row:",
-          e && e.message
-        );
-      }
-    }
 
     if (format === "xlsx") {
       const buf =
@@ -235,7 +215,6 @@ async function downloadTasksSupervisorReport(req, res) {
       res.setHeader("Content-Length", buf.length);
       return res.send(buf);
     } else if (format === "pdf") {
-      // NOTE: use generic renderPdfBuffer to avoid custom renderers that might mis-handle supervisor tasks
       let pdfBuf;
       try {
         pdfBuf = await reportService.renderPdfBuffer(
@@ -250,7 +229,6 @@ async function downloadTasksSupervisorReport(req, res) {
         );
         return res.status(500).json({ message: "Failed to render PDF" });
       }
-
       if (!pdfBuf || !Buffer.isBuffer(pdfBuf) || pdfBuf.length === 0) {
         console.error(
           "[reportTasksHandler] renderPdfBuffer returned empty buffer for supervisor tasks."
@@ -259,7 +237,6 @@ async function downloadTasksSupervisorReport(req, res) {
           .status(500)
           .json({ message: "Failed to render PDF (empty)" });
       }
-
       const filename = safeFilename("tasks_supervisor_report", "pdf");
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader(
@@ -268,9 +245,7 @@ async function downloadTasksSupervisorReport(req, res) {
       );
       res.setHeader("Content-Length", pdfBuf.length);
       return res.send(pdfBuf);
-    } else {
-      return res.status(400).json({ message: "Invalid format" });
-    }
+    } else return res.status(400).json({ message: "Invalid format" });
   } catch (err) {
     console.error(
       "[reportTasksHandler] Error rendering Tasks (Supervisor) report:",
@@ -280,6 +255,7 @@ async function downloadTasksSupervisorReport(req, res) {
   }
 }
 
+/* Employee-driven weekly tasks */
 async function downloadTasksEmployeeReport(req, res) {
   console.log(
     "[reportTasksHandler] downloadTasksEmployeeReport called - query:",
@@ -309,12 +285,11 @@ async function downloadTasksEmployeeReport(req, res) {
     const rawWeekly = await reportService.getWeeklyTaskRows(
       startDate,
       endDate,
-      status, // pass parsed status
-      fields, // pass requested fields to service
+      status,
+      fields,
       employeeId,
       departmentId
     );
-
     const rows = Array.isArray(rawWeekly) ? rawWeekly : [];
 
     const statusCandidate = normalizeStatusForQuery(status);
@@ -334,7 +309,6 @@ async function downloadTasksEmployeeReport(req, res) {
           : undefined;
       return sendPreviewResponse(req, res, filtered, msg);
     }
-
     if (filtered.length === 0)
       return res
         .status(404)
@@ -342,23 +316,8 @@ async function downloadTasksEmployeeReport(req, res) {
 
     const weeklyForExcel = pickFields(filtered, fields);
     const weeklyForPdf = filtered;
-
     const meta = await buildMetaFromReqQuery(req.query || {});
     console.debug("[reportTasksHandler] render meta (employee):", meta);
-
-    // diagnostics
-    console.debug(
-      "[reportTasksHandler] employee PDF render - rows count:",
-      weeklyForPdf.length
-    );
-    if (weeklyForPdf.length > 0) {
-      try {
-        console.debug(
-          "[reportTasksHandler] employee PDF render - sample keys:",
-          Object.keys(weeklyForPdf[0]).slice(0, 12)
-        );
-      } catch (e) {}
-    }
 
     if (format === "xlsx") {
       const buf =
@@ -391,7 +350,6 @@ async function downloadTasksEmployeeReport(req, res) {
         );
         return res.status(500).json({ message: "Failed to render PDF" });
       }
-
       if (!pdfBuf || !Buffer.isBuffer(pdfBuf) || pdfBuf.length === 0) {
         console.error(
           "[reportTasksHandler] renderPdfBuffer returned empty buffer for employee tasks."
@@ -400,7 +358,6 @@ async function downloadTasksEmployeeReport(req, res) {
           .status(500)
           .json({ message: "Failed to render PDF (empty)" });
       }
-
       const filename = safeFilename("tasks_employee_report", "pdf");
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader(
@@ -409,9 +366,7 @@ async function downloadTasksEmployeeReport(req, res) {
       );
       res.setHeader("Content-Length", pdfBuf.length);
       return res.send(pdfBuf);
-    } else {
-      return res.status(400).json({ message: "Invalid format" });
-    }
+    } else return res.status(400).json({ message: "Invalid format" });
   } catch (err) {
     console.error(
       "[reportTasksHandler] Error rendering Tasks (Employee) report:",

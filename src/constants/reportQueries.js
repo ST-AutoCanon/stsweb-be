@@ -1,3 +1,4 @@
+// src/constants/reportQueries.js
 module.exports = {
   GET_LEAVE_REPORT: `
   SELECT
@@ -28,6 +29,7 @@ module.exports = {
     AND ( ? IS NULL OR LOWER(lq.status) = LOWER(?) )
   ORDER BY COALESCE(lq.updated_at, lq.created_at) DESC
 `,
+
   GET_REIMBURSEMENT_REPORT: `
 SELECT
   r.id AS reimbursement_id,
@@ -54,6 +56,8 @@ SELECT
   r.da,
   r.transport_amount,
   r.stationary,
+  r.project,
+  r.meals_objective,
 
   r.status AS approval_status,
   COALESCE(NULLIF(r.payment_status, ''), NULLIF(r.status, '')) AS payment_status,
@@ -63,9 +67,6 @@ SELECT
   r.approver_name,
   r.approver_designation,
   r.approver_comments,
-
-  r.project,
-  r.meals_objective,
 
   DATE_FORMAT(r.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
   DATE_FORMAT(r.approved_date, '%Y-%m-%d') AS approved_date,
@@ -77,65 +78,102 @@ LEFT JOIN employee_professional pr ON e.employee_id = pr.employee_id
 LEFT JOIN departments d ON pr.department_id = d.id
 WHERE ( ? IS NULL OR (COALESCE(r.approved_date, r.created_at) >= ? ) )
   AND ( ? IS NULL OR (COALESCE(r.approved_date, r.created_at) < DATE_ADD(?, INTERVAL 1 DAY) ) )
-  -- simple single-parameter status clause (service may remove and replace this for complex tokens)
   AND ( ? IS NULL OR LOWER(COALESCE(r.payment_status, r.status, '')) = LOWER(?) )
 ORDER BY r.created_at DESC
 `,
 
-  /**
-   * Employee report
-   * params: [startDate, startDate, endDate, endDate, status, status]
-   */
+  /* IMPORTANT: GET_EMPLOYEE_REPORT now uses the same placeholder ordering
+     used elsewhere: startDate, startDate, endDate, endDate, status, status, dept, dept
+     This matches the parameter ordering used by reportUtils.fetchRows / service callers. */
   GET_EMPLOYEE_REPORT: `
-    SELECT
-      e.employee_id,
-      e.first_name,
-      e.last_name,
-      CONCAT(e.first_name, ' ', e.last_name) AS name,
-      e.email,
-      DATE_FORMAT(e.dob, '%Y-%m-%d') AS dob,
-      e.phone_number,
-      e.status,
-      p.address,
-      p.father_name,
-      p.mother_name,
-      p.gender,
-      p.marital_status,
-      DATE_FORMAT(p.spouse_dob, '%Y-%m-%d') AS spouse_dob,
-      p.aadhaar_number,
-      p.pan_number,
-      p.photo_url,
-      pr.domain,
-      pr.employee_type,
-      DATE_FORMAT(pr.joining_date, '%Y-%m-%d') AS joining_date,
-      pr.role,
-      pr.position,
-      pr.department_id,
-      COALESCE(d.name, '') AS department_name,
-      pr.supervisor_id,
-      CONCAT(sup.first_name, ' ', sup.last_name) AS supervisor_name,
-      pr.salary,
-      bd.bank_name,
-      bd.account_number,
-      bd.ifsc_code,
-      bd.branch_name AS bank_branch,
-      DATE_FORMAT(e.created_at, '%Y-%m-%d %H:%i:%s') AS created_at
-    FROM employees e
-    LEFT JOIN employee_personal p ON e.employee_id = p.employee_id
-    LEFT JOIN employee_professional pr ON e.employee_id = pr.employee_id
-    LEFT JOIN departments d ON pr.department_id = d.id
-    LEFT JOIN employee_bank_details bd ON e.employee_id = bd.employee_id
-    LEFT JOIN employees sup ON pr.supervisor_id = sup.employee_id
-    WHERE ( ? IS NULL OR (e.created_at >= ? ) )
-      AND ( ? IS NULL OR (e.created_at < DATE_ADD(?, INTERVAL 1 DAY) ) )
-      AND ( ? IS NULL OR LOWER(e.status) = LOWER(?) )
-    ORDER BY e.created_at DESC
-  `,
+  SELECT
+    e.employee_id,
+    e.first_name,
+    e.last_name,
+    CONCAT(COALESCE(e.first_name, ''), ' ', COALESCE(e.last_name, '')) AS employee_name,
+    e.email,
+    DATE_FORMAT(e.dob, '%Y-%m-%d') AS dob,
+    e.phone_number,
+    e.status,
 
-  /**
-   * Vendor report
-   * kept two extra no-op placeholders for compatibility with buildDateStatusParams usage
-   */
+    -- personal (employee_personal)
+    p.address,
+    p.father_name,
+    p.mother_name,
+    p.gender,
+    p.marital_status,
+    p.spouse_name,
+    DATE_FORMAT(p.marriage_date, '%Y-%m-%d') AS marriage_date,
+    p.aadhaar_number,
+    p.aadhaar_doc_url,
+    p.pan_number,
+    p.pan_doc_url,
+    p.passport_number,
+    p.passport_doc_url,
+    p.voter_id,
+    p.voter_id_doc_url,
+   
+    p.insurance_doc,
+    p.alternate_email,
+    p.alternate_number,
+    p.blood_group,
+    p.emergency_name,
+    p.emergency_number,
+    DATE_FORMAT(p.father_dob, '%Y-%m-%d') AS father_dob,
+    p.father_gov_doc_url,
+    DATE_FORMAT(p.mother_dob, '%Y-%m-%d') AS mother_dob,
+    p.mother_gov_doc_url,
+    DATE_FORMAT(p.spouse_dob, '%Y-%m-%d') AS spouse_dob,
+    p.spouse_gov_doc_url,
+    p.child1_name,
+    DATE_FORMAT(p.child1_dob, '%Y-%m-%d') AS child1_dob,
+    p.child1_gov_doc_url,
+    p.child2_name,
+    DATE_FORMAT(p.child2_dob, '%Y-%m-%d') AS child2_dob,
+    p.child2_gov_doc_url,
+    p.child3_name,
+    DATE_FORMAT(p.child3_dob, '%Y-%m-%d') AS child3_dob,
+    p.child3_gov_doc_url,
+    p.driving_license_number,
+    p.driving_license_doc_url,
+    p.uan_number,
+    p.pf_number,
+    p.esi_number,
+
+    -- professional (employee_professional)
+    pr.domain,
+    pr.employee_type,
+    DATE_FORMAT(pr.joining_date, '%Y-%m-%d') AS joining_date,
+    pr.role,
+    pr.position,
+    pr.department_id,
+    COALESCE(d.name, '') AS department_name,
+    pr.supervisor_id,
+    CONCAT(sup.first_name, ' ', sup.last_name) AS supervisor_name,
+    pr.salary,
+    pr.resume_url,
+
+    -- bank details (employee_bank_details)
+    bd.bank_name,
+    bd.account_number,
+    bd.ifsc_code,
+    bd.branch_name AS bank_branch,
+
+    DATE_FORMAT(e.created_at, '%Y-%m-%d %H:%i:%s') AS created_at
+  FROM employees e
+  LEFT JOIN employee_personal p ON e.employee_id = p.employee_id
+  LEFT JOIN employee_professional pr ON e.employee_id = pr.employee_id
+  LEFT JOIN departments d ON pr.department_id = d.id
+  LEFT JOIN employee_bank_details bd ON e.employee_id = bd.employee_id
+  LEFT JOIN employees sup ON pr.supervisor_id = sup.employee_id
+  WHERE
+    ( ? IS NULL OR (e.created_at >= ? ) )
+    AND ( ? IS NULL OR (e.created_at < DATE_ADD(?, INTERVAL 1 DAY) ) )
+    AND ( ? IS NULL OR LOWER(e.status) = LOWER(?) )
+    AND ( ? IS NULL OR pr.department_id = ? )
+  ORDER BY e.created_at DESC
+`,
+
   GET_VENDOR_REPORT: `
   SELECT
     v.vendor_id,
@@ -165,16 +203,11 @@ ORDER BY r.created_at DESC
   FROM vendors v
   WHERE ( ? IS NULL OR (COALESCE(v.created_at, NOW()) >= ? ) )
     AND ( ? IS NULL OR (COALESCE(v.created_at, NOW()) < DATE_ADD(?, INTERVAL 1 DAY) ) )
-    /* keep placeholders for compatibility with existing param building (no-op) */
     AND ( ? IS NULL OR 1=1 )
     AND ( ? IS NULL OR 1=1 )
   ORDER BY COALESCE(v.created_at, NOW()) DESC
 `,
 
-  /**
-   * Asset report
-   * This query uses multiple status placeholders to allow flexible matching in the SQL.
-   */
   GET_ASSET_REPORT: `
   SELECT
     a.asset_id,
@@ -193,7 +226,7 @@ ORDER BY r.created_at DESC
   WHERE ( ? IS NULL OR (COALESCE(a.created_at, a.valuation_date, NOW()) >= ? ) )
     AND ( ? IS NULL OR (COALESCE(a.created_at, a.valuation_date, NOW()) < DATE_ADD(?, INTERVAL 1 DAY) ) )
     AND (
-      ? IS NULL -- if status param is null -> no status filter
+      ? IS NULL
       OR (
         LOWER(?) = 'all'
         OR (LOWER(?) = 'assigned' AND LOWER(a.status) = 'in use')
@@ -206,9 +239,6 @@ ORDER BY r.created_at DESC
   ORDER BY COALESCE(a.created_at, a.valuation_date, NOW()) DESC
 `,
 
-  /**
-   * Attendance report
-   */
   GET_EMPLOYEE_ATTENDANCE_REPORT: `
     SELECT
       punch_id,
@@ -225,14 +255,9 @@ ORDER BY r.created_at DESC
     FROM emp_attendence
     WHERE ( ? IS NULL OR (punchin_time >= ? ) )
       AND ( ? IS NULL OR (punchin_time < DATE_ADD(?, INTERVAL 1 DAY) ) )
-      AND ( ? IS NULL OR LOWER(punch_status) = LOWER(?) )
     ORDER BY punchin_time DESC
   `,
 
-  /**
-   * Supervisor-driven tasks (task report) — maps to `tasks` table (supervisor-driven)
-   * This is used by reportService.getTaskRows and handler.downloadTasksSupervisorReport
-   */
   GET_SUPERVISOR_TASK_REPORT: `
   SELECT
     t.task_id,
@@ -255,10 +280,6 @@ ORDER BY r.created_at DESC
   ORDER BY t.start_date DESC, t.task_id ASC
   `,
 
-  /**
-   * Employee-driven weekly tasks — maps to `weekly_tasks` table (employee-driven)
-   * This is used by reportService.getWeeklyTaskRows and handler.downloadTasksEmployeeReport
-   */
   GET_EMPLOYEE_TASK_REPORT: `
   SELECT
     wt.task_id,
@@ -291,9 +312,6 @@ ORDER BY r.created_at DESC
   ORDER BY wt.task_date DESC, wt.task_id ASC
 `,
 
-  /**
-   * Departments
-   */
   GET_DEPARTMENTS: `
     SELECT id AS department_id, name AS department_name
     FROM departments
@@ -301,18 +319,10 @@ ORDER BY r.created_at DESC
     LIMIT 1000
   `,
 
-  /**
-   * Department name by id (used by applyEmployeeAndDepartmentFilters fallback)
-   * params: [departmentId]
-   */
   GET_DEPARTMENT_NAME_BY_ID: `
     SELECT name FROM departments WHERE id = ? LIMIT 1
   `,
 
-  /**
-   * Employee search (used by searchEmployees in service)
-   * params: [qLike, qLike, qLike, departmentId, departmentId, limit]
-   */
   SEARCH_EMPLOYEES: `
     SELECT
       e.employee_id,
@@ -329,10 +339,6 @@ ORDER BY r.created_at DESC
     LIMIT ?
   `,
 
-  /**
-   * Backward-compatible weekly alias (kept for any legacy callers)
-   * This intentionally duplicates the same weekly_tasks SQL but kept as a separate key
-   */
   GET_WEEKLY_TASK_REPORT: `
   SELECT
     wt.task_id,
@@ -361,11 +367,7 @@ ORDER BY r.created_at DESC
 `,
 };
 
-/* aliases to keep backwards compatibility with reportService expectations */
 const q = module.exports;
-// Explicitly map the canonical API names so reportService.getTaskRows uses the supervisor-driven SQL
 q.GET_TASK_REPORT = q.GET_SUPERVISOR_TASK_REPORT;
-// Ensure the weekly/employee alias points to the employee-driven weekly_tasks SQL
 q.GET_WEEKLY_TASK_REPORT = q.GET_EMPLOYEE_TASK_REPORT;
-
 module.exports = q;
