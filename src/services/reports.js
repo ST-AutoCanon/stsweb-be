@@ -92,7 +92,6 @@ function getFieldDisplayNames(component = "default") {
       "salary",
       "joining_date",
       "resume_url",
-      "photo_url",
     ],
     leaves: [
       "leave_id",
@@ -245,7 +244,7 @@ async function attachEmployeeNames(rows) {
   // Query employees table for name fields
   const empSql = `SELECT employee_id, first_name, last_name, email FROM employees WHERE employee_id IN (${placeholders})`;
   // Query professional table for additional info
-  const profSql = `SELECT employee_id, department_id, domain, employee_type, role, position, supervisor_id, salary, resume_url, joining_date, photo_url FROM employee_professional WHERE employee_id IN (${placeholders})`;
+  const profSql = `SELECT employee_id, department_id, domain, employee_type, role, position, supervisor_id, salary, resume_url, joining_date, FROM employee_professional WHERE employee_id IN (${placeholders})`;
   try {
     const [empRows, profRows] = await Promise.all([
       fetchRows(empSql, empIds).catch(() => []),
@@ -279,7 +278,6 @@ async function attachEmployeeNames(rows) {
           salary: pr.salary != null ? pr.salary : null,
           resume_url: pr.resume_url || null,
           joining_date: pr.joining_date || null,
-          photo_url: pr.photo_url || null,
         });
       }
     }
@@ -315,7 +313,7 @@ async function attachEmployeeNames(rows) {
         if (!r.position && prof.position) r.position = prof.position;
         if ((!r.joining_date || r.joining_date === "") && prof.joining_date)
           r.joining_date = prof.joining_date;
-        if (!r.photo_url && prof.photo_url) r.photo_url = prof.photo_url;
+
         if (!r.salary && prof.salary != null) r.salary = prof.salary;
       }
     }

@@ -726,6 +726,7 @@ const constructWhereClause = (
 
 const getLeaveQueriesForTeamLead = async (filters = {}, teamLeadId) => {
   try {
+    // fetch professional profile for requester
     const [profRows] = await db.execute(queries.GET_EMP_PROF_BY_ID, [
       teamLeadId,
     ]);
@@ -733,15 +734,29 @@ const getLeaveQueriesForTeamLead = async (filters = {}, teamLeadId) => {
       throw new Error("Team lead professional profile not found.");
     const prof = profRows[0];
     const roleName = (prof.role || "").toString().trim().toLowerCase();
+
+    // define identity sets
     const supervisorOrAbove = new Set([
       "supervisor",
       "manager",
       "admin",
       "ceo",
       "super admin",
+      "superadmin",
+      "super_admin",
     ]);
-    const managerOrAbove = new Set(["manager", "admin", "ceo", "super admin"]);
+    const managerOrAbove = new Set([
+      "manager",
+      "admin",
+      "ceo",
+      "super admin",
+      "superadmin",
+      "super_admin",
+    ]);
+
     const employeeIdSet = new Set();
+
+    // add direct reports if requester is supervisor or above
     if (supervisorOrAbove.has(roleName)) {
       const [directRows] = await db.execute(
         queries.GET_EMPLOYEES_BY_SUPERVISOR,
@@ -751,6 +766,8 @@ const getLeaveQueriesForTeamLead = async (filters = {}, teamLeadId) => {
         if (r && r.employee_id) employeeIdSet.add(r.employee_id);
       });
     }
+
+    // add department employees if requester is manager-or-above and department exists
     if (managerOrAbove.has(roleName) && prof.department_id) {
       try {
         const [deptRows] = await db.execute(
@@ -767,7 +784,25 @@ const getLeaveQueriesForTeamLead = async (filters = {}, teamLeadId) => {
         );
       }
     }
+
+    // IMPORTANT: ensure supervisors do not see their own leave in the "team" view.
+    // Only manager-or-above should see their own leaves in the team listing.
+    if (!managerOrAbove.has(roleName)) {
+      // remove the teamLeadId from the set if present
+      if (employeeIdSet.has(String(teamLeadId))) {
+        employeeIdSet.delete(String(teamLeadId));
+        console.debug(
+          "[getLeaveQueriesForTeamLead] Removed requester id from employee set for supervisor (no self leaves in team list)."
+        );
+      }
+    } else {
+      // If manager or above, ensure the manager can see themselves (keep teamLeadId)
+      employeeIdSet.add(String(teamLeadId));
+    }
+
     const employeeIds = Array.from(employeeIdSet);
+
+    // build where clause and params
     const { whereConditions, params } = constructWhereClause(
       filters,
       employeeIds,
@@ -794,7 +829,7 @@ const getLeaveQueriesForTeamLead = async (filters = {}, teamLeadId) => {
 
 module.exports = {
   getLeaveQueries,
-  updateLeaveRequest,
+  updateLeaveRequest, // ensure you export the full updateLeaveRequest implemented above
   submitLeaveRequest,
   getLeaveRequests,
   editLeaveRequest,

@@ -1,4 +1,6 @@
 // src/services/reportRenders.js
+// Updated: centers tables with few columns (<=3) so they don't shrink to left
+
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -171,19 +173,14 @@ function computeColumnPercents(rows) {
   const headers = Object.keys(rows[0] || {});
   if (!headers.length) return [];
   const count = headers.length;
-  // Base percent as floating point with high precision then distribute remainder.
   const base = 100 / count;
   const percents = headers.map(() => base);
-  // Now normalize to avoid floating rounding issues — distribute remainder to last column
   const sum = percents.reduce((s, v) => s + v, 0);
   const diff = 100 - sum;
   if (Math.abs(diff) > 1e-9)
     percents[percents.length - 1] = percents[percents.length - 1] + diff;
-  // Round to 2 decimal places for safety
   return percents.map((p) => Math.round(p * 100) / 100);
 }
-
-/* ------------------ Timestamp / meta helpers (Asia/Kolkata) ------------------ */
 
 function formatTimestampAsiaKolkata(d = new Date()) {
   try {
@@ -209,11 +206,6 @@ function formatTimestampAsiaKolkata(d = new Date()) {
   }
 }
 
-/**
- * generateMetaHeaderHtml(headerInfo)
- * accepts strings or objects for department/employee/status and renders readable string.
- * If headerInfo._smallCentered === true then it will center the meta block.
- */
 function generateMetaHeaderHtml(headerInfo) {
   const rawStatus =
     headerInfo && headerInfo.status ? headerInfo.status : headerInfo?.status;
@@ -321,7 +313,6 @@ function generateMetaHeaderHtml(headerInfo) {
         .report-meta .meta-left { display: flex; flex-direction: column; gap: 4px; }
         .report-meta .meta-item { font-size: 12px; color: #333; line-height: 1.2; }
         .report-meta .meta-right { text-align: right; min-width: 200px; }
-        .report-meta .time { font-size: 11px; color: #666; font-family: monospace; }
         @media (max-width: 480px) {
           .report-meta { flex-direction: column; gap: 8px; align-items: stretch; }
           .report-meta .meta-right { text-align: left; min-width: auto; }
@@ -343,18 +334,13 @@ function generateMetaHeaderHtml(headerInfo) {
   }
   return html;
 }
-/**
- * Insert zero-width-space (\u200B) into long continuous tokens so renderers can wrap them.
- * Example: breakLongWords("aaaaaaaa...long...", 40) -> inserts \u200B every 40 chars
- */
+
 function breakLongWords(s, limit = 40) {
   if (!s || typeof s !== "string") return s;
-  // If there are spaces/newlines, tokens are naturally breakable — only worry about long tokens
-  const tokens = s.split(/(\s+)/); // keep separators
+  const tokens = s.split(/(\s+)/);
   for (let i = 0; i < tokens.length; i++) {
     const tok = tokens[i];
     if (!tok || tok.length <= limit) continue;
-    // Only modify tokens that do not contain whitespace
     if (!/\s/.test(tok)) {
       let out = "";
       for (let j = 0; j < tok.length; j += limit) {
@@ -366,14 +352,6 @@ function breakLongWords(s, limit = 40) {
   }
   return tokens.join("");
 }
-
-/**
- * rowsToHtml - improved for overflow handling:
- * - uses pixel widths to avoid LibreOffice shrink
- * - strong wrapping rules (overflow-wrap, word-break, hyphens)
- * - inserts zero-width-space into very long tokens
- * - centers headers & data
- */
 function rowsToHtml(title, rows) {
   const inputRows = Array.isArray(rows) ? rows.map((r) => ({ ...r })) : [];
   let headerInfo = null;
@@ -385,31 +363,44 @@ function rowsToHtml(title, rows) {
   const headerCols =
     inputRows && inputRows.length ? Object.keys(inputRows[0]) : [];
   const colCount = headerCols.length || 0;
+  const smallTableMode = colCount > 0 && colCount <= 3;
 
-  // Pixel-based layout
   const pageContentWidthPx = 760;
   const minColPx = 120;
   let computedColPx =
     colCount > 0 ? Math.floor(pageContentWidthPx / colCount) : minColPx;
   if (computedColPx < minColPx) computedColPx = minColPx;
   const maxTableWidthPx = 1200;
-  const tableWidthPx = Math.min(
-    Math.max(computedColPx * Math.max(1, colCount), pageContentWidthPx),
-    maxTableWidthPx
-  );
 
-  const colgroup = headerCols
-    .map((h, i) => {
-      const widthPx =
-        i === headerCols.length - 1
-          ? Math.max(
-              minColPx,
-              tableWidthPx - computedColPx * (headerCols.length - 1)
-            )
-          : computedColPx;
-      return `<col style="width:${widthPx}px; min-width:${widthPx}px; box-sizing:border-box">`;
-    })
-    .join("");
+  let tableWidthPx;
+  if (smallTableMode) {
+    const tightColPx = Math.max(
+      80,
+      Math.ceil((pageContentWidthPx - 160) / colCount)
+    );
+    tableWidthPx = Math.min(tightColPx * colCount, maxTableWidthPx);
+  } else {
+    tableWidthPx = Math.min(
+      Math.max(computedColPx * Math.max(1, colCount), pageContentWidthPx),
+      maxTableWidthPx
+    );
+  }
+
+  const colgroup = smallTableMode
+    ? ""
+    : headerCols
+        .map((h, i) => {
+          const widthPx = headerCols.length
+            ? i === headerCols.length - 1
+              ? Math.max(
+                  minColPx,
+                  tableWidthPx - computedColPx * (headerCols.length - 1)
+                )
+              : computedColPx
+            : computedColPx;
+          return `<col style="width:${widthPx}px; min-width:${widthPx}px; box-sizing:border-box">`;
+        })
+        .join("");
 
   const colors = {
     titleColor: "#153243",
@@ -430,7 +421,7 @@ function rowsToHtml(title, rows) {
   const cellPadding = smallMode ? "2px" : "6px";
   const tableFont = "Arial, Helvetica, sans-serif";
 
-  const thInlineBase = [
+  const thBaseParts = [
     `border:${cellBorderPx}px solid ${colors.borderColor}`,
     `padding:${cellPadding}`,
     `font-size:${thFontSizePx}px`,
@@ -442,25 +433,28 @@ function rowsToHtml(title, rows) {
     `font-weight:600`,
     `box-sizing:border-box`,
     `overflow:hidden`,
-    `white-space:normal`, // allow header wrap if needed
+    `white-space:normal`,
     `word-break:break-word`,
     `overflow-wrap:anywhere`,
     `hyphens:auto`,
-  ].join("; ");
+  ];
 
-  const tdInlineBase = [
+  const tdBaseParts = [
     `border:${cellBorderPx}px solid ${colors.borderColor}`,
     `padding:${cellPadding}`,
     `font-size:${tdFontSizePx}px`,
     `vertical-align:middle`,
-    `text-align:center`, // center the input data horizontally
+    `text-align:center`,
     `word-break:break-word`,
     `overflow-wrap:anywhere`,
-    `white-space:pre-wrap`, // preserve newlines but allow wrapping
+    `white-space:pre-wrap`,
     `hyphens:auto`,
     `color:${colors.tableText}`,
     `box-sizing:border-box`,
-  ].join("; ");
+  ];
+
+  const thInlineBase = thBaseParts.join("; ");
+  const tdInlineBase = tdBaseParts.join("; ");
 
   const headerDisplayMap =
     headerInfo && headerInfo._field_display_map
@@ -468,18 +462,13 @@ function rowsToHtml(title, rows) {
       : null;
 
   const head = headerCols
-    .map((h, i) => {
+    .map((h) => {
       const label =
         headerDisplayMap && headerDisplayMap[h] ? headerDisplayMap[h] : h;
-      const widthPx = headerCols.length
-        ? i === headerCols.length - 1
-          ? Math.max(
-              minColPx,
-              tableWidthPx - computedColPx * (headerCols.length - 1)
-            )
-          : computedColPx
-        : computedColPx;
-      return `<th style="${thInlineBase}; width:${widthPx}px;">${escapeHtml(
+      const widthAttr = smallTableMode
+        ? ""
+        : ` width:${Math.round(computedColPx)}px;`;
+      return `<th style="${thInlineBase}${widthAttr}">${escapeHtml(
         breakLongWords(String(label), 40)
       )}</th>`;
     })
@@ -491,7 +480,7 @@ function rowsToHtml(title, rows) {
           .map((r, rowIndex) => {
             const bg = rowIndex % 2 === 0 ? colors.rowOddBg : colors.rowEvenBg;
             const tds = headerCols
-              .map((c, i) => {
+              .map((c) => {
                 let cell = r[c];
                 if (cell === null || typeof cell === "undefined") cell = "";
                 if (typeof cell === "object" && cell !== null) {
@@ -502,18 +491,11 @@ function rowsToHtml(title, rows) {
                     cell.value ||
                     JSON.stringify(cell);
                 }
-                // insert soft-breaks into very long tokens to avoid unbreakable strings
                 cell = breakLongWords(String(cell), 40);
-                const widthPx = headerCols.length
-                  ? i === headerCols.length - 1
-                    ? Math.max(
-                        minColPx,
-                        tableWidthPx - computedColPx * (headerCols.length - 1)
-                      )
-                    : computedColPx
-                  : computedColPx;
-                // escapeHtml will convert & < > etc.
-                return `<td style="${tdInlineBase}; background:${bg}; width:${widthPx}px;">${escapeHtml(
+                const widthAttr = smallTableMode
+                  ? ""
+                  : ` width:${Math.round(computedColPx)}px;`;
+                return `<td style="${tdInlineBase}; background:${bg};${widthAttr}">${escapeHtml(
                   cell
                 )}</td>`;
               })
@@ -527,12 +509,11 @@ function rowsToHtml(title, rows) {
           colors.rowOddBg
         }">No data available</td></tr>`;
 
-  // Force explicit pixel width and center the table
-  const tableInlineStyle = `border:${cellBorderPx}px solid ${colors.borderColor}; border-collapse:collapse; width:${tableWidthPx}px; max-width:100%; margin:0 auto; table-layout:fixed;`;
-
-  if (headerInfo) {
-    headerInfo._smallCentered = colCount <= 3;
-  }
+  const tableInlineStyleSmall = `border:${cellBorderPx}px solid ${colors.borderColor}; border-collapse:collapse; width:auto; max-width:100%; margin:0; table-layout:auto; display:inline-table;`;
+  const tableInlineStyleLarge = `border:${cellBorderPx}px solid ${colors.borderColor}; border-collapse:collapse; width:${tableWidthPx}px; max-width:100%; margin:0 auto; table-layout:fixed; display:table;`;
+  const tableInlineStyle = smallTableMode
+    ? tableInlineStyleSmall
+    : tableInlineStyleLarge;
 
   const css = `
     @page { size: A4 ${
@@ -543,27 +524,29 @@ function rowsToHtml(title, rows) {
     colors.tableText
   }; margin:0; padding:0; -webkit-print-color-adjust: exact; }
     .wrap { box-sizing: border-box; width: 100%; padding: 6px; margin: 0; overflow: visible; display:block; }
-    .meta { margin-bottom:8px; font-size:9px; color:${
-      colors.metaColor
-    }; text-align:left; }
+    .meta { margin-bottom:8px; font-size:9px; color:${colors.metaColor}; ${
+    smallTableMode ? "text-align:center;" : "text-align:left;"
+  } }
     thead { display: table-header-group; }
     tfoot { display: table-footer-group; }
     tr { page-break-inside: avoid; }
     th { text-transform: none; }
     td, th { box-sizing: border-box; overflow-wrap:anywhere; word-break:break-word; hyphens:auto; }
+    .table-center { text-align:center; width:100%; }
+    .table-center table { margin:0 auto; }
     @media (max-width: 480px) {
       .meta { font-size: 11px; }
-      table { width: 100% !important; }
+      table { width: 100% !important; display:table !important; }
     }
   `;
 
   const h2Inline = `font-size:${titleFontSizePx}px; font-weight:700; margin:0 0 10px 0; text-align:center; color:${colors.titleColor}`;
 
   const metaHeaderHtml = generateMetaHeaderHtml(headerInfo);
-
   const theadHtml = `<thead><tr>${
     head || `<th style="${thInlineBase}">Data</th>`
   }</tr></thead>`;
+  const colgroupHtml = colgroup ? `<colgroup>${colgroup}</colgroup>` : "";
 
   return `<!doctype html>
 <html>
@@ -576,11 +559,13 @@ function rowsToHtml(title, rows) {
     <div class="wrap">
       <h2 style="${h2Inline}">${escapeHtml(title)}</h2>
       ${metaHeaderHtml}
-      <table style="${tableInlineStyle}">
-        <colgroup>${colgroup}</colgroup>
-        ${theadHtml}
-        <tbody>${body}</tbody>
-      </table>
+      <div class="table-center">
+        <table style="${tableInlineStyle}">
+          ${colgroupHtml}
+          ${theadHtml}
+          <tbody>${body}</tbody>
+        </table>
+      </div>
     </div>
   </body>
 </html>`;

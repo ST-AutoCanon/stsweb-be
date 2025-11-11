@@ -40,19 +40,30 @@ async function dbExec(sql, params = []) {
 
 const MAX_DOWNLOAD_FIELDS_TASKS = 13;
 
+/**
+ * Build report metadata (human-friendly) from query parameters.
+ * It will prefer emp_status when present and add both normalized token (meta.status)
+ * and original label (meta.statusLabel) so downstream renderers can show friendly text.
+ */
 async function buildMetaFromReqQuery(query = {}) {
   const meta = {};
-  const rawStatus =
+
+  // Prefer emp_status (employee-driven) but fall back to status/task_status
+  const rawEmpStatus =
+    coerceToString(query.emp_status, null) ||
+    coerceToString(query.empStatus, null) ||
     coerceToString(query.status, null) ||
     coerceToString(query.task_status, null);
-  if (rawStatus) {
+
+  if (rawEmpStatus) {
     try {
-      meta.status =
-        typeof reportService.normalizeStatusForQuery === "function"
-          ? reportService.normalizeStatusForQuery(rawStatus) || rawStatus
-          : rawStatus;
+      const normalized = normalizeStatusForQuery(rawEmpStatus);
+      meta.status = normalized || rawEmpStatus;
+      // Keep original label too for nicer PDF cover pages
+      meta.statusLabel = rawEmpStatus;
     } catch (e) {
-      meta.status = rawStatus;
+      meta.status = rawEmpStatus;
+      meta.statusLabel = rawEmpStatus;
     }
   }
 
@@ -137,7 +148,10 @@ async function buildMetaFromReqQuery(query = {}) {
   return meta;
 }
 
-/* Supervisor-driven tasks */
+/* --------------------------
+   Supervisor-driven tasks
+   (kept behaviour unchanged)
+   -------------------------- */
 async function downloadTasksSupervisorReport(req, res) {
   console.log(
     "[reportTasksHandler] downloadTasksSupervisorReport called - query:",
@@ -255,15 +269,33 @@ async function downloadTasksSupervisorReport(req, res) {
   }
 }
 
-/* Employee-driven weekly tasks */
+/* --------------------------
+   Employee-driven weekly tasks
+   - Only filter by emp_status (emp_status column)
+   - Accepts emp_status (or empStatus) parameter from UI
+   - UI options expected: "All", "Completed", "Not started", "Working"
+   -------------------------- */
 async function downloadTasksEmployeeReport(req, res) {
   console.log(
     "[reportTasksHandler] downloadTasksEmployeeReport called - query:",
     req.query
   );
   try {
+    // parseDates will normalize "status" if provided under 'status'
     const parsed = parseDates(req.query);
-    let { startDate, endDate, status, format, fields } = parsed;
+    let { startDate, endDate, status: parsedStatus, format, fields } = parsed;
+
+    // Prefer emp_status (employee-driven filter). Support emp_status or empStatus keys.
+    const rawEmpStatus =
+      coerceToString(req.query.emp_status, null) ||
+      coerceToString(req.query.empStatus, null) ||
+      // fall back to parsed status only if emp_status absent
+      coerceToString(parsedStatus, null) ||
+      null;
+
+    // Normalize emp_status token to canonical form (or null if 'all' / empty)
+    const normalizedEmpStatus = normalizeStatusForQuery(rawEmpStatus);
+
     const employeeId = coerceToString(req.query.employee_id, null);
     const departmentId = coerceToString(req.query.department_id, null);
 
@@ -282,24 +314,38 @@ async function downloadTasksEmployeeReport(req, res) {
     if (typeof reportService.getWeeklyTaskRows !== "function")
       return res.status(500).json({ message: "Server misconfiguration" });
 
-    const rawWeekly = await reportService.getWeeklyTaskRows(
-      startDate,
-      endDate,
-      status,
-      fields,
-      employeeId,
-      departmentId
-    );
+    let rawWeekly;
+    try {
+      // We pass parsedStatus to service (if service expects general status filtering).
+      // We intentionally do NOT rely on service to apply emp_status filter — we apply it locally,
+      // so that employee-driven `emp_status` behavior is consistent regardless of service internals.
+      rawWeekly = await reportService.getWeeklyTaskRows(
+        startDate,
+        endDate,
+        parsedStatus,
+        fields,
+        employeeId,
+        departmentId
+      );
+    } catch (e) {
+      console.error(
+        "[reportTasksHandler] getWeeklyTaskRows failed:",
+        e && (e.stack || e.message)
+      );
+      // Surface DB/service errors so they're visible in logs and client receives a meaningful message.
+      const msg =
+        e && e.message && typeof e.message === "string"
+          ? `Service error: ${e.message}`
+          : "Failed to fetch weekly task rows";
+      return res.status(500).json({ message: msg });
+    }
+
     const rows = Array.isArray(rawWeekly) ? rawWeekly : [];
 
-    const statusCandidate = normalizeStatusForQuery(status);
+    // IMPORTANT: filter only on emp_status (per your requirement).
+    // If normalizedEmpStatus is null => treat as "All" (no filter).
     const filtered = rows.filter((w) =>
-      statusMatches(statusCandidate, [
-        w.emp_status,
-        w.sup_status,
-        w.sup_review_status,
-        w.status,
-      ])
+      statusMatches(normalizedEmpStatus, [w && w.emp_status])
     );
 
     if (isPreview) {
@@ -307,8 +353,12 @@ async function downloadTasksEmployeeReport(req, res) {
         filtered.length === 0
           ? "No weekly task data for selected date range"
           : undefined;
+
+      // sendPreviewResponse builds some meta from req.query; it will not see emp_status in meta.status
+      // unless emp_status is present in req.query (it usually is). sendPreviewResponse will still return rows.
       return sendPreviewResponse(req, res, filtered, msg);
     }
+
     if (filtered.length === 0)
       return res
         .status(404)
@@ -317,6 +367,10 @@ async function downloadTasksEmployeeReport(req, res) {
     const weeklyForExcel = pickFields(filtered, fields);
     const weeklyForPdf = filtered;
     const meta = await buildMetaFromReqQuery(req.query || {});
+    // ensure meta.status reflects emp_status canonical token (if present)
+    if (normalizedEmpStatus) meta.status = normalizedEmpStatus;
+    // keep a friendly label if we had a raw label
+    if (rawEmpStatus && !meta.statusLabel) meta.statusLabel = rawEmpStatus;
     console.debug("[reportTasksHandler] render meta (employee):", meta);
 
     if (format === "xlsx") {
