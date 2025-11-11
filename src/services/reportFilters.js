@@ -70,7 +70,7 @@ function normalizeStatusForQuery(status) {
     // attendance
     "punch in": "punch in",
     "punch out": "punch out",
-    // tasks
+    // tasks (supervisor and employee)
     "yet to start": "yet to start",
     "in progress": "in progress",
     "on hold": "on hold",
@@ -88,6 +88,18 @@ function normalizeStatusForQuery(status) {
     "in use": "in use",
     returned: "returned",
     decommissioned: "decommissioned",
+
+    // ----- NEW: employee-driven task statuses -----
+    // UI shows: "Completed", "Not started", "Working"
+    completed: "completed",
+    complete: "completed",
+    "not started": "not started",
+    notstarted: "not started",
+    "not-started": "not started",
+    not_started: "not started",
+    working: "working",
+    "in progress": "working", // map common synonym to 'working'
+    "working on": "working",
   };
 
   if (map[normalized]) return map[normalized];

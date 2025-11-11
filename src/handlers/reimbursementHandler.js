@@ -1,3 +1,4 @@
+// handlers/reimbursementHandler.js
 const reimbursementService = require("../services/reimbursementService");
 const multer = require("multer");
 const path = require("path");
@@ -36,14 +37,8 @@ const storage = multer.diskStorage({
       "reimbursement",
       year,
       month,
-      req.user.employeeId
+      String(req.user?.employeeId || req.body.employeeId || "unknown")
     );
-
-    // Log for debugging
-    console.log("[MULTER] Upload date:", isoDate);
-    console.log("[MULTER] Year/month:", year, month);
-    console.log("[MULTER] Employee ID:", req.user.employeeId);
-    console.log("[MULTER] Destination folder:", dest);
 
     // Ensure folder exists
     fs.mkdirSync(dest, { recursive: true });
@@ -53,11 +48,6 @@ const storage = multer.diskStorage({
   filename: (req, file, cb) => {
     const datePrefix = new Date().toISOString().slice(0, 10);
     const filename = `${datePrefix}-${Date.now()}-${file.originalname}`;
-
-    // Log for debugging
-    console.log("[MULTER] Original filename:", file.originalname);
-    console.log("[MULTER] Generated filename:", filename);
-
     cb(null, filename);
   },
 });
@@ -81,7 +71,7 @@ function fileFilter(req, file, cb) {
 const upload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
 });
 
 // fallback validation
@@ -95,42 +85,52 @@ function validateAttachments(files) {
   return null;
 }
 
+// Utility: safe unlink sync
+function safeUnlinkSync(fp) {
+  try {
+    if (fs.existsSync(fp)) fs.unlinkSync(fp);
+  } catch (e) {
+    console.warn("Failed to delete file:", fp, e.message);
+  }
+}
+
 // ── CONTROLLER METHODS ────────────────────────────────────────────────────────
 
 exports.generateReimbursementPDF = async (req, res) => {
   try {
     const { claimId } = req.params;
-    console.log("Fetching claim details for Claim ID:", claimId);
+    if (!claimId) return res.status(400).json({ error: "claimId required" });
 
     // Fetch claim details
-    const claimResult = await db.query(queries.GET_CLAIM_DETAILS, [claimId]);
-    if (!claimResult.length) {
-      return res.status(404).json({ error: "Claim not found" });
-    }
-
-    let claim = Array.isArray(claimResult[0])
-      ? claimResult[0][0]
-      : claimResult[0];
+    const [claimRows] = await db.query(queries.GET_CLAIM_DETAILS, [claimId]);
+    const claim = Array.isArray(claimRows) ? claimRows[0] : claimRows;
     if (!claim || !claim.employee_id) {
       return res.status(404).json({ error: "Claim not found" });
     }
 
     // Fetch employee
-    const employeeResult = await db.query(queries.GET_EMPLOYEE_DETAILS, [
+    const [employeeRows] = await db.query(queries.GET_EMPLOYEE_DETAILS, [
       claim.employee_id,
     ]);
-    const employee = Array.isArray(employeeResult[0])
-      ? employeeResult[0][0]
-      : employeeResult[0];
+    const employee = Array.isArray(employeeRows)
+      ? employeeRows[0]
+      : employeeRows;
     if (!employee || !employee.name) {
       return res.status(404).json({ error: "Employee details not found" });
     }
 
-    const rawAttachments = await db.query(queries.GET_ATTACHMENTS, [claimId]);
-    const attachments = rawAttachments.flat();
+    // Fetch attachments
+    const [attachmentsRows] = await db.query(queries.GET_ATTACHMENTS, [
+      claimId,
+    ]);
+    const attachments = Array.isArray(attachmentsRows)
+      ? attachmentsRows
+      : attachmentsRows || [];
 
-    // Filter out any attachments without a file_path
-    const attachmentsWithFiles = attachments.filter((att) => att.file_path);
+    // Keep only attachments with file_path
+    const attachmentsWithFiles = attachments.filter(
+      (att) => att && att.file_path
+    );
     if (attachmentsWithFiles.length !== attachments.length) {
       console.warn(
         `Filtered out ${
@@ -139,7 +139,7 @@ exports.generateReimbursementPDF = async (req, res) => {
       );
     }
 
-    // Verify that each remaining file actually exists
+    // Warn if files missing on disk
     attachmentsWithFiles.forEach((att) => {
       if (!fs.existsSync(att.file_path)) {
         console.warn(`File not found on disk: ${att.file_path}`);
@@ -149,12 +149,7 @@ exports.generateReimbursementPDF = async (req, res) => {
     // Generate DOCX using only valid attachments
     const docxPath = await generateDocx(claim, employee, attachmentsWithFiles);
 
-    console.log("Attachments about to be merged:");
-    attachmentsWithFiles.forEach((att, idx) =>
-      console.log(`  [${idx}] ${att.file_path}`)
-    );
-
-    // Convert to PDF using only valid attachments
+    // Convert to PDF
     const pdfPath = await convertDocxToPdf(
       docxPath,
       claim,
@@ -162,12 +157,17 @@ exports.generateReimbursementPDF = async (req, res) => {
     );
 
     // Create a safe file name
-    const fileName = `${employee.name.replace(/\s+/g, "_")}.pdf`;
+    const fileNameBase = (employee.name || `claim_${claimId}`).replace(
+      /\s+/g,
+      "_"
+    );
+    const fileName = `${fileNameBase}.pdf`;
 
     res.download(pdfPath, fileName, (err) => {
       if (err) console.error("Download error:", err);
-      fs.unlinkSync(docxPath);
-      fs.unlinkSync(pdfPath);
+      // cleanup temp files if they exist
+      safeUnlinkSync(docxPath);
+      safeUnlinkSync(pdfPath);
     });
   } catch (error) {
     console.error("Error generating reimbursement PDF:", error);
@@ -179,6 +179,9 @@ exports.getReimbursementsByEmployee = async (req, res) => {
   try {
     const employeeId = req.params.employeeId;
     const { fromDate, toDate } = req.query;
+    if (!employeeId)
+      return res.status(400).json({ message: "employeeId required" });
+
     const reimbursements =
       await reimbursementService.getReimbursementsByEmployee(
         employeeId,
@@ -198,12 +201,18 @@ exports.updatePaymentStatus = async (req, res) => {
     const { id } = req.params;
     let { payment_status, user_role } = req.body;
 
-    // drop the old “payable” → “paid” mapping
+    if (!id) return res.status(400).json({ error: "id required" });
+
     // allow exactly these three statuses now:
-    if (!["pending", "paid", "rejected"].includes(payment_status)) {
+    if (
+      !["pending", "paid", "rejected"].includes(
+        String(payment_status).toLowerCase()
+      )
+    ) {
       return res.status(400).json({ error: "Invalid payment status." });
     }
-    if (user_role === "employee") {
+
+    if (String(user_role).toLowerCase() === "employee") {
       return res.status(403).json({ error: "Not authorized." });
     }
 
@@ -212,7 +221,11 @@ exports.updatePaymentStatus = async (req, res) => {
       "SELECT status FROM reimbursement WHERE id = ?",
       [id]
     );
-    if (!rows.length || rows[0].status !== "approved") {
+    const statusVal =
+      rows && rows[0] && rows[0].status
+        ? String(rows[0].status).toLowerCase()
+        : null;
+    if (!statusVal || statusVal !== "approved") {
       return res.status(400).json({
         error:
           "Payment status can only be updated for approved reimbursements.",
@@ -220,10 +233,11 @@ exports.updatePaymentStatus = async (req, res) => {
     }
 
     // set paid_date only when status === "paid"
-    const paid_date = payment_status === "paid" ? new Date() : null;
+    const paid_date =
+      String(payment_status).toLowerCase() === "paid" ? new Date() : null;
     const updated = await reimbursementService.updatePaymentStatus(
       id,
-      payment_status,
+      String(payment_status).toLowerCase(),
       paid_date
     );
 
@@ -262,15 +276,15 @@ exports.exportReimbursements = async (req, res) => {
     submittedFrom = submittedFrom !== "null" ? submittedFrom : null;
     submittedTo = submittedTo !== "null" ? submittedTo : null;
 
-    // reuse your service to fetch the _flat_ array of rows:
+    // reuse service to fetch grouped rows (array of { employee_id, claims })
     const rows = await reimbursementService.getAllReimbursements(
       submittedFrom,
       submittedFrom,
       submittedTo
     );
-    // rows is an array of { employee_id, claims: [ … ] }
+
     // flatten into one big array of claims:
-    const flat = rows.reduce((acc, r) => acc.concat(r.claims), []);
+    const flat = rows.reduce((acc, r) => acc.concat(r.claims || []), []);
 
     // convert to sheet
     const ws = XLSX.utils.json_to_sheet(flat);
@@ -300,14 +314,11 @@ exports.exportReimbursements = async (req, res) => {
 
 exports.createReimbursement = async (req, res) => {
   try {
-    console.log("Request Body:", req.body);
-    console.log("Uploaded Files:", req.files);
-
     // Fallback validation
     if (req.files && req.files.length) {
       const errMsg = validateAttachments(req.files);
       if (errMsg) {
-        req.files.forEach((f) => fs.unlinkSync(f.path));
+        req.files.forEach((f) => safeUnlinkSync(f.path));
         return res.status(400).json({ error: errMsg });
       }
     }
@@ -352,12 +363,15 @@ exports.createReimbursement = async (req, res) => {
       reimbursementData
     );
 
+    // Auto-approve if Admin
     if (role === "Admin") {
+      // approver_id: use the admin's employeeId if present else 'Admin'
+      const approverId = req.user?.employeeId || "Admin";
       await reimbursementService.updateReimbursementStatus(
         newReimbursement.id,
         "approved",
         "Auto-approved by Admin",
-        employeeId,
+        approverId,
         "Admin",
         "Administrator"
       );
@@ -369,6 +383,10 @@ exports.createReimbursement = async (req, res) => {
     });
   } catch (error) {
     console.error("Error creating reimbursement:", error);
+    // If files were uploaded, attempt cleanup on error
+    if (req.files && req.files.length) {
+      req.files.forEach((f) => safeUnlinkSync(f.path));
+    }
     res
       .status(error.statusCode || 500)
       .json({ error: error.message || "Error creating reimbursement" });
@@ -378,19 +396,19 @@ exports.createReimbursement = async (req, res) => {
 // Note: in your routes, use upload.array("attachments", 5) before this handler
 exports.updateReimbursement = async (req, res) => {
   try {
-    console.log("Update Body:", req.body);
-    console.log("Uploaded Files:", req.files);
-
     // Fallback validation
     if (req.files && req.files.length) {
       const errMsg = validateAttachments(req.files);
       if (errMsg) {
-        req.files.forEach((f) => fs.unlinkSync(f.path));
+        req.files.forEach((f) => safeUnlinkSync(f.path));
         return res.status(400).json({ error: errMsg });
       }
     }
 
     const { id } = req.params;
+    if (!id)
+      return res.status(400).json({ error: "Reimbursement id required" });
+
     const role = req.user?.role || req.body.role;
     const updateData = {
       employeeId: req.body.employeeId,
@@ -434,6 +452,10 @@ exports.updateReimbursement = async (req, res) => {
     res.json({ message: "Reimbursement updated", data: updatedReimbursement });
   } catch (error) {
     console.error("Error updating reimbursement:", error);
+    // cleanup uploaded files on error
+    if (req.files && req.files.length) {
+      req.files.forEach((f) => safeUnlinkSync(f.path));
+    }
     res.status(500).json({ error: "Error updating reimbursement" });
   }
 };
@@ -442,19 +464,31 @@ exports.updateReimbursementStatus = async (req, res) => {
   try {
     const { id } = req.params;
     const { status, approver_comments, approver_id, project } = req.body;
-    if (!["approved", "rejected"].includes(status)) {
+    if (!id) return res.status(400).json({ error: "id required" });
+    if (!["approved", "rejected"].includes(String(status).toLowerCase())) {
       return res.status(400).json({ error: "Invalid status." });
     }
 
+    // get approver details (service returns single object or null)
     const approverDetails = await reimbursementService.getApproverDetails(
       approver_id
     );
-    const { name: approver_name, role: approver_designation } =
-      approverDetails[0] || {};
+
+    // normalize possible shapes
+    let approver_name = null;
+    let approver_designation = null;
+    if (approverDetails) {
+      // If the service returns an array, take first element
+      const row = Array.isArray(approverDetails)
+        ? approverDetails[0]
+        : approverDetails;
+      approver_name = row?.name || row?.employee_name || null;
+      approver_designation = row?.role || row?.designation || null;
+    }
 
     const updatedStatus = await reimbursementService.updateReimbursementStatus(
       id,
-      status,
+      String(status).toLowerCase(),
       approver_comments,
       approver_id,
       approver_name,
@@ -472,6 +506,8 @@ exports.updateReimbursementStatus = async (req, res) => {
 exports.deleteReimbursement = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!id) return res.status(400).json({ error: "id required" });
+
     await reimbursementService.deleteReimbursement(id);
     res.json({ message: "Reimbursement deleted" });
   } catch (error) {
@@ -498,9 +534,13 @@ exports.uploadReimbursementAttachment = async (req, res) => {
 exports.getAttachments = async (req, res) => {
   try {
     const { year, month, employeeId, filename } = req.params;
+    if (!year || !month || !employeeId || !filename) {
+      return res.status(400).json({ error: "Missing path parameters" });
+    }
+
     if (
       [year, month, employeeId, filename].some(
-        (p) => p.includes("..") || p.includes("/")
+        (p) => p.includes("..") || p.includes("/") || p.includes("\\")
       )
     ) {
       return res.status(400).json({ error: "Invalid filename" });
@@ -518,16 +558,17 @@ exports.getAttachments = async (req, res) => {
       filename
     );
     if (fs.existsSync(filePath)) {
+      const ext = path.extname(filename).toLowerCase();
       const mimeType =
         {
           ".jpg": "image/jpeg",
           ".jpeg": "image/jpeg",
           ".png": "image/png",
           ".pdf": "application/pdf",
-        }[path.extname(filename).toLowerCase()] || "application/octet-stream";
+        }[ext] || "application/octet-stream";
 
       res.setHeader("Content-Type", mimeType);
-      res.setHeader("Content-Disposition", `inline; filename=${filename}`);
+      res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
       fs.createReadStream(filePath).pipe(res);
     } else {
       res.status(404).json({ error: "File not found" });
@@ -549,7 +590,7 @@ exports.getAttachmentsByReimbursementId = async (req, res) => {
       await reimbursementService.getAttachmentsByReimbursementIds([
         reimbursementId,
       ]);
-    if (!attachments.length) {
+    if (!attachments || attachments.length === 0) {
       return res.status(404).json({ message: "No attachments found." });
     }
     res.json({ attachments });
@@ -561,21 +602,25 @@ exports.getAttachmentsByReimbursementId = async (req, res) => {
 
 exports.getTeamReimbursements = async (req, res) => {
   try {
+    // expect /team/:teamLeadId/reimbursements
     const { teamLeadId } = req.params;
-    const { departmentId, submittedFrom, submittedTo } = req.query;
-    if (!departmentId || !teamLeadId) {
-      return res
-        .status(400)
-        .json({ error: "Department ID and Team Lead ID are required" });
+    const { departmentId } = req.query;
+    let { submittedFrom, submittedTo } = req.query;
+
+    if (!teamLeadId) {
+      return res.status(400).json({ error: "Team Lead ID is required" });
+    }
+    if (!departmentId) {
+      return res.status(400).json({ error: "Department ID is required" });
     }
 
     const start =
       submittedFrom && submittedFrom !== "null" ? submittedFrom : null;
     const end = submittedTo && submittedTo !== "null" ? submittedTo : null;
 
+    // correct order: (departmentId, submittedFrom, submittedTo, teamLeadId)
     const teamReimbursements = await reimbursementService.getTeamReimbursements(
       departmentId,
-      start,
       start,
       end,
       teamLeadId

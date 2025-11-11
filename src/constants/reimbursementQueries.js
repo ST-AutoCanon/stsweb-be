@@ -1,3 +1,4 @@
+// constants/reimbursementQueries.js
 module.exports = {
   GET_ALL_REIMBURSEMENTS: `
   SELECT r.*,
@@ -16,6 +17,17 @@ module.exports = {
   ORDER BY r.created_at DESC
 `,
 
+  /*
+    GET_TEAM_REIMBURSEMENTS (safe with nullable excluded_employee_id and nullable date filters)
+
+    Parameter placeholder order (IMPORTANT):
+      1) department_id
+      2) excluded_employee_id  (the teamLeadId to exclude; may be NULL)
+      3) excluded_employee_id  (same value repeated for the conditional)
+      4) submittedFrom         (may be NULL)
+      5) submittedFrom         (same value, used for >=)
+      6) submittedFrom         (same value, used for DATE_ADD(..., INTERVAL 1 DAY))
+  */
   GET_TEAM_REIMBURSEMENTS: `
   SELECT r.*,
          CONCAT(e.first_name, ' ', e.last_name) AS employee_name,
@@ -23,7 +35,6 @@ module.exports = {
          IF(r.from_date IS NOT NULL AND r.to_date IS NOT NULL, 
             CONCAT(r.from_date, ' - ', r.to_date), 
             r.date) AS date_range,
-         -- include & normalize payment_status + status
          LOWER(TRIM(IFNULL(r.status, ''))) AS status,
          LOWER(TRIM(IFNULL(r.payment_status, ''))) AS payment_status,
          r.paid_date
@@ -32,7 +43,8 @@ module.exports = {
   WHERE r.employee_id IN (
       SELECT employee_id FROM employees WHERE department_id = ?
   )
-  AND (? IS NULL OR (r.created_at >= ? AND r.created_at < DATE_ADD(?, INTERVAL 1 DAY)))
+  AND ( ? IS NULL OR r.employee_id <> ? ) -- exclude the team lead only when provided
+  AND ( ? IS NULL OR (r.created_at >= ? AND r.created_at < DATE_ADD(?, INTERVAL 1 DAY)) )
   ORDER BY r.created_at DESC
 `,
 
@@ -56,6 +68,7 @@ module.exports = {
           meal_type, stationary, service_provider, project
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0), ?, ?, ?, ?, ?, ?, ?)
   `,
+
   CHECK_EXISTING_REIMBURSEMENT_SINGLE_DATE: `
     SELECT * FROM reimbursement 
     WHERE employee_id = ? 
@@ -111,8 +124,11 @@ module.exports = {
 `,
 
   GET_REIMBURSEMENTS_BY_EMPLOYEE: `
-    SELECT r.*, 
-           CONCAT(r.from_date, ' - ', r.to_date) AS date_range
+    SELECT r.*,
+           CONCAT(r.from_date, ' - ', r.to_date) AS date_range,
+           LOWER(TRIM(IFNULL(r.status, ''))) AS status,
+           LOWER(TRIM(IFNULL(r.payment_status, ''))) AS payment_status,
+           r.paid_date
     FROM reimbursement r
     WHERE r.employee_id = ?
 `,
@@ -120,11 +136,16 @@ module.exports = {
   DELETE_REIMBURSEMENT: `DELETE FROM reimbursement WHERE id=?`,
 
   GET_ATTACHMENTS_BY_REIMBURSEMENT_IDS: `
-    SELECT * FROM reimbursement_attachments 
+    SELECT id, reimbursement_id, file_name, file_path
+    FROM reimbursement_attachments
     WHERE reimbursement_id IN (?)
   `,
 
-  GET_ATTACHMENTS: `SELECT file_name, file_path FROM reimbursement_attachments WHERE reimbursement_id = ?`,
+  GET_ATTACHMENTS: `
+    SELECT id, reimbursement_id, file_name, file_path
+    FROM reimbursement_attachments
+    WHERE reimbursement_id = ?
+  `,
 
   GET_CLAIM_DETAILS: `SELECT * FROM reimbursement WHERE id = ?`,
 
