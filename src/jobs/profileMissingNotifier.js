@@ -60,20 +60,17 @@ function labelForKey(key) {
 }
 
 async function runCheckForMissingProfiles({ dedupeDays = 7 } = {}) {
-  console.log(
-    "[profileMissingNotifier] start scan",
-    new Date().toISOString(),
-    `(timezone: ${TZ})`
-  );
-
   try {
     // Use 'status' column per your table schema (enum 'Active'|'Inactive')
-    const [empRows] = await db.execute(
-      `SELECT employee_id FROM employees WHERE status = 'Active'`
-    );
+    const [empRows] = await db.execute(`
+  SELECT e.employee_id
+  FROM employees e
+  JOIN employee_professional p ON e.employee_id = p.employee_id
+  WHERE e.status = 'Active'
+    AND (p.role NOT IN ('Admin', 'SuperAdmin') OR p.role IS NULL)
+`);
 
     if (!empRows || empRows.length === 0) {
-      console.log("[profileMissingNotifier] no active employees found");
       return;
     }
 
@@ -100,9 +97,6 @@ async function runCheckForMissingProfiles({ dedupeDays = 7 } = {}) {
           [employeeId, likeParam, dedupeDays]
         );
         if (existRows && existRows.length > 0) {
-          console.log(
-            `[profileMissingNotifier] skipping ${employeeId} — recent similar notification exists`
-          );
           continue;
         }
 
@@ -113,10 +107,6 @@ async function runCheckForMissingProfiles({ dedupeDays = 7 } = {}) {
           message,
           new Date(),
         ]);
-
-        console.log(
-          `[profileMissingNotifier] inserted notification for ${employeeId}`
-        );
       } catch (innerErr) {
         console.error(
           `[profileMissingNotifier] failed for ${employeeId}:`,
@@ -127,11 +117,6 @@ async function runCheckForMissingProfiles({ dedupeDays = 7 } = {}) {
   } catch (err) {
     console.error("[profileMissingNotifier] job error:", err);
   } finally {
-    console.log(
-      "[profileMissingNotifier] finished scan",
-      new Date().toISOString(),
-      `(timezone: ${TZ})`
-    );
   }
 }
 
@@ -145,7 +130,6 @@ function scheduleJob() {
       timezone: TZ,
     }
   );
-  console.log(`[profileMissingNotifier] scheduled daily @ 09:00 ${TZ}`);
 }
 
 module.exports = {
