@@ -36,7 +36,10 @@ async function buildMetaFromReqQuery(query = {}) {
     if (empId) {
       try {
         if (typeof reportService.searchEmployees === "function") {
-          const found = await reportService.searchEmployees(empId);
+          const found = await reportService.searchEmployees({
+            q: empId,
+            limit: 1,
+          });
           meta.employeeName =
             Array.isArray(found) && found[0]
               ? found[0].employee_name ||
@@ -118,6 +121,7 @@ async function downloadVendorsReport(req, res) {
     if (typeof reportService.getVendorRows !== "function")
       return res.status(500).json({ message: "Server misconfiguration" });
 
+    // fetch rows (service should accept fields but we defensively apply pickFields here)
     const rowsRaw = await reportService.getVendorRows(
       startDate,
       endDate,
@@ -143,7 +147,16 @@ async function downloadVendorsReport(req, res) {
         .status(404)
         .json({ message: "No vendor data for selected date range" });
 
-    // build meta
+    // Apply pickFields (if available) so exports only include requested fields
+    let rowsForExport = rows;
+    if (
+      fields &&
+      Array.isArray(fields) &&
+      typeof reportService.pickFields === "function"
+    ) {
+      rowsForExport = reportService.pickFields(rows, fields);
+    }
+
     const meta = await buildMetaFromReqQuery(req.query || {});
     console.debug("[ReportVendorsHandler] render meta:", meta);
 
@@ -152,7 +165,7 @@ async function downloadVendorsReport(req, res) {
         return res
           .status(500)
           .json({ message: "Excel renderer not available" });
-      const buf = await reportService.renderExcelBuffer(rows, null);
+      const buf = await reportService.renderExcelBuffer(rowsForExport, null);
       const filename = safeFilename("vendors_report", "xlsx");
       res.setHeader(
         "Content-Type",
@@ -169,7 +182,7 @@ async function downloadVendorsReport(req, res) {
         return res.status(500).json({ message: "PDF renderer not available" });
       const pdfBuf = await reportService.renderPdfBuffer(
         "Vendors Report",
-        rows,
+        rowsForExport,
         { meta }
       );
       const filename = safeFilename("vendors_report", "pdf");

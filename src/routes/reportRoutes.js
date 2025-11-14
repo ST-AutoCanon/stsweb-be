@@ -38,7 +38,6 @@ router.get(
   )
 );
 
-// Note: some handlers were split — ensure you export downloadEmployeesReport from your handlers index
 router.get(
   "/employees",
   ensureHandler(reports.downloadEmployeesReport, "downloadEmployeesReport")
@@ -67,7 +66,6 @@ router.get(
   )
 );
 
-// Departments + search
 router.get(
   "/departments",
   ensureHandler(reports.getDepartments, "getDepartments")
@@ -77,7 +75,6 @@ router.get(
   ensureHandler(reports.searchEmployees, "searchEmployees")
 );
 
-// Health / quick check
 router.get("/ping", (req, res) => res.json({ ok: true }));
 
 module.exports = router;

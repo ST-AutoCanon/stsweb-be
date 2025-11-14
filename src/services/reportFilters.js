@@ -33,27 +33,33 @@ function escapeHtml(str) {
 /* ----------------- Status normalizer for DB query params -------------- */
 
 /**
- * normalizeStatusForQuery
- * - Accepts many UI inputs and returns a canonical token (or null for "no filter").
- * - Returns null for "all", empty, undefined.
- * - Returned tokens are lower-case / slash-separated for consistency (e.g. "approved/paid", "punch in", "in progress").
+ * canonicalizeStatusToken(raw)
+ * - robustly normalizes a raw status string into a canonical token used across filters.
+ * - returns null for empty/no-filter tokens such as "all", "null", etc.
  */
-function normalizeStatusForQuery(status) {
-  if (status === undefined || status === null) return null;
-  const s = typeof status === "string" ? status.trim() : String(status).trim();
+function canonicalizeStatusToken(raw) {
+  if (raw === undefined || raw === null) return null;
+  let s = typeof raw === "string" ? raw.trim() : String(raw).trim();
   if (!s) return null;
-  const low = s.toLowerCase();
 
   // treat 'all' and obvious non-values as no filter
-  if (["all", "null", "undefined", "none", "any"].includes(low)) return null;
+  const lowCheck = s.toLowerCase();
+  if (["all", "null", "undefined", "none", "any"].includes(lowCheck))
+    return null;
 
-  // Normalize separators and whitespace
-  let normalized = low
-    .replace(/[_\s-]+/g, " ")
-    .replace(/\s*\/\s*/g, "/")
-    .trim();
+  // 1) normalize separators/punctuation to space
+  s = s
+    .replace(/[\u2018\u2019\u201C\u201D]/g, "") // smart quotes
+    .replace(/[_\s\-–—]+/g, " ") // underscores, spaces, dashes -> single space
+    .replace(/\s*\/\s*/g, "/") // keep slash compound like "approved/paid"
+    .replace(/[^\w\s\/]+/g, "") // remove other punctuation except slash
+    .trim()
+    .toLowerCase();
 
-  // quick mapping of common variants
+  // Collapse multiple spaces
+  s = s.replace(/\s+/g, " ");
+
+  // mapping of common variants -> canonical token values
   const map = {
     // reimbursements / generic
     approve: "approved",
@@ -67,48 +73,76 @@ function normalizeStatusForQuery(status) {
     "approved/paid": "approved/paid",
     "approved/pending": "approved/pending",
     "approved/unpaid": "approved/unpaid",
+
     // attendance
     "punch in": "punch in",
     "punch out": "punch out",
-    // tasks (supervisor and employee)
+
+    // tasks (supervisor and employee) — canonical forms used by handlers
     "yet to start": "yet to start",
+    "not started": "not started",
+    "not-started": "not started",
+    notstarted: "not started",
     "in progress": "in progress",
+    inprogress: "in progress",
+    "in-progress": "in progress",
     "on hold": "on hold",
+    "on-hold": "on hold",
+    onhold: "on hold",
     "add on": "add on",
     "add-on": "add on",
     "re work": "re work",
     "re-work": "re work",
     rework: "re work",
     incomplete: "incomplete",
+    working: "working",
+    "working on": "working",
+    "in review": "in review",
+    "in-review": "in review",
+
     // employees
     active: "active",
     inactive: "inactive",
+
     // assets
     assigned: "assigned",
     "in use": "in use",
     returned: "returned",
     decommissioned: "decommissioned",
 
-    // ----- NEW: employee-driven task statuses -----
-    // UI shows: "Completed", "Not started", "Working"
+    // employee-driven task synonyms
     completed: "completed",
     complete: "completed",
     "not started": "not started",
-    notstarted: "not started",
-    "not-started": "not started",
-    not_started: "not started",
     working: "working",
-    "in progress": "working", // map common synonym to 'working'
-    "working on": "working",
+    "in progress": "working", // map some synonyms to 'working' if desired
   };
 
-  if (map[normalized]) return map[normalized];
+  // If exact mapped variant exists, return it
+  if (Object.prototype.hasOwnProperty.call(map, s)) return map[s];
 
-  // if slash exists keep as-is (but normalized)
-  if (normalized.includes("/")) return normalized;
+  // If it's a compound token containing slash(s), normalize each part and rejoin
+  if (s.includes("/")) {
+    const parts = s
+      .split("/")
+      .map((p) => p.trim())
+      .filter(Boolean)
+      .map((p) => (Object.prototype.hasOwnProperty.call(map, p) ? map[p] : p));
+    if (parts.length === 0) return null;
+    return parts.join("/");
+  }
 
-  // otherwise return normalized (best-effort)
-  return normalized;
+  // as a fallback, return the cleaned string
+  return s;
+}
+
+/**
+ * normalizeStatusForQuery
+ * - Accepts many UI inputs and returns a canonical token (or null for "no filter").
+ * - This is the function used by SQL builders (so it returns a string that the DB compare will likely match).
+ */
+function normalizeStatusForQuery(status) {
+  return canonicalizeStatusToken(status);
 }
 
 /* ----------------- buildDateStatusParams (used by SQL fetchers) ---------------- */
@@ -391,14 +425,44 @@ function normalizeForCompare(s) {
  *  - requestedStatus is null -> no filter (true)
  *  - requestedStatus contains "/" -> split into parts and require every part to appear (partial match allowed)
  *  - otherwise require any candidate to match or contain the token
+ *
+ * Matching is done on canonicalized forms (canonicalizeStatusToken) first and falls back to normalized string compare.
  */
 function statusMatches(requestedStatus, rowStatusCandidates = []) {
   if (!requestedStatus) return true;
   const reqRaw = String(requestedStatus || "").trim();
   if (!reqRaw) return true;
-  const req = normalizeForCompare(reqRaw);
 
-  // collect normalized candidates
+  // Attempt canonical forms
+  const reqCanon = canonicalizeStatusToken(reqRaw);
+  const candidateCanons = (
+    Array.isArray(rowStatusCandidates) ? rowStatusCandidates : []
+  )
+    .map((v) => (v === null || v === undefined ? "" : String(v)))
+    .filter(Boolean)
+    .map((v) => canonicalizeStatusToken(v));
+
+  // If any candidate canonical matches requested canonical, return true
+  if (reqCanon) {
+    for (const cc of candidateCanons) {
+      if (!cc) continue;
+      // direct equality
+      if (cc === reqCanon) return true;
+      // partial: requested contained in candidate (e.g. "in progress" vs "in progress qa")
+      if (cc.includes(reqCanon) || reqCanon.includes(cc)) return true;
+      // compound handling if either side has slash
+      if (reqCanon.includes("/")) {
+        const parts = reqCanon
+          .split("/")
+          .map((p) => p.trim())
+          .filter(Boolean);
+        if (parts.every((p) => cc.includes(p))) return true;
+      }
+    }
+  }
+
+  // Fallback to normalized compare for older DB values
+  const reqNorm = normalizeForCompare(reqRaw);
   const normalizedRowVals = (
     Array.isArray(rowStatusCandidates) ? rowStatusCandidates : []
   )
@@ -409,21 +473,40 @@ function statusMatches(requestedStatus, rowStatusCandidates = []) {
   if (normalizedRowVals.length === 0) return false;
 
   // compound: require all parts to be present in at least one candidate or across candidates
-  if (req.includes("/")) {
-    const parts = req
+  if (reqNorm.includes("/")) {
+    const parts = reqNorm
       .split("/")
       .map((p) => p.trim())
-      .filter(Boolean)
-      .map(normalizeForCompare);
+      .filter(Boolean);
     if (parts.length === 0) return false;
-    // every part must be found in at least one candidate (not necessarily same)
-    return parts.every((part) =>
+    const ok = parts.every((part) =>
       normalizedRowVals.some((rv) => rv === part || rv.includes(part))
     );
+    if (ok) return true;
   }
 
   // single token: match if any candidate matches exactly or contains token
-  return normalizedRowVals.some((rv) => rv === req || rv.includes(req));
+  if (normalizedRowVals.some((rv) => rv === reqNorm || rv.includes(reqNorm))) {
+    return true;
+  }
+
+  // debug: when nothing matched, log the request and the canonical candidates (non-production only)
+  if (process && process.env && process.env.NODE_ENV !== "production") {
+    try {
+      const candidDisplay = JSON.stringify({
+        requested: { raw: reqRaw, canon: reqCanon, norm: reqNorm },
+        candidates: candidateCanons,
+        normalizedRowVals,
+      });
+      console.debug(
+        `[reportFilters] statusMatches NO MATCH => ${candidDisplay}`
+      );
+    } catch (e) {
+      /* ignore logging errors */
+    }
+  }
+
+  return false;
 }
 
 /* ------------------ Preview helpers ------------------ */

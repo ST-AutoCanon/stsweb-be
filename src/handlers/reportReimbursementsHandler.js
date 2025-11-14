@@ -16,9 +16,6 @@ const db = require("../config");
 
 /**
  * dbExec - supports both promise-style and callback-style mysql clients.
- * - Sanitizes params (undefined -> null).
- * - Prefers db.query (promise or callback) and falls back to db.execute.
- * Returns [rows, fields] or throws.
  */
 async function dbExec(sql, params = []) {
   try {
@@ -135,6 +132,86 @@ async function lookupDeptForEmployee(employeeId) {
   return null;
 }
 
+/* find departments managed by managerEmpId (same approach as leaves handler) */
+async function findDepartmentsManagedBy(managerEmpId) {
+  if (!managerEmpId) return [];
+  const out = [];
+
+  try {
+    const [cols] = await dbExec("SHOW COLUMNS FROM departments");
+    const colNames = Array.isArray(cols)
+      ? cols
+          .map((c) => {
+            return String(
+              c.Field || c.field || c.COLUMN_NAME || c.column_name || ""
+            ).trim();
+          })
+          .filter(Boolean)
+      : [];
+
+    if (colNames.includes("manager_employee_id")) {
+      try {
+        const [rows] = await dbExec(
+          "SELECT id FROM departments WHERE manager_employee_id = ?",
+          [managerEmpId]
+        );
+        if (Array.isArray(rows)) {
+          for (const r of rows) if (r && r.id != null) out.push(String(r.id));
+          if (out.length) return Array.from(new Set(out));
+        }
+      } catch (e) {
+        console.warn(
+          "[reportReimbursementsHandler] query on manager_employee_id failed:",
+          e && e.message
+        );
+      }
+    }
+
+    if (colNames.includes("manager_id")) {
+      try {
+        const [rows] = await dbExec(
+          "SELECT id FROM departments WHERE manager_id = ?",
+          [managerEmpId]
+        );
+        if (Array.isArray(rows)) {
+          for (const r of rows) if (r && r.id != null) out.push(String(r.id));
+          if (out.length) return Array.from(new Set(out));
+        }
+      } catch (e) {
+        console.warn(
+          "[reportReimbursementsHandler] query on manager_id failed:",
+          e && e.message
+        );
+      }
+    }
+  } catch (e) {
+    console.warn(
+      "[reportReimbursementsHandler] SHOW COLUMNS failed:",
+      e && e.message
+    );
+  }
+
+  try {
+    const [rows] = await dbExec(
+      "SELECT DISTINCT department_id AS id FROM employee_professional WHERE supervisor_id = ? AND department_id IS NOT NULL",
+      [managerEmpId]
+    );
+    if (Array.isArray(rows) && rows.length) {
+      for (const r of rows) {
+        const id = r && (r.id ?? r.department_id);
+        if (id != null) out.push(String(id));
+      }
+    }
+  } catch (e) {
+    console.warn(
+      "[reportReimbursementsHandler] fallback department query failed:",
+      e && e.message
+    );
+  }
+
+  return Array.from(new Set(out));
+}
+
 async function buildMetaFromReqQuery(query = {}) {
   const meta = {};
   const rawStatus =
@@ -237,6 +314,7 @@ async function downloadReimbursementsReport(req, res) {
 
     // derive department if needed from requester
     const requesterEmpId = findEmployeeIdInRequest(req);
+
     if (!departmentId && requesterEmpId) {
       const derived = await lookupDeptForEmployee(requesterEmpId);
       if (derived) {
@@ -244,6 +322,36 @@ async function downloadReimbursementsReport(req, res) {
         console.debug(
           "[reportReimbursementsHandler] derived department for requester:",
           departmentId
+        );
+      }
+    }
+
+    let managerEmpId = null;
+    if (!departmentId && requesterEmpId) {
+      const u = req.user || req.authUser || req.session?.user;
+      const isAdmin =
+        !!(u && (u.is_admin || u.isAdmin || u.role === "admin")) || false;
+      const isManagerRole = !!(
+        u &&
+        u.role &&
+        /manager|supervisor|lead/i.test(String(u.role))
+      );
+      const explicitManager = String(
+        (req.headers && req.headers["x-force-manager-scope"]) ||
+          (req.query &&
+            (req.query.forceManager ||
+              req.query.manager_scope ||
+              req.query.managerScope)) ||
+          ""
+      ).toLowerCase();
+      const wantsMgrScope =
+        explicitManager === "1" || explicitManager === "true" || isManagerRole;
+
+      if (!isAdmin && wantsMgrScope) {
+        managerEmpId = requesterEmpId;
+        console.debug(
+          "[reportReimbursementsHandler] manager scoping enabled for:",
+          managerEmpId
         );
       }
     }
@@ -260,47 +368,219 @@ async function downloadReimbursementsReport(req, res) {
       return res.status(500).json({ message: "Server misconfiguration" });
     }
 
-    const rawReimbursements = await reportService.getReimbursementRows(
-      startDate,
-      endDate,
-      status,
-      null,
-      employeeId,
-      departmentId
-    );
-    let rows = Array.isArray(rawReimbursements) ? rawReimbursements : [];
-
-    // If service returns broad rows but scoping required, filter locally
-    if ((employeeId || departmentId || requesterEmpId) && rows.length > 0) {
-      rows = rows.filter((r) => {
-        if (
-          employeeId &&
-          String(r.employee_id).trim() !== String(employeeId).trim()
-        )
-          return false;
-        if (departmentId) {
-          const rowDept =
-            r.department_id ??
-            r.pr_department_id ??
-            r.department_id ??
-            r.departmentName ??
-            r.department_name ??
-            "";
-          if (!rowDept) return false;
-          if (
-            String(rowDept) !== String(departmentId) &&
-            String(rowDept).toLowerCase() !== String(departmentId).toLowerCase()
-          )
-            return false;
-        }
-        return true;
-      });
-      console.debug(
-        "[reportReimbursementsHandler] rows after local scoping:",
-        rows.length
+    // If we have departmentId or employeeId explicitly, pass them through to service
+    if (employeeId || departmentId) {
+      const rawReimbursements = await reportService.getReimbursementRows(
+        startDate,
+        endDate,
+        status,
+        null,
+        employeeId,
+        departmentId
       );
+      let rows = Array.isArray(rawReimbursements) ? rawReimbursements : [];
+
+      // Enforce local scoping just to be safe:
+      if (departmentId) {
+        rows = rows.filter((r) => {
+          const rid =
+            r &&
+            (r.department_id ?? r.departmentId ?? r.department ?? r.dept_id);
+          return rid != null && String(rid) === String(departmentId);
+        });
+      }
+      if (employeeId) {
+        rows = rows.filter((r) => {
+          const eid =
+            r && (r.employee_id ?? r.employeeId ?? r.emp_id ?? r.empId);
+          return eid != null && String(eid) === String(employeeId);
+        });
+      }
+
+      if (isPreviewRequest(req)) {
+        const msg =
+          rows.length === 0
+            ? "No reimbursement data for selected date range"
+            : undefined;
+        return sendPreviewResponse(req, res, rows, msg);
+      }
+
+      const statusCandidate = normalizeStatusForQuery(status);
+      const filtered = rows.filter((r) =>
+        statusMatches(statusCandidate, [
+          r.status,
+          r.payment_status,
+          r.approval_status,
+        ])
+      );
+
+      if (!filtered.length)
+        return res
+          .status(404)
+          .json({ message: "No reimbursement data for selected date range" });
+
+      const reimbursementsToExport = pickFields(filtered, fields);
+      const meta = await buildMetaFromReqQuery(req.query || {});
+      console.debug("[reportReimbursementsHandler] render meta:", meta);
+
+      if (format === "xlsx") {
+        if (typeof reportService.renderExcelBuffer !== "function")
+          return res
+            .status(500)
+            .json({ message: "Excel renderer not available" });
+        const buf = await reportService.renderExcelBuffer(
+          reimbursementsToExport,
+          null
+        );
+        const filename = safeFilename("reimbursements_report", "xlsx");
+        res.setHeader(
+          "Content-Type",
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        );
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${filename}"`
+        );
+        res.setHeader("Content-Length", buf.length);
+        return res.send(buf);
+      } else if (format === "pdf") {
+        if (typeof reportService.renderPdfBuffer !== "function")
+          return res
+            .status(500)
+            .json({ message: "PDF renderer not available" });
+        const pdfBuf = await reportService.renderPdfBuffer(
+          "Reimbursements Report",
+          reimbursementsToExport,
+          { meta }
+        );
+        const filename = safeFilename("reimbursements_report", "pdf");
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${filename}"`
+        );
+        res.setHeader("Content-Length", pdfBuf.length);
+        return res.send(pdfBuf);
+      } else return res.status(400).json({ message: "Invalid format" });
     }
 
+    // No explicit employee/department — consider manager scoping if managerEmpId present
+    let rows = [];
+    if (managerEmpId) {
+      let managedDeptIds = [];
+      try {
+        managedDeptIds = await findDepartmentsManagedBy(managerEmpId);
+      } catch (e) {
+        console.warn(
+          "[reportReimbursementsHandler] findDepartmentsManagedBy attempt failed:",
+          e && e.message
+        );
+      }
+
+      if (managedDeptIds.length > 0) {
+        const merged = [];
+        for (const d of managedDeptIds) {
+          try {
+            const part = await reportService.getReimbursementRows(
+              startDate,
+              endDate,
+              status,
+              null,
+              null,
+              d
+            );
+            if (Array.isArray(part) && part.length) merged.push(...part);
+          } catch (e) {
+            console.warn(
+              "[reportReimbursementsHandler] per-dept getReimbursementRows failed for dept",
+              d,
+              e && e.message
+            );
+          }
+        }
+        const map = new Map();
+        for (const p of merged)
+          if (p && (p.reimbursement_id ?? p.id))
+            map.set(String(p.reimbursement_id ?? p.id), p);
+        rows = Array.from(map.values());
+      } else {
+        // fallback: fetch all and filter by supervisor mapping
+        try {
+          const all = await reportService.getReimbursementRows(
+            startDate,
+            endDate,
+            status,
+            null,
+            null,
+            null
+          );
+          const allArr = Array.isArray(all) ? all : [];
+          const empIds = Array.from(
+            new Set(allArr.map((x) => x.employee_id).filter(Boolean))
+          );
+          if (empIds.length) {
+            const placeholders = empIds.map(() => "?").join(",");
+            const [profRows] = await dbExec(
+              `SELECT employee_id, supervisor_id FROM employee_professional WHERE employee_id IN (${placeholders})`,
+              empIds
+            );
+            const supMap = {};
+            for (const pr of Array.isArray(profRows) ? profRows : []) {
+              if (pr && pr.employee_id)
+                supMap[String(pr.employee_id)] = pr.supervisor_id;
+            }
+            rows = allArr.filter((r) => {
+              const id = r.employee_id ? String(r.employee_id) : null;
+              const sup = id ? supMap[id] : null;
+              return sup != null && String(sup) === String(managerEmpId);
+            });
+          } else rows = [];
+        } catch (e) {
+          console.error(
+            "[reportReimbursementsHandler] fallback JS filtering failed:",
+            e && e.message
+          );
+          rows = [];
+        }
+      }
+    } else {
+      // no scoping - full fetch
+      const rawReimbursements = await reportService.getReimbursementRows(
+        startDate,
+        endDate,
+        status,
+        null,
+        null,
+        null
+      );
+      rows = Array.isArray(rawReimbursements) ? rawReimbursements : [];
+    }
+
+    // As a final defensive filter: if the request included department_id or employee_id (even empty strings),
+    // apply scoping locally to ensure previews/downloads cannot leak other departments.
+    const explicitDept = coerceToString(
+      req.query && (req.query.department_id ?? req.query.departmentId),
+      null
+    );
+    const explicitEmp = coerceToString(
+      req.query && (req.query.employee_id ?? req.query.employeeId),
+      null
+    );
+    if (explicitDept) {
+      rows = rows.filter((r) => {
+        const rid =
+          r && (r.department_id ?? r.departmentId ?? r.department ?? r.dept_id);
+        return rid != null && String(rid) === String(explicitDept);
+      });
+    }
+    if (explicitEmp) {
+      rows = rows.filter((r) => {
+        const eid = r && (r.employee_id ?? r.employeeId ?? r.emp_id ?? r.empId);
+        return eid != null && String(eid) === String(explicitEmp);
+      });
+    }
+
+    // Preview handling
     if (isPreviewRequest(req)) {
       const msg =
         rows.length === 0
@@ -309,11 +589,7 @@ async function downloadReimbursementsReport(req, res) {
       return sendPreviewResponse(req, res, rows, msg);
     }
 
-    if (!Array.isArray(rows))
-      return res
-        .status(500)
-        .json({ message: "Failed to fetch reimbursement data" });
-
+    // Now filter by status and format as before
     const statusCandidate = normalizeStatusForQuery(status);
     const filtered = rows.filter((r) =>
       statusMatches(statusCandidate, [
