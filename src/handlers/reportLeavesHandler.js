@@ -253,12 +253,7 @@ async function buildMetaFromReqQuery(query = {}) {
     }
 
     let empCandidate =
-      query.employee_id ??
-      query.employeeId ??
-      query.employee ??
-      query.employee_name ??
-      query.employeeName ??
-      null;
+      query.employee_id ?? query.employeeId ?? query.employee ?? null;
     if (typeof empCandidate === "string" && empCandidate.trim() === "")
       empCandidate = null;
 
@@ -295,12 +290,7 @@ async function buildMetaFromReqQuery(query = {}) {
     }
 
     let deptCandidate =
-      query.department_id ??
-      query.departmentId ??
-      query.department ??
-      query.department_name ??
-      query.departmentName ??
-      null;
+      query.department_id ?? query.departmentId ?? query.department ?? null;
     if (typeof deptCandidate === "string" && deptCandidate.trim() === "")
       deptCandidate = null;
 
@@ -424,11 +414,8 @@ async function downloadLeavesReport(req, res) {
             departmentIdQuery
           );
         } else {
-          if (
-            !isAdmin &&
-            !isPreviewRequest(req) &&
-            isExplicitManagerScope(req)
-          ) {
+          // Allow manager scoping for previews as well — user expects preview to be scoped
+          if (!isAdmin && isExplicitManagerScope(req)) {
             managerEmpId = requesterEmpId;
             console.debug(
               "[reportLeavesHandler] explicit manager scoping enabled via flag/role:",
@@ -436,12 +423,13 @@ async function downloadLeavesReport(req, res) {
             );
           } else {
             console.debug(
-              "[reportLeavesHandler] skipping manager scoping for requester (no explicit scope or admin/preview)"
+              "[reportLeavesHandler] skipping manager scoping for requester (no explicit scope or admin)"
             );
           }
         }
       } catch (e) {
-        if (!isAdmin && !isPreviewRequest(req) && isExplicitManagerScope(req)) {
+        // allow fallback manager scoping if explicit manager or flag present
+        if (!isAdmin && isExplicitManagerScope(req)) {
           managerEmpId = requesterEmpId;
           console.debug(
             "[reportLeavesHandler] fallback: explicit manager scoping enabled via flag/role:",

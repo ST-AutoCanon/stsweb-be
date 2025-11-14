@@ -1,12 +1,5 @@
-// src/services/reportUtils.js
-// DB utility (fetchRows). Uses project config exported from ../config
-
 const db = require("../config");
 
-/**
- * Count '?' placeholders in SQL while ignoring question marks inside string literals.
- * This is a best-effort parser (handles single-quoted and double-quoted strings).
- */
 function countPlaceholders(sql) {
   if (!sql || typeof sql !== "string") return 0;
   let inSingle = false;
@@ -15,7 +8,6 @@ function countPlaceholders(sql) {
   for (let i = 0; i < sql.length; i++) {
     const ch = sql[i];
     if (ch === "'" && !inDouble) {
-      // toggle single-quote (ignore escaped quotes \' )
       if (!(i > 0 && sql[i - 1] === "\\")) inSingle = !inSingle;
     } else if (ch === '"' && !inSingle) {
       if (!(i > 0 && sql[i - 1] === "\\")) inDouble = !inDouble;
@@ -27,14 +19,116 @@ function countPlaceholders(sql) {
 }
 
 /**
- * fetchRows(sql, params) -> returns array of rows.
- * - Pads params with nulls if params.length < placeholder count (common cause of mysqld_stmt_execute error)
- * - Supports mysql2/promise style responses ([rows, fields]) and plain arrays.
- * - Prefers db.execute if present, otherwise uses db.query.
+ * Simple sanitizer: remove accidental trailing commas and fix common small mistakes.
  */
-async function fetchRows(sql, params = []) {
-  if (!sql || typeof sql !== "string") {
-    console.error("[reportUtils] fetchRows called with invalid SQL:", sql);
+function sanitizeSql(sql) {
+  if (!sql || typeof sql !== "string") return sql;
+  let s = sql;
+
+  s = s.replace(/\s*,\s*(FROM|WHERE|ORDER\s+BY|GROUP\s+BY|LIMIT)\b/gi, " $1");
+  s = s.replace(/,\s*\)/g, ")");
+  s = s.replace(/,{2,}/g, ",");
+  s = s.replace(/\s+/g, " ");
+
+  return s;
+}
+
+/**
+ * Expand array parameters in params into multiple '?' placeholders in SQL and flatten params.
+ */
+function expandArrayParams(sql, params) {
+  if (!Array.isArray(params) || params.length === 0) return { sql, params };
+
+  let newSql = sql;
+  const newParams = [];
+
+  function findNextQuestionIndex(startIdx = 0) {
+    let inSingle = false;
+    let inDouble = false;
+    for (let i = startIdx; i < newSql.length; i++) {
+      const ch = newSql[i];
+      if (ch === "'" && !inDouble) {
+        if (!(i > 0 && newSql[i - 1] === "\\")) inSingle = !inSingle;
+      } else if (ch === '"' && !inSingle) {
+        if (!(i > 0 && newSql[i - 1] === "\\")) inDouble = !inDouble;
+      } else if (ch === "?" && !inSingle && !inDouble) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  let searchFrom = 0;
+  for (let p of params) {
+    const qIdx = findNextQuestionIndex(searchFrom);
+    if (qIdx === -1) {
+      if (Array.isArray(p)) {
+        for (const v of p) newParams.push(v);
+      } else {
+        newParams.push(p);
+      }
+      continue;
+    }
+
+    if (Array.isArray(p)) {
+      if (p.length === 0) {
+        newSql = newSql.slice(0, qIdx) + "(NULL)" + newSql.slice(qIdx + 1);
+        searchFrom = qIdx + 6;
+      } else {
+        const marks = p.map(() => "?").join(", ");
+        newSql =
+          newSql.slice(0, qIdx) + "(" + marks + ")" + newSql.slice(qIdx + 1);
+        for (const v of p) newParams.push(v);
+        searchFrom = qIdx + marks.length + 2;
+      }
+    } else {
+      newParams.push(p);
+      searchFrom = qIdx + 1;
+    }
+  }
+
+  return { sql: newSql, params: newParams };
+}
+
+/**
+ * Sleep helper
+ */
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchRows(sql, params) {
+  try {
+    console.log(
+      "[reportUtils] Executing SQL (preview):",
+      (sql || "").slice(0, 1000)
+    ); // avoid logging huge text
+    console.log("[reportUtils] Params:", JSON.stringify(params));
+    const t0 = Date.now();
+    const [rows] = await pool.query(sql, params); // or the PromisePool call your code uses
+    const took = Date.now() - t0;
+    console.log(
+      `[reportUtils] SQL OK — rows: ${
+        Array.isArray(rows) ? rows.length : 0
+      } (took ${took} ms)`
+    );
+    return rows;
+  } catch (err) {
+    console.error(
+      "[reportUtils] fetchRows error:",
+      err && (err.stack || err.message)
+    );
+    throw err;
+  }
+}
+
+/**
+ * fetchRows(sql, params) -> returns array of rows.
+ * Adds retry for transient connection errors (ETIMEDOUT, ECONNRESET).
+ */
+async function fetchRows(rawSql, rawParams = []) {
+  if (!rawSql || typeof rawSql !== "string") {
+    console.error("[reportUtils] fetchRows called with invalid SQL:", rawSql);
     throw new Error(
       "reportService: SQL query is missing or invalid. Check ../constants/reportQueries.js for missing keys."
     );
@@ -46,12 +140,21 @@ async function fetchRows(sql, params = []) {
     throw new Error("DB not available. Check ../config export.");
   }
 
-  // Ensure params is an array
-  if (!Array.isArray(params)) {
-    params = [params];
+  let params = Array.isArray(rawParams) ? [...rawParams] : [rawParams];
+
+  let sql = rawSql;
+  try {
+    sql = sanitizeSql(sql);
+  } catch (e) {}
+
+  try {
+    const expanded = expandArrayParams(sql, params);
+    sql = expanded.sql;
+    params = expanded.params;
+  } catch (e) {
+    console.warn("[reportUtils] expandArrayParams failed:", e && e.message);
   }
 
-  // Count placeholders and pad params if necessary
   try {
     const placeholderCount = countPlaceholders(sql);
     if (placeholderCount > params.length) {
@@ -62,61 +165,100 @@ async function fetchRows(sql, params = []) {
         `[reportUtils] padded params to match placeholders { placeholderCount: ${placeholderCount}, paramsLength: ${before} }`
       );
     }
-  } catch (e) {
-    // non-fatal: continue
+  } catch (e) {}
+
+  // retry logic
+  const maxRetries = 2;
+  let attempt = 0;
+  let lastErr = null;
+
+  while (attempt <= maxRetries) {
+    try {
+      let res;
+      if (typeof db.query === "function") {
+        const maybePromise = db.query(sql, params);
+        if (maybePromise && typeof maybePromise.then === "function") {
+          res = await maybePromise;
+        } else {
+          res = await new Promise((resolve, reject) => {
+            db.query(sql, params, (err, rows, fields) => {
+              if (err) return reject(err);
+              resolve([rows, fields]);
+            });
+          });
+        }
+      } else if (typeof db.execute === "function") {
+        const maybePromise = db.execute(sql, params);
+        if (maybePromise && typeof maybePromise.then === "function") {
+          res = await maybePromise;
+        } else {
+          res = await new Promise((resolve, reject) => {
+            db.execute(sql, params, (err, rows, fields) => {
+              if (err) return reject(err);
+              resolve([rows, fields]);
+            });
+          });
+        }
+      } else {
+        throw new Error("DB client has no query/execute method");
+      }
+
+      if (Array.isArray(res) && res.length > 0 && Array.isArray(res[0])) {
+        return res[0];
+      }
+      if (Array.isArray(res)) {
+        return res;
+      }
+      if (res && typeof res === "object" && Array.isArray(res.rows)) {
+        return res.rows;
+      }
+      return [];
+    } catch (err) {
+      lastErr = err;
+      const msg =
+        err && (err.message || err.code)
+          ? err.message || err.code
+          : String(err);
+      // transient - retry on ETIMEDOUT, ECONNRESET, EPIPE
+      const transient = /ETIMEDOUT|ECONNRESET|EPIPE|ENOTFOUND/i.test(msg);
+      attempt++;
+      if (!transient || attempt > maxRetries) {
+        // Enrich error with SQL/params and rethrow
+        const safeParams = Array.isArray(params)
+          ? params.map((p) => {
+              try {
+                if (p === null) return null;
+                if (typeof p === "string" && p.length > 200)
+                  return `${p.slice(0, 200)}...`;
+                return p;
+              } catch (e) {
+                return String(p);
+              }
+            })
+          : params;
+        const enriched = new Error(
+          `[reportUtils] fetchRows error: ${
+            err && err.message ? err.message : String(err)
+          }\nSQL: \n${sql}\n -- params: ${JSON.stringify(safeParams)}`
+        );
+        enriched.stack = err && err.stack ? err.stack : enriched.stack;
+        console.error(enriched.message);
+        throw enriched;
+      } else {
+        const backoff = 200 * attempt;
+        console.warn(
+          `[reportUtils] transient DB error (${msg}), retrying ${attempt}/${maxRetries} after ${backoff}ms`
+        );
+        await sleep(backoff);
+        continue;
+      }
+    }
   }
 
-  // Execute the query using whichever method the exported db offers
-  try {
-    let res;
-    if (typeof db.execute === "function") {
-      // prefer execute (prepared statement)
-      res = await db.execute(sql, params);
-    } else {
-      // fallback to query
-      res = await db.query(sql, params);
-    }
-
-    // mysql2/promise often returns [rows, fields]
-    if (Array.isArray(res) && res.length > 0 && Array.isArray(res[0])) {
-      return res[0];
-    }
-    // some drivers return { rows } or an array of rows
-    if (Array.isArray(res)) {
-      return res;
-    }
-    if (res && typeof res === "object" && Array.isArray(res.rows)) {
-      return res.rows;
-    }
-    // if we got anything else, return empty array
-    return [];
-  } catch (err) {
-    // Enrich error with SQL and params for easier debugging (keeps original message)
-    const safeParams = Array.isArray(params)
-      ? params.map((p) => {
-          try {
-            if (p === null) return null;
-            if (typeof p === "string" && p.length > 200)
-              return `${p.slice(0, 200)}...`;
-            return p;
-          } catch (e) {
-            return String(p);
-          }
-        })
-      : params;
-    const enriched = new Error(
-      `[reportUtils] fetchRows error: ${
-        err && err.message ? err.message : String(err)
-      }\nSQL: \n${sql}\n -- params: ${JSON.stringify(safeParams)}`
-    );
-    // preserve stack if possible
-    enriched.stack = err && err.stack ? err.stack : enriched.stack;
-    console.error(enriched.message);
-    throw enriched;
-  }
+  // should not reach
+  throw lastErr || new Error("Unknown DB error");
 }
 
-/** light helper used by some handlers */
 function coerceToString(val, fallback = null) {
   if (val === undefined || val === null) return fallback;
   if (Array.isArray(val)) val = val[val.length - 1];

@@ -1,5 +1,9 @@
 // src/handlers/reportTasksHandler.js
+// Fully updated — strict department enforcement when employee_name is typed.
+// Keeps preview behavior and export behavior intact.
+
 const reportService = require("../services/reportIndex");
+const reportUtils = require("../services/reportUtils"); // fetchRows, coerce helpers if needed
 const {
   coerceToString,
   parseDates,
@@ -12,43 +16,168 @@ const {
   sendPreviewResponse,
 } = require("../services/reportFilters");
 
-const db = require("../config");
-const mysql = require("mysql2");
+const MAX_DOWNLOAD_FIELDS_TASKS = 13;
 
-async function dbExec(sql, params = []) {
+/* -------------------- helpers -------------------- */
+
+async function getEmployeeDepartment(employeeId) {
+  if (!employeeId) return null;
   try {
-    if (!Array.isArray(params)) params = [params];
-    const finalSql = mysql.format(sql, params);
-    if (db && typeof db.query === "function") {
-      return new Promise((resolve, reject) => {
-        db.query(finalSql, (err, rows, fields) => {
-          if (err) return reject(err);
-          resolve([rows, fields]);
-        });
-      });
-    } else if (db && typeof db.execute === "function") {
-      return db.execute(finalSql);
-    } else throw new Error("DB client has no query/execute");
-  } catch (e) {
-    console.error(
-      "[reportTasksHandler][dbExec] error:",
-      e && (e.stack || e.message)
+    const rows = await reportUtils.fetchRows(
+      "SELECT department_id FROM employee_professional WHERE employee_id = ? LIMIT 1",
+      [String(employeeId)]
     );
-    throw e;
+    if (
+      Array.isArray(rows) &&
+      rows[0] &&
+      typeof rows[0].department_id !== "undefined"
+    )
+      return rows[0].department_id != null
+        ? String(rows[0].department_id).trim()
+        : null;
+    return null;
+  } catch (e) {
+    console.warn(
+      "[reportTasksHandler] getEmployeeDepartment failed:",
+      e && e.message
+    );
+    return null;
   }
 }
 
-const MAX_DOWNLOAD_FIELDS_TASKS = 13;
+/**
+ * Verify employee belongs to department. Returns true only when both provided and match.
+ * If departmentId is not provided, returns true (no strict check).
+ */
+async function verifyEmployeeInDepartment(employeeId, departmentId) {
+  if (!employeeId) return false;
+  if (!departmentId) return true; // nothing to verify against
+  try {
+    const mapped = await getEmployeeDepartment(employeeId);
+    if (mapped === null) return false;
+    return String(mapped).trim() === String(departmentId).trim();
+  } catch (e) {
+    console.warn(
+      "[reportTasksHandler] verifyEmployeeInDepartment failed:",
+      e && e.message
+    );
+    return false;
+  }
+}
 
 /**
- * Build report metadata (human-friendly) from query parameters.
- * It will prefer emp_status when present and add both normalized token (meta.status)
- * and original label (meta.statusLabel) so downstream renderers can show friendly text.
+ * Resolve typed employee name -> array of employee_ids.
+ * If departmentId provided, only returns ids mapped to that department.
+ * Uses reportService.searchEmployees if available, else falls back to DB lookup.
+ */
+async function resolveEmployeeIdsFromTypedName(typedName, departmentId) {
+  if (!typedName || !typedName.trim()) return [];
+  const q = String(typedName).trim();
+  try {
+    let items = [];
+    if (typeof reportService.searchEmployees === "function") {
+      const res = await reportService.searchEmployees({
+        q,
+        limit: 200,
+        departmentId: departmentId || null,
+      });
+      if (Array.isArray(res)) items = res;
+      else if (res && Array.isArray(res.results)) items = res.results;
+      else if (res && Array.isArray(res.data)) items = res.data;
+    } else {
+      // fallback DB lookup (returns employee_id and department_id)
+      const pattern = `%${q}%`;
+      const sql =
+        "SELECT e.employee_id, pr.department_id FROM employees e LEFT JOIN employee_professional pr ON e.employee_id = pr.employee_id WHERE (CONCAT(COALESCE(e.first_name,''),' ',COALESCE(e.last_name,'')) LIKE ? OR e.email LIKE ? OR e.employee_id LIKE ?) LIMIT 200";
+      const rows = await reportUtils.fetchRows(sql, [
+        pattern,
+        pattern,
+        pattern,
+      ]);
+      if (Array.isArray(rows)) {
+        items = rows.map((r) => ({
+          employee_id: r.employee_id,
+          department_id:
+            r.department_id != null ? String(r.department_id).trim() : null,
+        }));
+      }
+    }
+
+    // Normalize items into {employee_id, department_id?}
+    const normalized = (Array.isArray(items) ? items : [])
+      .map((it) => {
+        if (!it) return null;
+        return {
+          employee_id: it.employee_id || it.employeeId || it.id || null,
+          department_id:
+            it.department_id ||
+            it.departmentId ||
+            it.dept_id ||
+            it.department ||
+            null,
+        };
+      })
+      .filter(Boolean);
+
+    // Unique ids list
+    const uniqueIds = Array.from(
+      new Set(normalized.map((i) => String(i.employee_id).trim()))
+    );
+
+    // If departmentId provided, ensure only those employees actually mapped to department are returned.
+    if (departmentId && uniqueIds.length > 0) {
+      try {
+        const placeholders = uniqueIds.map(() => "?").join(",");
+        const profRows = await reportUtils.fetchRows(
+          `SELECT employee_id, department_id FROM employee_professional WHERE employee_id IN (${placeholders})`,
+          uniqueIds
+        );
+        const map = {};
+        if (Array.isArray(profRows)) {
+          for (const r of profRows) {
+            if (r && r.employee_id != null) {
+              map[String(r.employee_id).trim()] =
+                r.department_id != null ? String(r.department_id).trim() : null;
+            }
+          }
+        }
+        const did = String(departmentId).trim();
+        const filtered = uniqueIds.filter((eid) => {
+          const m = map[eid];
+          if (m == null || m === "") return false; // enforce strict membership
+          return String(m).trim() === did;
+        });
+        return filtered;
+      } catch (e) {
+        // fallback: filter normalized results by department info present in search results
+        const did = String(departmentId).trim();
+        const fallbackFiltered = normalized
+          .filter(
+            (n) =>
+              n.department_id != null && String(n.department_id).trim() === did
+          )
+          .map((n) => String(n.employee_id).trim());
+        return Array.from(new Set(fallbackFiltered));
+      }
+    }
+
+    // no department constraint -> return unique IDs
+    return uniqueIds;
+  } catch (e) {
+    console.warn(
+      "[reportTasksHandler] resolveEmployeeIdsFromTypedName failed:",
+      e && e.message
+    );
+    return [];
+  }
+}
+
+/**
+ * Build meta human-friendly (used in preview responses)
  */
 async function buildMetaFromReqQuery(query = {}) {
   const meta = {};
 
-  // Prefer emp_status (employee-driven) but fall back to status/task_status
   const rawEmpStatus =
     coerceToString(query.emp_status, null) ||
     coerceToString(query.empStatus, null) ||
@@ -59,7 +188,6 @@ async function buildMetaFromReqQuery(query = {}) {
     try {
       const normalized = normalizeStatusForQuery(rawEmpStatus);
       meta.status = normalized || rawEmpStatus;
-      // Keep original label too for nicer PDF cover pages
       meta.statusLabel = rawEmpStatus;
     } catch (e) {
       meta.status = rawEmpStatus;
@@ -82,7 +210,6 @@ async function buildMetaFromReqQuery(query = {}) {
           const svcRes = await reportService.searchEmployees({
             q: empId,
             limit: 1,
-            departmentId: coerceToString(query.department_id, null),
           });
           let found = null;
           if (Array.isArray(svcRes) && svcRes.length) found = svcRes[0];
@@ -95,17 +222,11 @@ async function buildMetaFromReqQuery(query = {}) {
               (found.employee_name ||
                 `${found.first_name || ""} ${found.last_name || ""}`.trim())) ||
             empId;
-        } else if (typeof reportService.getEmployeeRows === "function") {
+        } else {
           const er = await reportService.getEmployeeRows(empId);
           meta.employeeName =
-            Array.isArray(er) && er[0]
-              ? er[0].employee_name ||
-                `${(er[0].first_name || "").trim()} ${(
-                  er[0].last_name || ""
-                ).trim()}`.trim() ||
-                empId
-              : empId;
-        } else meta.employeeName = empId;
+            Array.isArray(er) && er[0] ? er[0].employee_name || empId : empId;
+        }
       } catch (e) {
         meta.employeeName = empId;
       }
@@ -148,17 +269,43 @@ async function buildMetaFromReqQuery(query = {}) {
   return meta;
 }
 
-/* --------------------------
-   Supervisor-driven tasks
-   (kept behaviour unchanged)
-   -------------------------- */
+/* -------------------------- row status matching -------------------------- */
+
+function rowMatchesStatusToken(statusToken, row) {
+  if (!statusToken) return true;
+  const candidateFields = [
+    "status",
+    "emp_status",
+    "task_status",
+    "sup_status",
+    "sup_review_status",
+    "empStatus",
+    "taskStatus",
+  ];
+  const candidates = new Set();
+  for (const k of candidateFields) {
+    if (row && typeof row[k] !== "undefined" && row[k] !== null) {
+      candidates.add(String(row[k]));
+      try {
+        const n = normalizeStatusForQuery(row[k]);
+        if (n) candidates.add(n);
+      } catch (e) {
+        // ignore
+      }
+    }
+  }
+  const arr = Array.from(candidates);
+  return statusMatches(statusToken, arr);
+}
+
+/* ------------------- Supervisor-driven tasks ------------------- */
 async function downloadTasksSupervisorReport(req, res) {
   console.log(
     "[reportTasksHandler] downloadTasksSupervisorReport called - query:",
-    req.query
+    req.query || {}
   );
   try {
-    const parsed = parseDates(req.query);
+    const parsed = parseDates(req.query || {});
     let { startDate, endDate, status, format, fields } = parsed;
     const employeeId = coerceToString(req.query.employee_id, null);
     const departmentId = coerceToString(req.query.department_id, null);
@@ -177,6 +324,27 @@ async function downloadTasksSupervisorReport(req, res) {
     if (typeof reportService.getTaskRows !== "function")
       return res.status(500).json({ message: "Server misconfiguration" });
 
+    // If explicit employeeId supplied AND departmentId supplied -> verify membership
+    if (employeeId && departmentId) {
+      const ok = await verifyEmployeeInDepartment(employeeId, departmentId);
+      if (!ok) {
+        // Provide empty preview or 404 for export
+        if (isPreviewRequest(req)) {
+          return sendPreviewResponse(
+            req,
+            res,
+            [],
+            "No task data for selected date range"
+          );
+        } else {
+          return res
+            .status(404)
+            .json({ message: "No task data for selected date range" });
+        }
+      }
+    }
+
+    // Fetch raw task rows (service-level filtering may not be strict)
     const rawTasks = await reportService.getTaskRows(
       startDate,
       endDate,
@@ -185,11 +353,175 @@ async function downloadTasksSupervisorReport(req, res) {
       employeeId,
       departmentId
     );
-    const rows = Array.isArray(rawTasks) ? rawTasks : [];
+    let rows = Array.isArray(rawTasks) ? rawTasks : [];
 
+    // If user typed an employee_name, resolve to IDs and restrict (this is the critical check)
+    const typedEmployeeName =
+      coerceToString(req.query.employee_name, null) ||
+      coerceToString(req.query.employeeName, null) ||
+      null;
+    if (typedEmployeeName) {
+      const resolvedIds = await resolveEmployeeIdsFromTypedName(
+        typedEmployeeName,
+        departmentId
+      );
+      // If no matches (or none in department when departmentId provided) -> No Data
+      if (!resolvedIds || resolvedIds.length === 0) {
+        if (isPreviewRequest(req)) {
+          return sendPreviewResponse(
+            req,
+            res,
+            [],
+            "No task data for selected date range"
+          );
+        } else {
+          return res
+            .status(404)
+            .json({ message: "No task data for selected date range" });
+        }
+      }
+
+      // Make sure the resolvedIds truly belong to the department if departmentId provided.
+      if (departmentId) {
+        try {
+          const placeholders = resolvedIds.map(() => "?").join(",");
+          const profRows = await reportUtils.fetchRows(
+            `SELECT employee_id FROM employee_professional WHERE employee_id IN (${placeholders}) AND department_id = ?`,
+            [...resolvedIds, departmentId]
+          );
+          const verified = Array.isArray(profRows)
+            ? profRows.map((r) => String(r.employee_id).trim())
+            : [];
+          if (!verified || verified.length === 0) {
+            if (isPreviewRequest(req)) {
+              return sendPreviewResponse(
+                req,
+                res,
+                [],
+                "No task data for selected date range"
+              );
+            } else {
+              return res
+                .status(404)
+                .json({ message: "No task data for selected date range" });
+            }
+          }
+          rows = rows.filter((r) => {
+            const eid =
+              r && (r.employee_id ?? r.employeeId ?? r.emp_id ?? r.empId);
+            return eid != null && verified.includes(String(eid).trim());
+          });
+        } catch (e) {
+          console.warn(
+            "[reportTasksHandler] employee_professional lookup failed in supervisor filter:",
+            e && e.message
+          );
+          // conservative: treat as no matches to avoid cross-dept leakage
+          if (isPreviewRequest(req)) {
+            return sendPreviewResponse(
+              req,
+              res,
+              [],
+              "No task data for selected date range"
+            );
+          } else {
+            return res
+              .status(404)
+              .json({ message: "No task data for selected date range" });
+          }
+        }
+      } else {
+        // No department constraint — just filter to resolved ids
+        rows = rows.filter((r) => {
+          const eid =
+            r && (r.employee_id ?? r.employeeId ?? r.emp_id ?? r.empId);
+          return eid != null && resolvedIds.includes(String(eid).trim());
+        });
+      }
+    }
+
+    // Always enforce department scoping server-side if departmentId provided (if typedEmployeeName not used above, or remaining rows)
+    if (departmentId && !typedEmployeeName) {
+      const hasDeptIdField = rows.some(
+        (r) =>
+          Object.prototype.hasOwnProperty.call(r, "department_id") ||
+          Object.prototype.hasOwnProperty.call(r, "departmentId") ||
+          Object.prototype.hasOwnProperty.call(r, "dept_id") ||
+          Object.prototype.hasOwnProperty.call(r, "department")
+      );
+      if (hasDeptIdField) {
+        rows = rows.filter((r) => {
+          const v =
+            r.department_id ?? r.departmentId ?? r.dept_id ?? r.department;
+          return v != null && String(v).trim() === String(departmentId).trim();
+        });
+      } else {
+        const empIds = Array.from(
+          new Set(
+            rows
+              .map((r) =>
+                r && r.employee_id ? String(r.employee_id).trim() : null
+              )
+              .filter(Boolean)
+          )
+        );
+        if (empIds.length > 0) {
+          try {
+            const placeholders = empIds.map(() => "?").join(",");
+            const profRows = await reportUtils.fetchRows(
+              `SELECT employee_id, department_id FROM employee_professional WHERE employee_id IN (${placeholders})`,
+              empIds
+            );
+            const map = {};
+            if (Array.isArray(profRows)) {
+              for (const p of profRows) {
+                if (p && p.employee_id != null)
+                  map[String(p.employee_id).trim()] =
+                    p.department_id != null
+                      ? String(p.department_id).trim()
+                      : null;
+              }
+            }
+            rows = rows.filter((r) => {
+              const eid =
+                r && r.employee_id != null
+                  ? String(r.employee_id).trim()
+                  : null;
+              if (!eid) return false;
+              const mapped = map[eid];
+              return (
+                mapped != null &&
+                String(mapped).trim() === String(departmentId).trim()
+              );
+            });
+          } catch (e) {
+            console.warn(
+              "[reportTasksHandler] department mapping failed:",
+              e && e.message
+            );
+            // if mapping fails, be conservative: drop results (prevent cross-dept leakage)
+            rows = [];
+          }
+        } else {
+          // no employees -> nothing to show
+          rows = [];
+        }
+      }
+    }
+
+    // final employeeId strict filter (if explicitly provided)
+    if (employeeId) {
+      rows = rows.filter((r) => {
+        const eid = r && (r.employee_id ?? r.employeeId ?? r.emp_id ?? r.empId);
+        return eid != null && String(eid).trim() === String(employeeId).trim();
+      });
+    }
+
+    // Preview branch with status filter applied
     if (isPreviewRequest(req)) {
+      const statusToken = normalizeStatusForQuery(status);
       const filteredPreview = rows.filter((t) =>
-        statusMatches(normalizeStatusForQuery(status), [t.status])
+        rowMatchesStatusToken(statusToken, t)
       );
       const msg =
         filteredPreview.length === 0
@@ -198,8 +530,10 @@ async function downloadTasksSupervisorReport(req, res) {
       return sendPreviewResponse(req, res, filteredPreview, msg);
     }
 
+    // Export / final filtering
+    const statusTokenFinal = normalizeStatusForQuery(status);
     const filtered = rows.filter((t) =>
-      statusMatches(normalizeStatusForQuery(status), [t.status])
+      rowMatchesStatusToken(statusTokenFinal, t)
     );
     if (filtered.length === 0)
       return res
@@ -208,9 +542,7 @@ async function downloadTasksSupervisorReport(req, res) {
 
     const tasksForExcel = pickFields(filtered, fields);
     const tasksForPdf = filtered;
-
     const meta = await buildMetaFromReqQuery(req.query || {});
-    console.debug("[reportTasksHandler] render meta (supervisor):", meta);
 
     if (format === "xlsx") {
       const buf =
@@ -269,31 +601,21 @@ async function downloadTasksSupervisorReport(req, res) {
   }
 }
 
-/* --------------------------
-   Employee-driven weekly tasks
-   - Only filter by emp_status (emp_status column)
-   - Accepts emp_status (or empStatus) parameter from UI
-   - UI options expected: "All", "Completed", "Not started", "Working"
-   -------------------------- */
+/* ------------------- Employee-driven weekly tasks ------------------- */
 async function downloadTasksEmployeeReport(req, res) {
   console.log(
     "[reportTasksHandler] downloadTasksEmployeeReport called - query:",
-    req.query
+    req.query || {}
   );
   try {
-    // parseDates will normalize "status" if provided under 'status'
-    const parsed = parseDates(req.query);
+    const parsed = parseDates(req.query || {});
     let { startDate, endDate, status: parsedStatus, format, fields } = parsed;
 
-    // Prefer emp_status (employee-driven filter). Support emp_status or empStatus keys.
     const rawEmpStatus =
       coerceToString(req.query.emp_status, null) ||
       coerceToString(req.query.empStatus, null) ||
-      // fall back to parsed status only if emp_status absent
       coerceToString(parsedStatus, null) ||
       null;
-
-    // Normalize emp_status token to canonical form (or null if 'all' / empty)
     const normalizedEmpStatus = normalizeStatusForQuery(rawEmpStatus);
 
     const employeeId = coerceToString(req.query.employee_id, null);
@@ -314,11 +636,26 @@ async function downloadTasksEmployeeReport(req, res) {
     if (typeof reportService.getWeeklyTaskRows !== "function")
       return res.status(500).json({ message: "Server misconfiguration" });
 
+    // If explicit employeeId supplied AND departmentId supplied -> verify membership
+    if (employeeId && departmentId) {
+      const ok = await verifyEmployeeInDepartment(employeeId, departmentId);
+      if (!ok) {
+        if (isPreview)
+          return sendPreviewResponse(
+            req,
+            res,
+            [],
+            "No weekly task data for selected date range"
+          );
+        else
+          return res
+            .status(404)
+            .json({ message: "No weekly task data for selected date range" });
+      }
+    }
+
     let rawWeekly;
     try {
-      // We pass parsedStatus to service (if service expects general status filtering).
-      // We intentionally do NOT rely on service to apply emp_status filter — we apply it locally,
-      // so that employee-driven `emp_status` behavior is consistent regardless of service internals.
       rawWeekly = await reportService.getWeeklyTaskRows(
         startDate,
         endDate,
@@ -332,7 +669,6 @@ async function downloadTasksEmployeeReport(req, res) {
         "[reportTasksHandler] getWeeklyTaskRows failed:",
         e && (e.stack || e.message)
       );
-      // Surface DB/service errors so they're visible in logs and client receives a meaningful message.
       const msg =
         e && e.message && typeof e.message === "string"
           ? `Service error: ${e.message}`
@@ -340,10 +676,163 @@ async function downloadTasksEmployeeReport(req, res) {
       return res.status(500).json({ message: msg });
     }
 
-    const rows = Array.isArray(rawWeekly) ? rawWeekly : [];
+    let rows = Array.isArray(rawWeekly) ? rawWeekly : [];
 
-    // IMPORTANT: filter only on emp_status (per your requirement).
-    // If normalizedEmpStatus is null => treat as "All" (no filter).
+    // If user typed an employee_name, resolve to IDs and restrict
+    const typedEmployeeName =
+      coerceToString(req.query.employee_name, null) ||
+      coerceToString(req.query.employeeName, null) ||
+      null;
+    if (typedEmployeeName) {
+      const resolvedIds = await resolveEmployeeIdsFromTypedName(
+        typedEmployeeName,
+        departmentId
+      );
+      if (!resolvedIds || resolvedIds.length === 0) {
+        if (isPreview)
+          return sendPreviewResponse(
+            req,
+            res,
+            [],
+            "No weekly task data for selected date range"
+          );
+        else
+          return res
+            .status(404)
+            .json({ message: "No weekly task data for selected date range" });
+      }
+
+      // enforce department when departmentId present
+      if (departmentId) {
+        try {
+          const placeholders = resolvedIds.map(() => "?").join(",");
+          const profRows = await reportUtils.fetchRows(
+            `SELECT employee_id FROM employee_professional WHERE employee_id IN (${placeholders}) AND department_id = ?`,
+            [...resolvedIds, departmentId]
+          );
+          const verified = Array.isArray(profRows)
+            ? profRows.map((r) => String(r.employee_id).trim())
+            : [];
+          if (!verified || verified.length === 0) {
+            if (isPreview)
+              return sendPreviewResponse(
+                req,
+                res,
+                [],
+                "No weekly task data for selected date range"
+              );
+            else
+              return res.status(404).json({
+                message: "No weekly task data for selected date range",
+              });
+          }
+          rows = rows.filter((r) => {
+            const eid =
+              r && (r.employee_id ?? r.employeeId ?? r.emp_id ?? r.empId);
+            return eid != null && verified.includes(String(eid).trim());
+          });
+        } catch (e) {
+          console.warn(
+            "[reportTasksHandler] employee_professional lookup failed in employee-driven filter:",
+            e && e.message
+          );
+          if (isPreview)
+            return sendPreviewResponse(
+              req,
+              res,
+              [],
+              "No weekly task data for selected date range"
+            );
+          else
+            return res
+              .status(404)
+              .json({ message: "No weekly task data for selected date range" });
+        }
+      } else {
+        rows = rows.filter((r) => {
+          const eid =
+            r && (r.employee_id ?? r.employeeId ?? r.emp_id ?? r.empId);
+          return eid != null && resolvedIds.includes(String(eid).trim());
+        });
+      }
+    }
+
+    // Enforce department scoping server-side (same logic as supervisor) when typedEmployeeName not used
+    if (departmentId && !typedEmployeeName) {
+      const hasDeptIdField = rows.some(
+        (r) =>
+          Object.prototype.hasOwnProperty.call(r, "department_id") ||
+          Object.prototype.hasOwnProperty.call(r, "departmentId") ||
+          Object.prototype.hasOwnProperty.call(r, "dept_id") ||
+          Object.prototype.hasOwnProperty.call(r, "department")
+      );
+      if (hasDeptIdField) {
+        rows = rows.filter((r) => {
+          const v =
+            r.department_id ?? r.departmentId ?? r.dept_id ?? r.department;
+          return v != null && String(v).trim() === String(departmentId).trim();
+        });
+      } else {
+        const empIds = Array.from(
+          new Set(
+            rows
+              .map((r) =>
+                r && r.employee_id ? String(r.employee_id).trim() : null
+              )
+              .filter(Boolean)
+          )
+        );
+        if (empIds.length > 0) {
+          try {
+            const placeholders = empIds.map(() => "?").join(",");
+            const profRows = await reportUtils.fetchRows(
+              `SELECT employee_id, department_id FROM employee_professional WHERE employee_id IN (${placeholders})`,
+              empIds
+            );
+            const map = {};
+            if (Array.isArray(profRows)) {
+              for (const p of profRows) {
+                if (p && p.employee_id != null)
+                  map[String(p.employee_id).trim()] =
+                    p.department_id != null
+                      ? String(p.department_id).trim()
+                      : null;
+              }
+            }
+            rows = rows.filter((r) => {
+              const eid =
+                r && r.employee_id != null
+                  ? String(r.employee_id).trim()
+                  : null;
+              if (!eid) return false;
+              const mapped = map[eid];
+              return (
+                mapped != null &&
+                String(mapped).trim() === String(departmentId).trim()
+              );
+            });
+          } catch (e) {
+            console.warn(
+              "[reportTasksHandler] department mapping failed:",
+              e && e.message
+            );
+            rows = [];
+          }
+        } else {
+          rows = [];
+        }
+      }
+    }
+
+    // EmployeeId explicit filter last
+    if (employeeId) {
+      rows = rows.filter((r) => {
+        const eid = r && (r.employee_id ?? r.employeeId ?? r.emp_id ?? r.empId);
+        return eid != null && String(eid).trim() === String(employeeId).trim();
+      });
+    }
+
+    // Filter on emp_status
     const filtered = rows.filter((w) =>
       statusMatches(normalizedEmpStatus, [w && w.emp_status])
     );
@@ -353,9 +842,6 @@ async function downloadTasksEmployeeReport(req, res) {
         filtered.length === 0
           ? "No weekly task data for selected date range"
           : undefined;
-
-      // sendPreviewResponse builds some meta from req.query; it will not see emp_status in meta.status
-      // unless emp_status is present in req.query (it usually is). sendPreviewResponse will still return rows.
       return sendPreviewResponse(req, res, filtered, msg);
     }
 
@@ -367,11 +853,8 @@ async function downloadTasksEmployeeReport(req, res) {
     const weeklyForExcel = pickFields(filtered, fields);
     const weeklyForPdf = filtered;
     const meta = await buildMetaFromReqQuery(req.query || {});
-    // ensure meta.status reflects emp_status canonical token (if present)
     if (normalizedEmpStatus) meta.status = normalizedEmpStatus;
-    // keep a friendly label if we had a raw label
     if (rawEmpStatus && !meta.statusLabel) meta.statusLabel = rawEmpStatus;
-    console.debug("[reportTasksHandler] render meta (employee):", meta);
 
     if (format === "xlsx") {
       const buf =

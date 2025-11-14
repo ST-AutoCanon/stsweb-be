@@ -1,4 +1,3 @@
-// src/constants/reportQueries.js
 module.exports = {
   GET_LEAVE_REPORT: `
   SELECT
@@ -82,9 +81,6 @@ WHERE ( ? IS NULL OR (COALESCE(r.approved_date, r.created_at) >= ? ) )
 ORDER BY r.created_at DESC
 `,
 
-  /* IMPORTANT: GET_EMPLOYEE_REPORT now uses the same placeholder ordering
-     used elsewhere: startDate, startDate, endDate, endDate, status, status, dept, dept
-     This matches the parameter ordering used by reportUtils.fetchRows / service callers. */
   GET_EMPLOYEE_REPORT: `
   SELECT
     e.employee_id,
@@ -172,6 +168,44 @@ ORDER BY r.created_at DESC
     AND ( ? IS NULL OR LOWER(e.status) = LOWER(?) )
     AND ( ? IS NULL OR pr.department_id = ? )
   ORDER BY e.created_at DESC
+`,
+
+  GET_EMPLOYEE_REPORT_COMPACT: `
+SELECT
+  e.employee_id,
+  e.first_name,
+  e.last_name,
+  CONCAT(COALESCE(e.first_name, ''), ' ', COALESCE(e.last_name, '')) AS employee_name,
+  e.email,
+  DATE_FORMAT(e.dob, '%Y-%m-%d') AS dob,
+  e.phone_number,
+  e.status,
+  pr.employee_type,
+  pr.role,
+  pr.position,
+  pr.department_id,
+  COALESCE(d.name, '') AS department_name,
+  pr.supervisor_id,
+  CONCAT(COALESCE(sup.first_name, ''), ' ', COALESCE(sup.last_name, '')) AS supervisor_name,
+  p.address,
+  p.father_name,
+  p.mother_name,
+  bd.bank_name,
+  bd.account_number,
+  bd.ifsc_code,
+  bd.branch_name AS bank_branch,
+  DATE_FORMAT(e.created_at, '%Y-%m-%d %H:%i:%s') AS created_at
+FROM employees e
+LEFT JOIN employee_professional pr ON e.employee_id = pr.employee_id
+LEFT JOIN departments d ON pr.department_id = d.id
+LEFT JOIN employees sup ON pr.supervisor_id = sup.employee_id
+LEFT JOIN employee_personal p ON e.employee_id = p.employee_id
+LEFT JOIN employee_bank_details bd ON e.employee_id = bd.employee_id
+WHERE ( ? IS NULL OR (e.created_at >= ? ) )
+  AND ( ? IS NULL OR (e.created_at < DATE_ADD(?, INTERVAL 1 DAY) ) )
+  AND ( ? IS NULL OR LOWER(e.status) = LOWER(?) )
+  AND ( ? IS NULL OR pr.department_id = ? )
+ORDER BY e.created_at DESC
 `,
 
   GET_VENDOR_REPORT: `

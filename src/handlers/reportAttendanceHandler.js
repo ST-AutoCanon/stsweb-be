@@ -263,6 +263,34 @@ function filterAttendanceRows(rows, employeeId, departmentId) {
   });
 }
 
+// Example: robust function to fetch professional rows for a list of employee ids
+async function fetchEmployeeProfessionalRowsByIds(dbExecFn, empIds = []) {
+  if (!Array.isArray(empIds) || empIds.length === 0) return [];
+
+  // columns we want
+  const columns = [
+    "employee_id",
+    "department_id",
+    "domain",
+    "employee_type",
+    "role",
+    "position",
+    "supervisor_id",
+    "salary",
+    "resume_url",
+    "joining_date",
+  ];
+  const selectCols = columns.join(", "); // IMPORTANT: join without trailing comma
+
+  // build placeholders for the IN clause
+  const placeholders = empIds.map(() => "?").join(",");
+
+  const sql = `SELECT ${selectCols} FROM employee_professional WHERE employee_id IN (${placeholders})`;
+  // pass empIds array as params; ensure order/length matches placeholders
+  const [rows] = await dbExecFn(sql, empIds);
+  return Array.isArray(rows) ? rows : [];
+}
+
 /**
  * Map employees in rows to their department_id (if missing on rows) by querying employee_professional.
  * Mutates rows in-place to add pr_department_id when found.

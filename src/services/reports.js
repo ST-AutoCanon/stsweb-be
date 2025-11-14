@@ -10,7 +10,6 @@ const fetchRows = utils.fetchRows;
  * Use getFieldDisplayNames(componentName) to obtain mapping.
  */
 const LABEL_OVERRIDES = {
-  // specific manual overrides
   replacement_task: "Replacement Task",
   H_F_day: "Half/Full Day",
   H_F_Day: "Half/Full Day",
@@ -51,12 +50,10 @@ const LABEL_OVERRIDES = {
   H_F_day: "Half/Full Day",
 };
 
-/** Convert snake_case / camelCase keys to Title Case fallback label */
 function prettyLabel(k) {
   if (!k || typeof k !== "string") return k;
   if (Object.prototype.hasOwnProperty.call(LABEL_OVERRIDES, k))
     return LABEL_OVERRIDES[k];
-  // replace underscores and camelCase boundaries with spaces, then title case
   const spaced = k
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/_+/g, " ")
@@ -69,7 +66,6 @@ function prettyLabel(k) {
 }
 
 function getFieldDisplayNames(component = "default") {
-  // some pre-built field sets for components - can be extended
   const sets = {
     employees: [
       "employee_id",
@@ -202,7 +198,6 @@ function getFieldDisplayNames(component = "default") {
   };
 
   const set = sets[component] || sets["default"] || [];
-  // build mapping
   const map = {};
   for (const key of set) {
     map[key] = prettyLabel(key);
@@ -212,8 +207,6 @@ function getFieldDisplayNames(component = "default") {
 
 /**
  * attachEmployeeNames(rows)
- * If rows have employee_id but not employee_name, batch query employees table to attach names.
- * Also can attach some professional fields from employee_professional when missing.
  */
 async function attachEmployeeNames(rows) {
   if (!Array.isArray(rows) || rows.length === 0) return;
@@ -239,12 +232,12 @@ async function attachEmployeeNames(rows) {
   );
   if (empIds.length === 0) return;
 
-  const placeholders = empIds.map(() => "?").join(",");
-
-  // Query employees table for name fields
-  const empSql = `SELECT employee_id, first_name, last_name, email FROM employees WHERE employee_id IN (${placeholders})`;
-  // Query professional table for additional info
-  const profSql = `SELECT employee_id, department_id, domain, employee_type, role, position, supervisor_id, salary, resume_url, joining_date, FROM employee_professional WHERE employee_id IN (${placeholders})`;
+  const empSql = `SELECT employee_id, first_name, last_name, email FROM employees WHERE employee_id IN (${empIds
+    .map(() => "?")
+    .join(",")})`;
+  const profSql = `SELECT employee_id, department_id, domain, employee_type, role, position, supervisor_id, salary, resume_url, joining_date FROM employee_professional WHERE employee_id IN (${empIds
+    .map(() => "?")
+    .join(",")})`;
   try {
     const [empRows, profRows] = await Promise.all([
       fetchRows(empSql, empIds).catch(() => []),
@@ -290,7 +283,6 @@ async function attachEmployeeNames(rows) {
         if (em && em.employee_name) {
           r.employee_name = em.employee_name;
         } else {
-          // attempt to build from first/last present on row
           if (r.first_name || r.last_name) {
             r.employee_name = `${(r.first_name || "").trim()} ${(
               r.last_name || ""
@@ -324,7 +316,6 @@ async function attachEmployeeNames(rows) {
 
 /**
  * attachDeptNames(rows)
- * If rows have department_id but not department_name, query departments to attach names.
  */
 async function attachDeptNames(rows) {
   if (!Array.isArray(rows) || rows.length === 0) return;
@@ -371,8 +362,78 @@ async function attachDeptNames(rows) {
   }
 }
 
-/* --------------------------- Report functions (original logic, improved) --------------------------- */
+/**
+ * forceFilterByEmployeeProfessional(rows, departmentId)
+ * - Chunk IN(...) queries to avoid packet/timeouts
+ * - On transient DB error, return original rows (do not empty them)
+ */
+async function forceFilterByEmployeeProfessional(rows, departmentId) {
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+  if (departmentId === undefined || departmentId === null) return rows;
 
+  const empIds = Array.from(
+    new Set(
+      rows
+        .map((r) =>
+          r.employee_id != null ? String(r.employee_id).trim() : null
+        )
+        .filter(Boolean)
+    )
+  );
+  if (empIds.length === 0) return [];
+
+  try {
+    const batchSize = Number(process.env.REPORT_EMP_PROF_BATCH_SIZE || 50);
+    const profRows = [];
+    for (let i = 0; i < empIds.length; i += batchSize) {
+      const chunk = empIds.slice(i, i + batchSize);
+      const placeholders = chunk.map(() => "?").join(",");
+      const sql = `SELECT employee_id, department_id FROM employee_professional WHERE employee_id IN (${placeholders})`;
+      // await each chunk to avoid overloading DB with many simultaneous IN queries
+      const part = await fetchRows(sql, chunk);
+      if (Array.isArray(part)) profRows.push(...part);
+    }
+
+    const empToDept = {};
+    if (Array.isArray(profRows)) {
+      for (const p of profRows) {
+        if (p && p.employee_id != null)
+          empToDept[String(p.employee_id).trim()] =
+            p.department_id != null ? String(p.department_id).trim() : null;
+      }
+    }
+
+    const deptStr = String(departmentId).trim();
+    const filtered = rows.filter((r) => {
+      if (r.department_id != null && String(r.department_id).trim() === deptStr)
+        return true;
+      const emp = r.employee_id != null ? String(r.employee_id).trim() : null;
+      if (!emp) return false;
+      const mapped = empToDept[emp];
+      if (mapped != null && String(mapped).trim() === deptStr) return true;
+      // Fallback: try department_name includes match (less strict)
+      if (
+        r.department_name &&
+        String(r.department_name)
+          .toLowerCase()
+          .includes(String(deptStr).toLowerCase())
+      )
+        return true;
+      return false;
+    });
+    return filtered;
+  } catch (e) {
+    // IMPORTANT: If DB lookup fails (ETIMEDOUT etc), do NOT return empty array.
+    // Return original rows so the UI preview doesn't disappear on transient DB faults.
+    console.warn(
+      "[reports] forceFilterByEmployeeProfessional failed (DB lookup); returning original rows. Error:",
+      e && e.message
+    );
+    return rows;
+  }
+}
+
+/* --------------------------- Report functions --------------------------- */
 async function getLeaveRows(
   startDate,
   endDate,
@@ -381,25 +442,49 @@ async function getLeaveRows(
   employeeId = null,
   departmentId = null
 ) {
+  console.log("➡️ [getLeaveRows] Called with params:", {
+    startDate,
+    endDate,
+    status,
+    fields,
+    employeeId,
+    departmentId,
+  });
+
   const sql = queries.GET_LEAVE_REPORT;
   if (!sql) {
-    console.error("[reports] GET_LEAVE_REPORT missing in reportQueries");
+    console.error(
+      "[getLeaveRows] ❌ Missing GET_LEAVE_REPORT in reportQueries"
+    );
     throw new Error("Missing GET_LEAVE_REPORT SQL definition");
   }
+
   const params = filters.buildDateStatusParams(startDate, endDate, status);
+  console.log("🧩 [getLeaveRows] SQL Params built:", params);
+
   let rows;
   try {
+    console.log("🚀 [getLeaveRows] Executing SQL...");
     rows = await fetchRows(sql, params);
+    console.log(
+      `✅ [getLeaveRows] SQL executed successfully. Rows fetched: ${
+        rows?.length || 0
+      }`
+    );
     rows = Array.isArray(rows) ? rows : [];
+    if (rows.length > 0) {
+      console.log("🗂️ [getLeaveRows] Sample row:", rows[0]);
+    }
   } catch (err) {
-    console.error("[reports] getLeaveRows SQL error:", err);
+    console.error("❌ [getLeaveRows] SQL execution error:", err);
     throw err;
   }
 
-  // attach employee/department readable names if missing
+  console.log("🔗 [getLeaveRows] Attaching employee and department names...");
   await attachEmployeeNames(rows);
   await attachDeptNames(rows);
 
+  console.log("🧮 [getLeaveRows] Applying employee/department filters...");
   try {
     rows = await filters.applyEmployeeAndDepartmentFilters(
       rows,
@@ -407,34 +492,58 @@ async function getLeaveRows(
       departmentId,
       async (deptId) => {
         if (queries && queries.GET_DEPARTMENT_NAME_BY_ID) {
+          console.log(
+            "🔍 [getLeaveRows] Fetching department name for ID:",
+            deptId
+          );
           return await fetchRows(queries.GET_DEPARTMENT_NAME_BY_ID, [deptId]);
         }
         return [];
       }
     );
+    console.log(
+      `✅ [getLeaveRows] Filters applied. Rows after emp/dept filter: ${rows.length}`
+    );
   } catch (e) {
     console.warn(
-      "[reports] Warning applying emp/dept filters:",
+      "⚠️ [getLeaveRows] Warning applying emp/dept filters:",
       e && e.message
     );
   }
 
-  // Server-side safe status filter (fallback if SQL didn't filter)
+  if (departmentId) {
+    const before = rows.length;
+    console.log(
+      "🏗️ [getLeaveRows] Applying strict department filter for dept ID:",
+      departmentId
+    );
+    const strict = await forceFilterByEmployeeProfessional(rows, departmentId);
+    if (Array.isArray(strict) && strict.length >= 0) {
+      rows = strict;
+      console.debug(
+        `[getLeaveRows] ✅ Strict dept filter applied: ${before} -> ${rows.length}`
+      );
+    }
+  }
+
   try {
     const statusCandidate = filters.normalizeStatusForQuery(status);
     if (statusCandidate) {
       const before = rows.length;
+      console.log(
+        `⚙️ [getLeaveRows] Applying status filter: '${statusCandidate}'`
+      );
       rows = rows.filter((r) =>
         filters.statusMatches(statusCandidate, [r.status])
       );
       const after = rows.length;
       console.debug(
-        `[reports] getLeaveRows status filter applied '${statusCandidate}': ${before} -> ${after}`
+        `[getLeaveRows] ✅ Status filter '${statusCandidate}' applied: ${before} -> ${after}`
       );
     }
   } catch (e) {
     console.warn(
-      "[reports] getLeaveRows status safety filter failed:",
+      "⚠️ [getLeaveRows] Status safety filter failed:",
       e && e.message
     );
   }
@@ -459,7 +568,18 @@ async function getLeaveRows(
     "loss_of_pay_days",
     "preserved_leave_days",
   ];
-  return filters.keepOnlyFields(rows, fields, defaultOrder);
+
+  console.log("🧾 [getLeaveRows] Keeping only selected fields...");
+  const filteredRows = filters.keepOnlyFields(rows, fields, defaultOrder);
+
+  console.log(
+    `✅ [getLeaveRows] Final rows count after field filtering: ${filteredRows.length}`
+  );
+  if (filteredRows.length > 0) {
+    console.log("📄 [getLeaveRows] Sample final row:", filteredRows[0]);
+  }
+
+  return filteredRows;
 }
 
 async function getReimbursementRows(
@@ -495,7 +615,7 @@ async function getReimbursementRows(
   const params = [s, s, e, e];
   let statusSql = "";
   if (!st) {
-    // nothing - SQL expects null placeholders from buildDateStatusParams earlier
+    // nothing
   } else if (st === "approved/paid") {
     statusSql =
       " AND LOWER(COALESCE(r.status, '')) = ? AND LOWER(COALESCE(r.payment_status, '')) = ? ";
@@ -538,10 +658,15 @@ async function getReimbursementRows(
     finalSql = finalSql + " " + statusSql;
   }
 
-  const rawRows = await fetchRows(finalSql, params);
+  let rawRows;
+  try {
+    rawRows = await fetchRows(finalSql, params);
+  } catch (err) {
+    console.error("[reports] getReimbursementRows SQL error:", err);
+    throw err;
+  }
   let normalized = Array.isArray(rawRows) ? rawRows : [];
 
-  // attach names if missing
   await attachEmployeeNames(normalized);
   await attachDeptNames(normalized);
 
@@ -564,7 +689,20 @@ async function getReimbursementRows(
     );
   }
 
-  // Safety server-side status filter (extra guard)
+  if (departmentId) {
+    const beforeCount = normalized.length;
+    const strict = await forceFilterByEmployeeProfessional(
+      normalized,
+      departmentId
+    );
+    if (Array.isArray(strict)) {
+      normalized = strict;
+      console.debug(
+        `[reports] getReimbursementRows strict dept filter: ${beforeCount} -> ${normalized.length}`
+      );
+    }
+  }
+
   try {
     const statusCandidate = filters.normalizeStatusForQuery(status);
     if (statusCandidate) {
@@ -645,10 +783,6 @@ async function getAttendanceRows(
     throw new Error("Missing GET_EMPLOYEE_ATTENDANCE_REPORT SQL definition");
   }
 
-  // FIX: attendance SQL commonly expects exactly four date params [s, s, e, e]
-  // (e.g. ? IS NULL OR (punchin_time >= ?)  ... ? IS NULL OR (punchin_time < DATE_ADD(?, INTERVAL 1 DAY)))
-  // Using filters.buildDateStatusParams could produce extra placeholders (status-related)
-  // which led to "Malformed communication packet" when params length didn't match SQL.
   const s = startDate || null;
   const e = endDate || null;
   const params = [s, s, e, e];
@@ -665,7 +799,6 @@ async function getAttendanceRows(
     throw err;
   }
 
-  // Attach employee name / department name if missing on attendance rows
   await attachEmployeeNames(rows);
   await attachDeptNames(rows);
 
@@ -688,7 +821,17 @@ async function getAttendanceRows(
     );
   }
 
-  // Safety server-side filter for attendance status (punching)
+  if (departmentId) {
+    const before = rows.length;
+    const strict = await forceFilterByEmployeeProfessional(rows, departmentId);
+    if (Array.isArray(strict)) {
+      rows = strict;
+      console.debug(
+        `[reports] getAttendanceRows strict dept filter: ${before} -> ${rows.length}`
+      );
+    }
+  }
+
   try {
     const statusCandidate = filters.normalizeStatusForQuery(status);
     if (statusCandidate) {
@@ -741,54 +884,13 @@ async function getTaskRows(
   }
   const s = startDate || null;
   const e = endDate || null;
-  const st = filters.normalizeStatusForQuery(status);
-  const params = [s, s, e, e, st, st];
 
+  const params = [s, s, e, e, null, null];
+
+  let rows;
   try {
-    let rows = await fetchRows(sql, params);
+    rows = await fetchRows(sql, params);
     rows = Array.isArray(rows) ? rows : [];
-
-    // attach names if missing
-    await attachEmployeeNames(rows);
-    await attachDeptNames(rows);
-
-    // Apply employee/department filters
-    let afterRows = rows;
-    try {
-      afterRows = await filters.applyEmployeeAndDepartmentFilters(
-        rows,
-        employeeId,
-        departmentId,
-        async (deptId) => {
-          if (queries && queries.GET_DEPARTMENT_NAME_BY_ID) {
-            return await fetchRows(queries.GET_DEPARTMENT_NAME_BY_ID, [deptId]);
-          }
-          return [];
-        }
-      );
-    } catch (e) {
-      console.warn(
-        "[reports] Warning applying emp/dept filters (tasks):",
-        e && e.message
-      );
-      afterRows = rows;
-    }
-
-    const defaultOrder = [
-      "task_id",
-      "employee_id",
-      "employee_name",
-      "task_title",
-      "description",
-      "start_date",
-      "due_date",
-      "status",
-      "percentage",
-      "progress_percentage",
-      "created_at",
-      "updated_at",
-    ];
-    return filters.keepOnlyFields(afterRows, fields, defaultOrder);
   } catch (err) {
     console.error(
       "[reports] getTaskRows SQL error:",
@@ -796,6 +898,76 @@ async function getTaskRows(
     );
     throw err;
   }
+
+  try {
+    await attachEmployeeNames(rows);
+    await attachDeptNames(rows);
+  } catch (e) {
+    console.warn("[reports] attach names/dept failed (tasks):", e && e.message);
+  }
+
+  try {
+    const afterFilter = await filters.applyEmployeeAndDepartmentFilters(
+      rows,
+      employeeId,
+      departmentId,
+      async (deptId) => {
+        if (queries && queries.GET_DEPARTMENT_NAME_BY_ID) {
+          return await fetchRows(queries.GET_DEPARTMENT_NAME_BY_ID, [deptId]);
+        }
+        return [];
+      }
+    );
+    if (Array.isArray(afterFilter)) rows = afterFilter;
+  } catch (e) {
+    console.warn(
+      "[reports] Warning applying emp/dept filters (tasks):",
+      e && e.message
+    );
+  }
+
+  if (departmentId) {
+    const beforeStrict = rows.length;
+    const strict = await forceFilterByEmployeeProfessional(rows, departmentId);
+    if (Array.isArray(strict)) {
+      rows = strict;
+      console.debug(
+        `[reports] getTaskRows strict dept filter: ${beforeStrict} -> ${rows.length}`
+      );
+    }
+  }
+
+  const st = filters.normalizeStatusForQuery(status);
+  if (st && String(st).trim().toLowerCase() !== "all") {
+    try {
+      const before = rows.length;
+      rows = (Array.isArray(rows) ? rows : []).filter((r) =>
+        filters.statusMatches(st, [r.status])
+      );
+      const after = rows.length;
+      console.debug(
+        `[reports] getTaskRows status filter '${st}': ${before} -> ${after}`
+      );
+    } catch (e) {
+      console.warn("[reports] status matching error (tasks):", e && e.message);
+    }
+  }
+
+  const defaultOrder = [
+    "task_id",
+    "employee_id",
+    "employee_name",
+    "task_title",
+    "description",
+    "start_date",
+    "due_date",
+    "status",
+    "percentage",
+    "progress_percentage",
+    "created_at",
+    "updated_at",
+  ];
+  return filters.keepOnlyFields(rows, fields, defaultOrder);
 }
 
 async function getWeeklyTaskRows(
@@ -850,7 +1022,7 @@ async function getWeeklyTaskRows(
   } catch (e) {
     console.warn(
       "[reports] Warning preparing weekly task SQL status clause:",
-      e && e.message
+      e && (e.message || e)
     );
     if (st && st !== "all") {
       finalSql =
@@ -872,57 +1044,73 @@ async function getWeeklyTaskRows(
   try {
     rows = await fetchRows(finalSql, params);
     rows = Array.isArray(rows) ? rows : [];
-
-    await attachEmployeeNames(rows);
-    await attachDeptNames(rows);
-
-    try {
-      rows = await filters.applyEmployeeAndDepartmentFilters(
-        rows,
-        employeeId,
-        departmentId,
-        async (deptId) => {
-          if (queries && queries.GET_DEPARTMENT_NAME_BY_ID) {
-            return await fetchRows(queries.GET_DEPARTMENT_NAME_BY_ID, [deptId]);
-          }
-          return [];
-        }
-      );
-    } catch (e) {
-      console.warn(
-        "[reports] Warning applying emp/dept filters (weekly tasks):",
-        e && e.message
-      );
-    }
-
-    const defaultOrder = [
-      "task_id",
-      "week_id",
-      "task_date",
-      "project_id",
-      "project_name",
-      "task_name",
-      "replacement_task",
-      "employee_id",
-      "employee_name",
-      "emp_status",
-      "emp_comment",
-      "sup_status",
-      "sup_comment",
-      "sup_review_status",
-      "star_rating",
-      "parent_task_id",
-      "created_at",
-      "updated_at",
-    ];
-    return filters.keepOnlyFields(rows, fields, defaultOrder);
   } catch (err) {
-    console.error(
-      "[reports] getWeeklyTaskRows SQL error:",
-      err && (err.stack || err)
-    );
+    console.error("[reports] getWeeklyTaskRows SQL error:", err);
     throw err;
   }
+
+  try {
+    await attachEmployeeNames(rows);
+    await attachDeptNames(rows);
+  } catch (e) {
+    console.warn(
+      "[reports] attach names/dept failed (weekly tasks):",
+      e && e.message
+    );
+  }
+
+  try {
+    const afterFilter = await filters.applyEmployeeAndDepartmentFilters(
+      rows,
+      employeeId,
+      departmentId,
+      async (deptId) => {
+        if (queries && queries.GET_DEPARTMENT_NAME_BY_ID) {
+          return await fetchRows(queries.GET_DEPARTMENT_NAME_BY_ID, [deptId]);
+        }
+        return [];
+      }
+    );
+    if (Array.isArray(afterFilter)) rows = afterFilter;
+  } catch (e) {
+    console.warn(
+      "[reports] Warning applying emp/dept filters (weekly tasks):",
+      e && e.message
+    );
+  }
+
+  if (departmentId) {
+    const beforeStrict = rows.length;
+    const strict = await forceFilterByEmployeeProfessional(rows, departmentId);
+    if (Array.isArray(strict)) {
+      rows = strict;
+      console.debug(
+        `[reports] getWeeklyTaskRows strict dept filter: ${beforeStrict} -> ${rows.length}`
+      );
+    }
+  }
+
+  const defaultOrder = [
+    "task_id",
+    "week_id",
+    "task_date",
+    "project_id",
+    "project_name",
+    "task_name",
+    "replacement_task",
+    "employee_id",
+    "employee_name",
+    "emp_status",
+    "emp_comment",
+    "sup_status",
+    "sup_comment",
+    "sup_review_status",
+    "star_rating",
+    "parent_task_id",
+    "created_at",
+    "updated_at",
+  ];
+  return filters.keepOnlyFields(rows, fields, defaultOrder);
 }
 
 async function getEmployeeRows(
@@ -948,7 +1136,6 @@ async function getEmployeeRows(
     throw err;
   }
 
-  // ensure employee_name alias exists even if SQL alias is 'name'
   for (const r of rows) {
     if (!r.employee_name) {
       r.employee_name =
@@ -957,14 +1144,12 @@ async function getEmployeeRows(
         `${(r.first_name || "").trim()} ${(r.last_name || "").trim()}`.trim() ||
         "";
     }
-    // department fallback
     if (!r.department_name) {
       r.department_name = r.department_name || r.department || "";
     }
   }
 
-  // Attach professional/personal data where missing
-  await attachEmployeeNames(rows); // already attaches prof fields like role/position/joining_date
+  await attachEmployeeNames(rows);
   await attachDeptNames(rows);
 
   try {
@@ -986,7 +1171,17 @@ async function getEmployeeRows(
     );
   }
 
-  // Server-side safe status filter for employees (Active/Inactive etc)
+  if (departmentId) {
+    const beforeStrict = rows.length;
+    const strict = await forceFilterByEmployeeProfessional(rows, departmentId);
+    if (Array.isArray(strict)) {
+      rows = strict;
+      console.debug(
+        `[reports] getEmployeeRows strict dept filter: ${beforeStrict} -> ${rows.length}`
+      );
+    }
+  }
+
   try {
     const statusCandidate = filters.normalizeStatusForQuery(status);
     if (statusCandidate) {
@@ -1170,7 +1365,7 @@ async function getAssetRows(
   return filters.keepOnlyFields(rows, fields, defaultOrder);
 }
 
-/* get departments - same robust attempts as before */
+/* get departments - robust attempts */
 async function getDepartments() {
   try {
     if (queries && queries.GET_DEPARTMENTS) {
@@ -1210,16 +1405,12 @@ async function getDepartments() {
     }
     return [];
   } catch (err) {
-    console.error(
-      "[reports] getDepartments error:",
-      err && err.stack ? err.stack : err
-    );
+    console.error("[reports] getDepartments error:", err && (err.stack || err));
     throw err;
   }
 }
 
 async function searchEmployees(arg) {
-  // If arg is a string: treat as q and return array
   if (typeof arg === "string") {
     const q = arg.trim();
     if (!q) return [];
@@ -1227,71 +1418,49 @@ async function searchEmployees(arg) {
     return Array.isArray(res.results) ? res.results : [];
   }
 
-  // otherwise treat arg as options object
   const { q, limit = 10, departmentId = null } = arg || {};
   const trimmed = typeof q === "string" ? q.trim() : "";
   if (!trimmed) return { results: [], total: 0 };
 
-  // coerce and clamp limit (we will interpolate this into SQL)
   let lim = Number(limit);
   if (!Number.isFinite(lim) || lim <= 0) lim = 10;
   lim = Math.min(lim, 500);
 
   try {
-    // First try using pre-defined query constant if present
     if (queries && queries.SEARCH_EMPLOYEES) {
       try {
         let sql = queries.SEARCH_EMPLOYEES;
         const wildcard = `%${trimmed}%`;
         const params = [wildcard, wildcard, wildcard];
 
-        // Detect and handle optional department clause patterns.
-        // If departmentId provided, keep clause and push the param(s).
-        // If NOT provided, remove the optional clause so placeholders match params.
-        // The pattern attempts to match common optional patterns used in this project.
         const deptClausePatterns = [
           /\s*AND\s*\(\s*\?\s*IS\s*NULL\s*OR\s*pr\.department_id\s*=\s*\?\s*\)\s*/i,
           /\s*AND\s*\(\s*\?\s*IS\s*NULL\s*OR\s*d\.id\s*=\s*\?\s*\)\s*/i,
           /\s*AND\s*\(NULL\s*\?\s*OR\s*pr\.department_id\s*=\s*\?\s*\)\s*/i,
         ];
 
-        let removedDeptClause = false;
         if (departmentId && String(departmentId).trim() !== "") {
-          // push department param(s) expected by most optional clause shapes
           params.push(String(departmentId));
           params.push(String(departmentId));
         } else {
-          // try to remove any known optional dept clause so params remain correct
           for (const pat of deptClausePatterns) {
             if (pat.test(sql)) {
               sql = sql.replace(pat, " ");
-              removedDeptClause = true;
               break;
             }
           }
         }
 
-        // Many SEARCH_EMPLOYEES SQL variants include a final LIMIT ? placeholder.
-        // To avoid binding LIMIT as a parameter (which can trigger driver errors),
-        // remove a trailing "LIMIT ?" if present and instead append a literal LIMIT.
-        // We'll attempt to replace "LIMIT ?" with an empty string (if present)
-        // and then add "LIMIT <lim>" at the end.
-        sql = sql.replace(/\bLIMIT\s*\?\s*;?$/i, ""); // remove ending LIMIT ?
-        // ensure we don't accidentally leave multiple queries; keep SQL tidy
+        sql = sql.replace(/\bLIMIT\s*\?\s*;?$/i, "");
         sql = sql.trim();
-
-        // Append safe LIMIT (coerced integer)
         sql = sql + ` LIMIT ${lim}`;
 
-        // Execute
         const rows = await fetchRows(sql, params);
         const items = Array.isArray(rows) ? rows : [];
-        // ensure department_name present
         for (const r of items) {
           if (!r.department_name) r.department_name = r.department_name || "";
         }
 
-        // Now compute total if possible (do separate count query)
         let total = items.length;
         try {
           let countSql = `
@@ -1313,9 +1482,7 @@ async function searchEmployees(arg) {
           ) {
             total = Number(cntRows[0].cnt);
           }
-        } catch (countErr) {
-          // ignore count fallback errors (we already have items)
-        }
+        } catch (countErr) {}
 
         return { results: items, total };
       } catch (e) {
@@ -1326,11 +1493,9 @@ async function searchEmployees(arg) {
       }
     }
 
-    // fallback SQL (no pre-defined constant)
     const safe = trimmed.replace(/%/g, "\\%");
     const wildcard = `%${safe}%`;
 
-    // Build fallback SQL and INTERPOLATE LIMIT rather than binding it.
     let sql = `
       SELECT
         e.employee_id,
@@ -1377,9 +1542,7 @@ async function searchEmployees(arg) {
       ) {
         total = Number(cntRows[0].cnt);
       }
-    } catch (countErr) {
-      // ignore
-    }
+    } catch (countErr) {}
 
     const results = Array.isArray(rows)
       ? rows.map((r) => ({
@@ -1401,9 +1564,68 @@ async function searchEmployees(arg) {
   }
 }
 
+async function forceFilterByEmployeeProfessional(rows, departmentId) {
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+  if (departmentId === undefined || departmentId === null) return rows;
+
+  const empIds = Array.from(
+    new Set(
+      rows
+        .map((r) =>
+          r.employee_id != null ? String(r.employee_id).trim() : null
+        )
+        .filter(Boolean)
+    )
+  );
+  if (empIds.length === 0) return rows;
+
+  try {
+    const placeholders = empIds.map(() => "?").join(",");
+    const sql = `SELECT employee_id, department_id FROM employee_professional WHERE employee_id IN (${placeholders})`;
+    const profRows = await fetchRows(sql, empIds);
+    if (!Array.isArray(profRows) || profRows.length === 0) {
+      // no mapping available; fallback to original rows to avoid accidental removal
+      console.warn(
+        "[reports] forceFilterByEmployeeProfessional: no mappings returned; skipping strict filter"
+      );
+      return rows;
+    }
+    const empToDept = {};
+    for (const p of profRows) {
+      if (p && p.employee_id != null)
+        empToDept[String(p.employee_id).trim()] =
+          p.department_id != null ? String(p.department_id).trim() : null;
+    }
+    // If mapping covers none of the empIds, skip strict filtering
+    if (Object.keys(empToDept).length === 0) {
+      console.warn(
+        "[reports] forceFilterByEmployeeProfessional: mapping empty after lookup; skipping strict filter"
+      );
+      return rows;
+    }
+
+    const deptStr = String(departmentId).trim();
+    const filtered = rows.filter((r) => {
+      if (r.department_id != null && String(r.department_id).trim() === deptStr)
+        return true;
+      const emp = r.employee_id != null ? String(r.employee_id).trim() : null;
+      if (!emp) return false;
+      const mapped = empToDept[emp];
+      if (mapped != null && String(mapped).trim() === deptStr) return true;
+      return false;
+    });
+    return filtered;
+  } catch (e) {
+    console.warn(
+      "[reports] forceFilterByEmployeeProfessional failed (will skip strict filter):",
+      e && e.message
+    );
+    // on any error, do not filter out rows — fall back to prior behavior
+    return rows;
+  }
+}
+
 async function buildMetaFromReqQuery(query) {
-  // Return an object with readable strings so PDF header generation
-  // doesn't end up with objects (e.g. "[object Object]").
   const meta = {
     filters: [],
     summary: "",
@@ -1420,7 +1642,6 @@ async function buildMetaFromReqQuery(query) {
     const employeeId = q.employee_id || q.employeeId || null;
     const departmentId = q.department_id || q.departmentId || null;
 
-    // Date filter display
     if (startDate || endDate) {
       if (startDate && endDate)
         meta.filters.push(`Date: ${startDate} → ${endDate}`);
@@ -1430,13 +1651,11 @@ async function buildMetaFromReqQuery(query) {
       meta.filters.push("Date: (no range specified)");
     }
 
-    // Status
     if (status && String(status).trim() !== "") {
       meta.filters.push(`Status: ${status}`);
       meta.status = String(status);
     }
 
-    // Employee lookup (human name)
     if (employeeId && String(employeeId).trim() !== "") {
       try {
         const rows = await fetchRows(
@@ -1464,7 +1683,6 @@ async function buildMetaFromReqQuery(query) {
       }
     }
 
-    // Department lookup
     if (departmentId && String(departmentId).trim() !== "") {
       try {
         const drows = await fetchRows(
@@ -1485,7 +1703,6 @@ async function buildMetaFromReqQuery(query) {
       }
     }
 
-    // Build a one-line summary string for convenience in templates
     meta.summary = meta.filters.join(" | ");
     return meta;
   } catch (err) {
@@ -1505,9 +1722,7 @@ module.exports = {
   getVendorRows,
   getAssetRows,
   getDepartments,
-  // searchEmployees: wrapper
   searchEmployees,
-  // Extra utility: mapping for pretty PDF headers
   getFieldDisplayNames,
   buildMetaFromReqQuery,
 };

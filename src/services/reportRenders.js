@@ -106,36 +106,55 @@ async function renderExcelBuffer(rows, headers) {
 
 async function renderTasksExcelBuffer(tasksRows, weeklyRows) {
   const workbook = new ExcelJS.Workbook();
-  function addSheet(name, rows, fallbackRows = []) {
-    const safeRows = Array.isArray(rows) ? rows.map((r) => ({ ...r })) : [];
-    let cols;
-    if (safeRows.length > 0) {
-      cols = Object.keys(safeRows[0]).map((k) => ({
-        header: k,
-        key: k,
-        width: 20,
-      }));
-    } else {
-      const fallbackSafe =
-        Array.isArray(fallbackRows) && fallbackRows.length > 0
-          ? fallbackRows.map((r) => ({ ...r }))
-          : [];
-      if (fallbackSafe.length > 0) {
-        cols = Object.keys(fallbackSafe[0]).map((k) => ({
-          header: k,
-          key: k,
-          width: 20,
-        }));
-      } else {
-        cols = [{ header: "Message", key: "message", width: 50 }];
-        safeRows.push({ message: "No data available for selected range" });
+
+  // Helper: produce an ordered union of keys across rows (first occurrence order)
+  function unionKeysFromRows(rowsArray) {
+    const seen = new Set();
+    const keys = [];
+    for (const r of rowsArray) {
+      if (!r || typeof r !== "object") continue;
+      for (const k of Object.keys(r)) {
+        if (!seen.has(k)) {
+          seen.add(k);
+          keys.push(k);
+        }
       }
     }
+    return keys;
+  }
+
+  function addSheet(name, rows, fallbackRows = []) {
+    // make shallow copies
+    let safeRows = Array.isArray(rows) ? rows.map((r) => ({ ...r })) : [];
+    const fallbackSafe = Array.isArray(fallbackRows)
+      ? fallbackRows.map((r) => ({ ...r }))
+      : [];
+
+    let cols;
+
+    // If primary rows are empty but fallback has data, use fallback as sheet data
+    // This ensures the sheet isn't left header-only when fallbackRows are intended as the data source.
+    let usedRowsForCols = safeRows.length > 0 ? safeRows : fallbackSafe;
+    if (safeRows.length === 0 && fallbackSafe.length > 0) {
+      // use fallback as the actual rows for this sheet (helps avoid empty sheet)
+      safeRows = fallbackSafe.slice();
+    }
+
+    if (usedRowsForCols.length > 0) {
+      // create columns from union of keys across sample rows so headers include all fields
+      const keys = unionKeysFromRows(usedRowsForCols);
+      cols = keys.map((k) => ({ header: k, key: k, width: 20 }));
+    } else {
+      cols = [{ header: "Message", key: "message", width: 50 }];
+      safeRows.push({ message: "No data available for selected range" });
+    }
+
     const pruned = pruneEmptyColumnsFromData(safeRows, cols);
     const finalCols = pruned.columns.length > 0 ? pruned.columns : cols;
     finalCols.forEach((c) => {
       c.width = computeAutoWidthForColumn(safeRows, c.key, c.header);
     });
+
     const sheet = workbook.addWorksheet(name);
     sheet.columns = finalCols.map((c) => ({
       header: c.header,
@@ -143,6 +162,7 @@ async function renderTasksExcelBuffer(tasksRows, weeklyRows) {
       width: c.width,
     }));
     sheet.views = [{ state: "frozen", xSplit: 0, ySplit: 1 }];
+
     for (const r of safeRows) {
       const rowObj = {};
       for (const c of finalCols) {
@@ -153,8 +173,12 @@ async function renderTasksExcelBuffer(tasksRows, weeklyRows) {
       sheet.addRow(rowObj);
     }
   }
+
+  // Tasks sheet: primary tasksRows, fallback weeklyRows
   addSheet("Tasks", tasksRows, weeklyRows);
+  // Weekly Tasks sheet: primary weeklyRows, fallback tasksRows
   addSheet("Weekly Tasks", weeklyRows, tasksRows);
+
   const buf = await workbook.xlsx.writeBuffer();
   return buf;
 }
