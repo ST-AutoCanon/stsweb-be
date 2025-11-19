@@ -1,4 +1,3 @@
-// src/services/leaveService.js
 const db = require("../config");
 const queries = require("../constants/leaveQueries");
 const LeavePolicyService = require("./leavePolicyService");
@@ -102,11 +101,23 @@ const updateLeaveRequest = async (payload) => {
     preserved_leave_days = null,
     actorId = null,
     total_days = null,
-    // new flag — expected from frontend when using default fallback
-    is_defaulted = false,
+    // NOTE: we no longer trust client-supplied `is_defaulted` directly.
+    // The client can send a raw value, but server will only honor it when
+    // payload.__internal_system === true.
+    is_defaulted: raw_is_defaulted = false,
   } = payload;
 
   const bind = (v) => (v === undefined ? null : v);
+
+  // Trust gate: client may include is_defaulted, but server honours it
+  // ONLY if caller also provides explicit internal marker __internal_system === true.
+  const providedInternal = payload && payload.__internal_system === true;
+  const is_defaulted = providedInternal ? Boolean(raw_is_defaulted) : false;
+  if (raw_is_defaulted && !providedInternal) {
+    console.warn(
+      "[updateLeaveRequest] Client attempted to set is_defaulted but __internal_system missing — ignoring client-supplied is_defaulted."
+    );
+  }
 
   let conn = null;
   let transactionStarted = false;
@@ -194,6 +205,7 @@ const updateLeaveRequest = async (payload) => {
         compensated: c,
         deducted: d,
         lop: l,
+        is_defaulted,
       });
 
       if (Math.abs(c + d + l - totalDays) > EPS) {
@@ -419,7 +431,7 @@ const updateLeaveRequest = async (payload) => {
       return;
     } else {
       // Rejection or other non-Approved: update non-transactionally
-      // Use the incoming is_defaulted flag so DB accurately reflects what frontend sent.
+      // Use the computed is_defaulted flag so DB accurately reflects server-trusted value.
       const isDefaultFlagNum = is_defaulted ? 1 : 0;
 
       const paramsReject = [
@@ -429,7 +441,7 @@ const updateLeaveRequest = async (payload) => {
         bind(0), // deducted
         bind(0), // loss_of_pay - rejected path sets 0
         bind(preserved_leave_days),
-        // is_defaulted as provided by caller (was previously hardcoded to 0)
+        // is_defaulted as determined by server (only true for trusted internal calls)
         bind(isDefaultFlagNum),
         bind(leaveId),
       ];

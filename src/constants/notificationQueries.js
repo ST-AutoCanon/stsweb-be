@@ -1,5 +1,3 @@
-// backend/constants/notificationQueries.js
-
 const INSERT_NOTIFICATION = `
   INSERT INTO notifications
     (user_id, meeting_id, policy_id, message, triggered_at, is_read, created_at)
@@ -10,6 +8,7 @@ const CHECK_RECENT_SIMILAR_NOTIFICATION = `
   SELECT id FROM notifications
   WHERE user_id = ?
     AND message LIKE ?
+    AND is_read = 0
     AND triggered_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
   LIMIT 1
 `;
@@ -33,7 +32,6 @@ const SELECT_UNREAD_NOTIFICATIONS = `
   ORDER BY triggered_at DESC;
 `;
 
-/* New helper queries used by the policy-alert job */
 const SELECT_POLICIES_ENDING_IN_DAYS = `
   SELECT
     id,
@@ -44,15 +42,12 @@ const SELECT_POLICIES_ENDING_IN_DAYS = `
   WHERE DATE(year_end) = DATE_ADD(CURDATE(), INTERVAL ? DAY)
 `;
 
-/* Choose recipients logic — default: admins/hr/managers.
-   Adjust roles if your DB uses different role names. */
 const SELECT_NOTIFICATION_RECIPIENTS = `
   SELECT employee_id
   FROM employee_professional
   WHERE LOWER(role) IN ('admin', 'hr', 'manager')
 `;
 
-/* Avoid duplicate notifications for same user+policy+message */
 const CHECK_NOTIFICATION_EXISTS = `
   SELECT id
   FROM notifications
