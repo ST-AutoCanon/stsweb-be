@@ -1,4 +1,3 @@
-// controllers/leaveHandler.js
 const LeaveService = require("../services/leaveService");
 const ErrorHandler = require("../utils/errorHandler");
 
@@ -62,6 +61,8 @@ class LeaveHandler {
   /**
    * Update (approve/reject) a leave request.
    * - Accepts is_defaulted in various forms in the request body (or header fallback).
+   * - Detects internal/system marker and passes it through to service so service
+   *   can decide whether to trust client-provided flags.
    */
   static async updateLeaveRequest(req, res) {
     try {
@@ -157,11 +158,22 @@ class LeaveHandler {
 
       const is_defaulted = parseBoolFlexible(rawIsDefault);
 
+      // detect internal/system marker (several supported forms)
+      const internalMarker =
+        (req.body &&
+          (req.body.__internal_system === true ||
+            req.body._internalOrigin === "system" ||
+            req.body._internal_origin === "system")) ||
+        (req.headers && parseBoolFlexible(req.headers["x-internal-system"])) ||
+        false;
+
       console.log(
         "[LeaveHandler.updateLeaveRequest] parsed is_defaulted:",
         is_defaulted,
         "raw:",
-        rawIsDefault
+        rawIsDefault,
+        "internalMarker:",
+        internalMarker
       );
 
       // build payload to send to service
@@ -175,8 +187,12 @@ class LeaveHandler {
         preserved_leave_days:
           preserved_leave_days === null ? null : Number(preserved_leave_days),
         actorId,
-        // pass through is_defaulted flag so service can act accordingly
-        is_defaulted,
+        // pass the raw flag and also the explicit internal-system marker (service decides)
+        is_defaulted, // raw client-provided boolean (service will validate trust)
+        __internal_system: internalMarker === true,
+        // also preserve older _internalOrigin token if frontend uses it:
+        _internalOrigin:
+          req.body?._internalOrigin ?? req.body?._internal_origin,
       };
 
       console.log(

@@ -111,6 +111,7 @@ const allowedOrigins = [
   "https://sts-test.site",
   "http://localhost:3000",
   "http://127.0.0.1:3000",
+   "http://192.168.1.2:3000",
   "http://122.166.77.12:3000", // ✅ added from second file
 ];
 

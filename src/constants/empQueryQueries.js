@@ -1,17 +1,14 @@
 module.exports = {
-  /* Create a new conversation thread */
   CREATE_THREAD: `
     INSERT INTO threads (sender_id, recipient_id, subject, department_id)
     VALUES (?, ?, ?, ?);
   `,
 
-  /* Add a message to a thread */
   ADD_MESSAGE: `
     INSERT INTO employee_queries (thread_id, sender_id, sender_role, message, attachment_url)
     VALUES (?, ?, ?, ?, ?);
   `,
 
-  /* Retrieve all messages in a thread */
   GET_THREAD_MESSAGES: `
     SELECT 
     eq.id, 
@@ -32,14 +29,12 @@ module.exports = {
   
   `,
 
-  /* Close a thread with optional feedback and note */
   CLOSE_THREAD: `
     UPDATE threads
     SET status = 'closed', feedback = ?, note = ?, updated_at = NOW()
     WHERE id = ?;
   `,
 
-  /* List all threads (admin view), including unread counts */
   GET_ALL_THREADS: `
     SELECT
       t.id,
@@ -73,19 +68,21 @@ module.exports = {
     ORDER BY t.updated_at DESC;
   `,
 
-  /* Get employee IDs by role */
   GET_EMPLOYEE_BY_ROLE: `
     SELECT employee_id
     FROM employee_professional
     WHERE role = ?;
   `,
 
-  /* Get manager IDs for a specific department */
   GET_MANAGER_BY_DEPARTMENT: `
-    SELECT employee_id
-    FROM employee_professional
-    WHERE role = 'Manager' AND department_id = ?;
-  `,
+  SELECT ep.employee_id
+  FROM employee_professional ep
+  JOIN employees e
+    ON ep.employee_id = e.employee_id
+  WHERE ep.role = 'Manager'
+    AND ep.department_id = ?
+    AND e.status = 'Active';
+`,
 
   FETCH_THREADS: `
   SELECT
@@ -157,17 +154,23 @@ module.exports = {
   INSERT INTO message_read_status (message_id, recipient_id, is_read) VALUES ?
   `,
 
-  GET_ADMIN: `SELECT employee_id FROM employee_professional WHERE role = 'Admin'`,
-  // GET_HR: `SELECT employee_id FROM employee_professional WHERE role = 'HR'`,
-  GET_HR: `SELECT employee_id
-FROM employee_professional
-WHERE role = 'Manager'
-  AND department_id = (
-    SELECT id
-    FROM departments
-    WHERE name = 'HR'
-    LIMIT 1
-  );`,
+  GET_ADMIN: `
+  SELECT ep.employee_id
+  FROM employee_professional ep
+  JOIN employees e
+    ON ep.employee_id = e.employee_id
+  WHERE ep.role = 'Admin'
+    AND e.status = 'Active';
+`,
+
+  GET_HR: `
+  SELECT ep.employee_id
+  FROM employee_professional ep
+  JOIN employees e
+    ON ep.employee_id = e.employee_id
+  WHERE ep.role = 'HR'
+    AND e.status = 'Active';
+`,
 
   UPDATE_LATEST_MESSAGE: `
     UPDATE threads
