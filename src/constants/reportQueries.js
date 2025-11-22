@@ -263,8 +263,8 @@ ORDER BY e.created_at DESC
       ? IS NULL
       OR (
         LOWER(?) = 'all'
-        OR (LOWER(?) = 'assigned' AND LOWER(a.status) = 'in use')
-        OR (LOWER(?) = 'pending' AND LOWER(a.status) = 'not using')
+        OR (LOWER(?) = 'assigned' AND LOWER(a.status) = 'assigned')
+        OR (LOWER(?) = 'unassigned' AND LOWER(a.status) = 'unassigned')
         OR (LOWER(?) = 'returned' AND LOWER(a.status) = 'returned')
         OR (LOWER(?) IN ('decommissioned') AND LOWER(a.status) = 'decommissioned')
         OR LOWER(a.status) = LOWER(?)
