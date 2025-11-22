@@ -17,7 +17,7 @@ const employeeTaskRoutes = require("./routes/employeeTaskUpdateRoutes");
 const weeklyTaskSupervisorRoutes = require("./routes/weekly_task_supervisor");
 const weekTaskRoutes = require("./routes/weekTaskRoutes");
 const report = require("./routes/reportRoutes");
-
+const overtimeSupervisorRoutes = require('./routes/overtimeSupervisorRoutes');
 
 
 const EmployeeQueries = require("./services/employeeQueries");
@@ -401,7 +401,7 @@ app.use("/api/incentives", incentivesRoutes);
 //compensation
 app.use("/api/overtime", overtimeRoutes);
 app.use("/api/overtime-summary", overtimeSummaryRoutes);
-
+app.use('/api/compensation', overtimeSupervisorRoutes);
 app.use("/api/compensations", compensationRoutes);
 app.use("/api/compensation", assignCompensationRoutes);
 app.use("/api", employeeRoutesforsalarybreakup);

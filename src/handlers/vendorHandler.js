@@ -53,7 +53,7 @@ const addVendorHandler = async (req, res) => {
     if (!company_name) {
       return res.status(400).json({ error: "Company name is required" });
     }
-    if (!gst_certificate || !pan_card || !cancelled_cheque) {
+    if (!gst_certificate || !pan_card ) {
       return res.status(400).json({
         error: "GST Certificate, PAN Card, and Cancelled Cheque are required",
       });
