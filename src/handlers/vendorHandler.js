@@ -177,8 +177,7 @@ const updateVendorHandler = async (req, res) => {
     }
     if (
       (!new_gst_certificate && !gst_path && !existingVendor.gst_certificate) ||
-      (!new_pan_card && !pan_path && !existingVendor.pan_card) ||
-      (!new_cancelled_cheque && !cheque_path && !existingVendor.cancelled_cheque)
+      (!new_pan_card && !pan_path && !existingVendor.pan_card)
     ) {
       return res.status(400).json({
         error: "GST Certificate, PAN Card, and Cancelled Cheque are required",
