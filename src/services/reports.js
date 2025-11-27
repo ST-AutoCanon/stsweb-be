@@ -1302,11 +1302,14 @@ async function getAssetRows(
     console.error("[reports] GET_ASSET_REPORT missing in reportQueries");
     throw new Error("Missing GET_ASSET_REPORT SQL definition");
   }
+
   const s = startDate || null;
   const e = endDate || null;
-  const st =
-    status && String(status).trim().toLowerCase() !== "all" ? status : null;
-  const params = [s, s, e, e, st, st, st, st, st, st, st];
+
+  // Fetch rows WITHOUT relying on DB-level status filtering (we will apply assigned_to.status server-side).
+  // Provide only date params; fetchRows pads params to match placeholders if query expects more params.
+  const params = [s, s, e, e];
+
   let rows;
   try {
     rows = await fetchRows(sql, params);
@@ -1315,21 +1318,138 @@ async function getAssetRows(
     console.error("[reports] getAssetRows SQL error:", err);
     throw err;
   }
+
+  // === Post-process each row:
+  // 1) Parse assigned_to JSON (if present) and extract first element's status (assignedStatus)
+  // 2) Set row.status to assignedStatus (so "status column" uses assigned_to.status). If assignedStatus missing fall back to original asset.status
+  // 3) For department / employee filters, try to expose employee_id from assigned_to[*].employeeId when available
+  for (const r of rows) {
+    // Keep original asset lifecycle status under a separate key so we don't lose it (useful for frontend labels if needed)
+    try {
+      if (
+        !Object.prototype.hasOwnProperty.call(r, "__asset_lifecycle_status") &&
+        typeof r.status !== "undefined"
+      ) {
+        r.__asset_lifecycle_status = r.status;
+      }
+    } catch (e) {}
+
+    // Parse assigned_to and extract assignedStatus + employeeIdCandidate
+    let assignedStatus = null;
+    let assignedEmployeeId = null;
+    try {
+      const raw = r.assigned_to;
+      if (raw) {
+        let parsed = raw;
+        if (typeof raw === "string") {
+          // sometimes DB returns HTML-encoded or escaped strings; try safe parse
+          const trimmed = raw.trim();
+          if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+            parsed = JSON.parse(trimmed);
+          } else {
+            // not JSON array/object — leave as-is
+            parsed = raw;
+          }
+        }
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const first = parsed[0] || {};
+          assignedStatus =
+            (first && (first.status || first.state || first.status)) || null;
+          assignedEmployeeId =
+            (first && (first.employeeId || first.employee_id || first.empId)) ||
+            null;
+        } else if (parsed && typeof parsed === "object") {
+          // single object stored instead of array
+          assignedStatus = parsed.status || parsed.state || null;
+          assignedEmployeeId =
+            parsed.employeeId || parsed.employee_id || parsed.empId || null;
+        }
+      }
+    } catch (e) {
+      // JSON parse failed — ignore and fallback below
+      assignedStatus = null;
+      assignedEmployeeId = null;
+    }
+
+    // Normalize assignedStatus fallback
+    if (assignedStatus !== null && typeof assignedStatus !== "undefined") {
+      // keep as string trimmed
+      assignedStatus = String(assignedStatus).trim();
+    } else {
+      // if no assigned status found, preserve existing asset.status as status column fallback
+      assignedStatus =
+        r.status !== undefined &&
+        r.status !== null &&
+        String(r.status).trim() !== ""
+          ? String(r.status).trim()
+          : null;
+    }
+
+    // Overwrite the "status" field so status column uses the assigned_to.status (or fallback to asset.status)
+    r.status = assignedStatus !== null ? assignedStatus : null;
+
+    // Expose assigned_employee_id to help applyEmployeeAndDepartmentFilters which expects employee_id
+    if (
+      (!r.employee_id || String(r.employee_id).trim() === "") &&
+      assignedEmployeeId
+    ) {
+      r.employee_id = String(assignedEmployeeId).trim();
+    }
+  }
+
+  // Attach names and dept names if possible (these helpers are safe)
+  try {
+    await attachEmployeeNames(rows);
+    await attachDeptNames(rows);
+  } catch (e) {
+    console.warn(
+      "[reports] attach names/dept failed (assets):",
+      e && e.message
+    );
+  }
+
+  // Apply employee/department filters post-fetch (we already exposed a reasonable employee_id from assigned_to)
   try {
     if (
       (employeeId != null && String(employeeId).trim() !== "") ||
       (departmentId != null && String(departmentId).trim() !== "")
     ) {
+      // pass adapted rows to applyEmployeeAndDepartmentFilters
       const adaptedRows = rows.map((r) => {
         const copy = Object.assign({}, r);
+        // ensure employee_id is present for filters (already attempted above)
         if (
           !Object.prototype.hasOwnProperty.call(copy, "employee_id") &&
           copy.assigned_to
         ) {
-          copy.employee_id = copy.assigned_to;
+          try {
+            const raw = copy.assigned_to;
+            let parsed = raw;
+            if (typeof raw === "string") {
+              const trimmed = raw.trim();
+              if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+                parsed = JSON.parse(trimmed);
+              }
+            }
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              const first = parsed[0] || {};
+              if (first.employeeId || first.employee_id) {
+                copy.employee_id =
+                  first.employeeId || first.employee_id || copy.employee_id;
+              }
+            } else if (parsed && typeof parsed === "object") {
+              if (parsed.employeeId || parsed.employee_id) {
+                copy.employee_id =
+                  parsed.employeeId || parsed.employee_id || copy.employee_id;
+              }
+            }
+          } catch (e) {
+            // ignore parse errors
+          }
         }
         return copy;
       });
+
       rows = await filters.applyEmployeeAndDepartmentFilters(
         adaptedRows,
         employeeId,
@@ -1348,6 +1468,49 @@ async function getAssetRows(
       e && e.message
     );
   }
+
+  // If departmentId provided, apply strict professional mapping as additional guard
+  if (departmentId) {
+    const before = rows.length;
+    try {
+      const strict = await forceFilterByEmployeeProfessional(
+        rows,
+        departmentId
+      );
+      if (Array.isArray(strict)) {
+        rows = strict;
+        console.debug(
+          `[reports] getAssetRows strict dept filter: ${before} -> ${rows.length}`
+        );
+      }
+    } catch (e) {
+      console.warn(
+        "[reports] getAssetRows forceFilterByEmployeeProfessional failed:",
+        e && e.message
+      );
+    }
+  }
+
+  // Apply status filter server-side using assigned_to.status (we already overwrote r.status to assignedStatus)
+  try {
+    const statusCandidate = filters.normalizeStatusForQuery(status);
+    if (statusCandidate) {
+      const before = rows.length;
+      rows = rows.filter((r) =>
+        filters.statusMatches(statusCandidate, [r.status])
+      );
+      const after = rows.length;
+      console.debug(
+        `[reports] getAssetRows status filter '${statusCandidate}': ${before} -> ${after}`
+      );
+    }
+  } catch (e) {
+    console.warn(
+      "[reports] getAssetRows status safety filter failed:",
+      e && e.message
+    );
+  }
+
   const defaultOrder = [
     "asset_id",
     "asset_code",

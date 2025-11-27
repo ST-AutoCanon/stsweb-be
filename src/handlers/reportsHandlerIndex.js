@@ -13,6 +13,7 @@ const attendanceHandler = require("./reportAttendanceHandler");
 const tasksHandler = require("./reportTasksHandler");
 const assetsHandler = require("./reportAssetsHandler");
 const reimbursementsHandler = require("./reportReimbursementsHandler");
+
 // ==================== deriveDepartmentForEmployee (robust + console logs) ====================
 async function deriveDepartmentForEmployee(employeeId) {
   console.log("\n[deriveDepartmentForEmployee] START");

@@ -1,8 +1,28 @@
 module.exports = {
   GET_INVOICES_BY_PROJECT: `
 SELECT 
-  i.*,
-  -- also pull the project’s payment_type for convenience
+  i.id,
+  i.projectId,
+  i.invoiceType,
+  DATE_FORMAT(i.invoiceDate,'%Y-%m-%d') AS invoiceDate,
+  i.invoiceNo,
+  i.referenceId,
+  DATE_FORMAT(i.referenceDate,'%Y-%m-%d') AS referenceDate,
+  i.workDescription,
+  i.subTotal,
+  i.advance,
+  i.totalExcludingTax,
+  i.totalIncludingTax,
+  i.terms,
+  i.lineItems,
+  i.gst,
+  i.gstAmount,
+  i.totalAmount,
+  i.createdAt,
+  i.updatedAt,
+  i.gstPayment,
+  i.milestoneId,
+  i.status,
   p.payment_type,
 
   COALESCE((

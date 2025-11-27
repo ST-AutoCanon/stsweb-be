@@ -1,5 +1,9 @@
+// src/services/reportUtils.js
 const db = require("../config");
 
+/**
+ * Count placeholders (?) that are not inside string literals.
+ */
 function countPlaceholders(sql) {
   if (!sql || typeof sql !== "string") return 0;
   let inSingle = false;
@@ -97,34 +101,11 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchRows(sql, params) {
-  try {
-    console.log(
-      "[reportUtils] Executing SQL (preview):",
-      (sql || "").slice(0, 1000)
-    ); // avoid logging huge text
-    console.log("[reportUtils] Params:", JSON.stringify(params));
-    const t0 = Date.now();
-    const [rows] = await pool.query(sql, params); // or the PromisePool call your code uses
-    const took = Date.now() - t0;
-    console.log(
-      `[reportUtils] SQL OK — rows: ${
-        Array.isArray(rows) ? rows.length : 0
-      } (took ${took} ms)`
-    );
-    return rows;
-  } catch (err) {
-    console.error(
-      "[reportUtils] fetchRows error:",
-      err && (err.stack || err.message)
-    );
-    throw err;
-  }
-}
-
 /**
- * fetchRows(sql, params) -> returns array of rows.
- * Adds retry for transient connection errors (ETIMEDOUT, ECONNRESET).
+ * fetchRows
+ * - Executes SQL with params using configured DB client (db.query or db.execute).
+ * - Adds retries on transient errors (ETIMEDOUT/ECONNRESET/EPIPE/ENOTFOUND).
+ * - Expands array params into (?,?,?) sequences.
  */
 async function fetchRows(rawSql, rawParams = []) {
   if (!rawSql || typeof rawSql !== "string") {
@@ -141,8 +122,8 @@ async function fetchRows(rawSql, rawParams = []) {
   }
 
   let params = Array.isArray(rawParams) ? [...rawParams] : [rawParams];
-
   let sql = rawSql;
+
   try {
     sql = sanitizeSql(sql);
   } catch (e) {}
@@ -174,6 +155,13 @@ async function fetchRows(rawSql, rawParams = []) {
 
   while (attempt <= maxRetries) {
     try {
+      console.log(
+        "[reportUtils] Executing SQL (preview):",
+        (sql || "").slice(0, 1000)
+      );
+      console.log("[reportUtils] Params:", JSON.stringify(params));
+      const t0 = Date.now();
+
       let res;
       if (typeof db.query === "function") {
         const maybePromise = db.query(sql, params);
@@ -203,15 +191,26 @@ async function fetchRows(rawSql, rawParams = []) {
         throw new Error("DB client has no query/execute method");
       }
 
+      const took = Date.now() - t0;
       if (Array.isArray(res) && res.length > 0 && Array.isArray(res[0])) {
+        console.log(
+          `[reportUtils] SQL OK — rows: ${res[0].length} (took ${took} ms)`
+        );
         return res[0];
       }
       if (Array.isArray(res)) {
+        console.log(
+          `[reportUtils] SQL OK — rows: ${res.length} (took ${took} ms)`
+        );
         return res;
       }
       if (res && typeof res === "object" && Array.isArray(res.rows)) {
+        console.log(
+          `[reportUtils] SQL OK — rows: ${res.rows.length} (took ${took} ms)`
+        );
         return res.rows;
       }
+      console.log(`[reportUtils] SQL OK — rows: 0 (took ${took} ms)`);
       return [];
     } catch (err) {
       lastErr = err;
@@ -219,11 +218,9 @@ async function fetchRows(rawSql, rawParams = []) {
         err && (err.message || err.code)
           ? err.message || err.code
           : String(err);
-      // transient - retry on ETIMEDOUT, ECONNRESET, EPIPE
       const transient = /ETIMEDOUT|ECONNRESET|EPIPE|ENOTFOUND/i.test(msg);
       attempt++;
       if (!transient || attempt > maxRetries) {
-        // Enrich error with SQL/params and rethrow
         const safeParams = Array.isArray(params)
           ? params.map((p) => {
               try {
@@ -255,7 +252,6 @@ async function fetchRows(rawSql, rawParams = []) {
     }
   }
 
-  // should not reach
   throw lastErr || new Error("Unknown DB error");
 }
 
