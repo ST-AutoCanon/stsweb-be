@@ -259,17 +259,6 @@ ORDER BY e.created_at DESC
   FROM assets a
   WHERE ( ? IS NULL OR (COALESCE(a.created_at, a.valuation_date, NOW()) >= ? ) )
     AND ( ? IS NULL OR (COALESCE(a.created_at, a.valuation_date, NOW()) < DATE_ADD(?, INTERVAL 1 DAY) ) )
-    AND (
-      ? IS NULL
-      OR (
-        LOWER(?) = 'all'
-        OR (LOWER(?) = 'assigned' AND LOWER(a.status) = 'assigned')
-        OR (LOWER(?) = 'unassigned' AND LOWER(a.status) = 'unassigned')
-        OR (LOWER(?) = 'returned' AND LOWER(a.status) = 'returned')
-        OR (LOWER(?) IN ('decommissioned') AND LOWER(a.status) = 'decommissioned')
-        OR LOWER(a.status) = LOWER(?)
-      )
-    )
   ORDER BY COALESCE(a.created_at, a.valuation_date, NOW()) DESC
 `,
 

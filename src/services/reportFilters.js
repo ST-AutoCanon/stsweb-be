@@ -1,5 +1,12 @@
 // src/services/reportFilters.js
 // Collection of shared helpers used by handlers + reports module.
+//
+// Key changes in this version:
+// - Strict preview detection: only treat explicit query param preview=true (or '1') or boolean true as preview.
+//   This avoids accidental JSON preview responses for binary downloads when Accept: application/json is present.
+// - Robust & tolerant parsing of assigned_to column (parseAssignedToValue).
+// - Lifecycle/status matching uses assigned_to entries first for lifecycle tokens: assigned, unassigned, returned, decommissioned.
+// - Defensive behavior: parsing errors fall back gracefully instead of throwing.
 
 const fs = require("fs");
 const path = require("path");
@@ -30,7 +37,67 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
-/* ----------------- Status normalizer for DB query params -------------- */
+/* ----------------- Status synonyms & normalizer ----------------- */
+
+/**
+ * STATUS_SYNONYMS
+ * Map canonicalToken -> array of synonyms (all expected to be lower/clean forms).
+ */
+const STATUS_SYNONYMS = {
+  assigned: [
+    "assigned",
+    "assignedto",
+    "assigned_to",
+    "in use",
+    "inuse",
+    "in-use",
+    "allocated",
+    "issued",
+    "issuedto",
+    "using",
+  ],
+  unassigned: [
+    "unassigned",
+    "not using",
+    "notusing",
+    "notinuse",
+    "available",
+    "free",
+    "notassigned",
+    "not-assigned",
+    "not-using",
+    "not_using",
+  ],
+  returned: ["returned", "returnedto", "returned_to"],
+  decommissioned: [
+    "decommissioned",
+    "decomm",
+    "retired",
+    "disposed",
+    "de-commissioned",
+  ],
+  pending: ["pending"],
+  approved: ["approved"],
+  rejected: ["rejected"],
+  "approved/paid": ["approved/paid", "approvedpaid", "approved_paid"],
+  "approved/pending": [
+    "approved/pending",
+    "approvedpending",
+    "approved_pending",
+  ],
+};
+
+function normalizeStringForSynonym(s) {
+  if (s === null || s === undefined) return "";
+  return String(s)
+    .toLowerCase()
+    .trim()
+    .replace(/[\u2018\u2019\u201C\u201D]/g, "") // smart quotes
+    .replace(/[_\s\-–—]+/g, " ") // underscores/dashes -> space
+    .replace(/[^\w\s\/]+/g, "") // remove other punctuation except slash
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 /**
  * canonicalizeStatusToken(raw)
@@ -42,26 +109,45 @@ function canonicalizeStatusToken(raw) {
   let s = typeof raw === "string" ? raw.trim() : String(raw).trim();
   if (!s) return null;
 
-  // treat 'all' and obvious non-values as no filter
   const lowCheck = s.toLowerCase();
   if (["all", "null", "undefined", "none", "any"].includes(lowCheck))
     return null;
 
-  // 1) normalize separators/punctuation to space
-  s = s
-    .replace(/[\u2018\u2019\u201C\u201D]/g, "") // smart quotes
-    .replace(/[_\s\-–—]+/g, " ") // underscores, spaces, dashes -> single space
-    .replace(/\s*\/\s*/g, "/") // keep slash compound like "approved/paid"
-    .replace(/[^\w\s\/]+/g, "") // remove other punctuation except slash
-    .trim()
-    .toLowerCase();
+  let normalized = normalizeStringForSynonym(s);
 
-  // Collapse multiple spaces
-  s = s.replace(/\s+/g, " ");
+  // QUICK FIX: treat typical lifecycle "in use" variants as assigned
+  if (
+    normalized === "in use" ||
+    normalized === "inuse" ||
+    normalized.indexOf("in use") !== -1 ||
+    normalized.indexOf("inuse") !== -1
+  ) {
+    return "assigned";
+  }
 
-  // mapping of common variants -> canonical token values
-  const map = {
-    // reimbursements / generic
+  // Quick recognition of explicit assigned_to-like tokens
+  if (
+    normalized === "assignedto" ||
+    normalized === "assigned_to" ||
+    normalized === "assigned"
+  ) {
+    return "assigned";
+  }
+
+  // Negations mapping (simple heuristics)
+  if (
+    normalized.startsWith("not ") ||
+    normalized.startsWith("not-") ||
+    normalized.startsWith("no ")
+  ) {
+    // examples: "not using" -> unassigned
+    if (normalized.includes("use") || normalized.includes("using")) {
+      return "unassigned";
+    }
+  }
+
+  // direct map of common tokens
+  const directMap = {
     approve: "approved",
     approved: "approved",
     rejecting: "rejected",
@@ -73,12 +159,8 @@ function canonicalizeStatusToken(raw) {
     "approved/paid": "approved/paid",
     "approved/pending": "approved/pending",
     "approved/unpaid": "approved/unpaid",
-
-    // attendance
     "punch in": "punch in",
     "punch out": "punch out",
-
-    // tasks (supervisor and employee) — canonical forms used by handlers
     "yet to start": "yet to start",
     "not started": "not started",
     "not-started": "not started",
@@ -89,80 +171,62 @@ function canonicalizeStatusToken(raw) {
     "on hold": "on hold",
     "on-hold": "on hold",
     onhold: "on hold",
-    "add on": "add on",
-    "add-on": "add on",
-    "re work": "re work",
-    "re-work": "re work",
-    rework: "re work",
     incomplete: "incomplete",
     working: "working",
     "working on": "working",
     "in review": "in review",
     "in-review": "in review",
-
-    // employees
     active: "active",
     inactive: "inactive",
-
-    // assets
-    assigned: "assigned",
-    "in use": "in use",
     returned: "returned",
     decommissioned: "decommissioned",
-
-    // employee-driven task synonyms
-    completed: "completed",
-    complete: "completed",
-    "not started": "not started",
-    working: "working",
-    "in progress": "working", // map some synonyms to 'working' if desired
   };
 
-  // If exact mapped variant exists, return it
-  if (Object.prototype.hasOwnProperty.call(map, s)) return map[s];
-
-  // If it's a compound token containing slash(s), normalize each part and rejoin
-  if (s.includes("/")) {
-    const parts = s
-      .split("/")
-      .map((p) => p.trim())
-      .filter(Boolean)
-      .map((p) => (Object.prototype.hasOwnProperty.call(map, p) ? map[p] : p));
-    if (parts.length === 0) return null;
-    return parts.join("/");
+  if (Object.prototype.hasOwnProperty.call(directMap, normalized)) {
+    return directMap[normalized];
   }
 
-  // as a fallback, return the cleaned string
-  return s;
+  // Check STATUS_SYNONYMS list for match
+  for (const canon of Object.keys(STATUS_SYNONYMS)) {
+    const syns = STATUS_SYNONYMS[canon] || [];
+    for (const synRaw of syns) {
+      const synNorm = normalizeStringForSynonym(synRaw);
+      if (!synNorm) continue;
+      if (normalized === synNorm) return canon;
+      if (normalized.includes(synNorm)) return canon;
+      if (synNorm.includes(normalized)) return canon;
+    }
+  }
+
+  // compound slash tokens
+  if (normalized.includes("/")) {
+    const parts = normalized
+      .split("/")
+      .map((p) => p.trim())
+      .filter(Boolean);
+    const canonParts = parts
+      .map((p) => canonicalizeStatusToken(p))
+      .filter(Boolean);
+    if (canonParts.length === parts.length) {
+      return canonParts.join("/");
+    }
+  }
+
+  // fallback: return cleaned string so downstream fallback matching may apply
+  return normalized;
 }
 
-/**
- * normalizeStatusForQuery
- * - Accepts many UI inputs and returns a canonical token (or null for "no filter").
- * - This is the function used by SQL builders (so it returns a string that the DB compare will likely match).
- */
 function normalizeStatusForQuery(status) {
   return canonicalizeStatusToken(status);
 }
 
 /* ----------------- buildDateStatusParams (used by SQL fetchers) ---------------- */
 
-/**
- * buildDateStatusParams(startDate, endDate, status)
- *
- * Many of your SQL queries use a pattern like:
- *   WHERE (? IS NULL OR <date> >= ?) AND (? IS NULL OR <date> < DATE_ADD(?, INTERVAL 1 DAY))
- *   ... AND ( ? IS NULL OR LOWER(col) = LOWER(?) )
- *
- * To make "All" behave as "no filter", this function returns null placeholders
- * when status is null/empty/'all'.
- */
 function buildDateStatusParams(startDate, endDate, status) {
   const s = startDate || null;
   const e = endDate || null;
   const st = normalizeStatusForQuery(status);
   if (!st) {
-    // provide nulls so SQL clauses written as (? IS NULL OR LOWER(col)=LOWER(?)) work as expected
     return [s, s, e, e, null, null];
   }
   return [s, s, e, e, st, st];
@@ -200,14 +264,13 @@ function keepOnlyFields(rows, requestedFields, defaultOrder) {
           (k) => String(k).toLowerCase() === lower
         );
         if (foundKey) obj[f] = r[foundKey];
-        else obj[f] = ""; // preserve column but empty value
+        else obj[f] = "";
       }
     }
     return obj;
   });
 }
 
-// alias used by some handlers
 function pickFields(rows, fields) {
   return keepOnlyFields(rows, fields, null);
 }
@@ -264,7 +327,6 @@ async function applyEmployeeAndDepartmentFilters(
 
   let filtered = rows;
 
-  // --- Employee filter ---
   if (employeeId != null && String(employeeId).trim() !== "") {
     const empStr = String(employeeId).trim();
     filtered = filtered.filter((r) => {
@@ -280,11 +342,9 @@ async function applyEmployeeAndDepartmentFilters(
 
   if (!Array.isArray(filtered) || filtered.length === 0) return [];
 
-  // --- Department filter ---
   if (departmentId != null && String(departmentId).trim() !== "") {
     const didStr = String(departmentId).trim();
 
-    // Strict compare on department_id if present
     const hasDeptIdField = filtered.some((r) =>
       Object.prototype.hasOwnProperty.call(r, "department_id")
     );
@@ -297,7 +357,6 @@ async function applyEmployeeAndDepartmentFilters(
       return filtered;
     }
 
-    // If rows have employee_id, try to map via employee_professional in one query
     const empIds = Array.from(
       new Set(
         filtered
@@ -344,33 +403,37 @@ async function applyEmployeeAndDepartmentFilters(
       }
     }
 
-    // Try resolving department name by id
     try {
       let deptName = null;
       if (queries && queries.GET_DEPARTMENT_NAME_BY_ID) {
-        const nameRows = await reportUtils.fetchRows(
-          queries.GET_DEPARTMENT_NAME_BY_ID,
-          [departmentId]
-        );
-        if (Array.isArray(nameRows) && nameRows[0]) {
-          deptName = (
-            nameRows[0].name ||
-            nameRows[0].department_name ||
-            nameRows[0].department ||
-            ""
-          )
-            .toString()
-            .trim()
-            .toLowerCase();
-        }
-      } else {
-        const rowsDept = await reportUtils.fetchRows(
-          "SELECT name FROM departments WHERE id = ? LIMIT 1",
-          [departmentId]
-        );
-        if (Array.isArray(rowsDept) && rowsDept[0] && rowsDept[0].name) {
-          deptName = String(rowsDept[0].name).trim().toLowerCase();
-        }
+        try {
+          const nameRows = await reportUtils.fetchRows(
+            queries.GET_DEPARTMENT_NAME_BY_ID,
+            [departmentId]
+          );
+          if (Array.isArray(nameRows) && nameRows[0]) {
+            deptName = (
+              nameRows[0].name ||
+              nameRows[0].department_name ||
+              nameRows[0].department ||
+              ""
+            )
+              .toString()
+              .trim()
+              .toLowerCase();
+          }
+        } catch (e) {}
+      }
+      if (!deptName) {
+        try {
+          const rowsDept = await reportUtils.fetchRows(
+            "SELECT name FROM departments WHERE id = ? LIMIT 1",
+            [departmentId]
+          );
+          if (Array.isArray(rowsDept) && rowsDept[0] && rowsDept[0].name) {
+            deptName = String(rowsDept[0].name).trim().toLowerCase();
+          }
+        } catch (e) {}
       }
 
       if (deptName !== null && deptName !== "") {
@@ -381,14 +444,8 @@ async function applyEmployeeAndDepartmentFilters(
         });
         return filtered;
       }
-    } catch (e) {
-      console.warn(
-        "[reportFilters] department lookup failed, skipping department_name equality filtering:",
-        e && (e.message || e)
-      );
-    }
+    } catch (e) {}
 
-    // Fallback: contains match on department_name
     filtered = filtered.filter((r) => {
       const dn = r.department_name;
       if (!dn) return false;
@@ -401,10 +458,6 @@ async function applyEmployeeAndDepartmentFilters(
 
 /* ------------------ Status matching utilities ----------------- */
 
-/**
- * normalizeForCompare
- * removes non-alphanumeric characters and collapses to lowercase for robust comparisons.
- */
 function normalizeForCompare(s) {
   if (s === undefined || s === null) return "";
   return String(s)
@@ -416,127 +469,375 @@ function normalizeForCompare(s) {
 }
 
 /**
- * statusMatches(requestedStatus, rowStatusCandidates)
+ * parseAssignedToValue(v)
+ * - Accepts either an array of objects or a JSON-string representation.
+ * - Returns an array of normalized assignment entries (objects).
+ * - Quietly returns [] if parsing fails.
  *
- * - requestedStatus: token returned by normalizeStatusForQuery (string or null)
- * - rowStatusCandidates: array of values from the row (e.g. [r.status, r.payment_status])
- *
- * Returns true when:
- *  - requestedStatus is null -> no filter (true)
- *  - requestedStatus contains "/" -> split into parts and require every part to appear (partial match allowed)
- *  - otherwise require any candidate to match or contain the token
- *
- * Matching is done on canonicalized forms (canonicalizeStatusToken) first and falls back to normalized string compare.
+ * Expected entry shapes:
+ *  { name, employeeId, startDate, returnDate, comments, status }
  */
-function statusMatches(requestedStatus, rowStatusCandidates = []) {
-  if (!requestedStatus) return true;
-  const reqRaw = String(requestedStatus || "").trim();
-  if (!reqRaw) return true;
+function parseAssignedToValue(v) {
+  try {
+    if (!v && v !== 0) return [];
+    if (Array.isArray(v)) return v;
+    const sRaw = String(v);
+    const s = sRaw.trim();
+    if (!s) return [];
 
-  // Attempt canonical forms
-  const reqCanon = canonicalizeStatusToken(reqRaw);
-  const candidateCanons = (
-    Array.isArray(rowStatusCandidates) ? rowStatusCandidates : []
-  )
-    .map((v) => (v === null || v === undefined ? "" : String(v)))
-    .filter(Boolean)
-    .map((v) => canonicalizeStatusToken(v));
-
-  // If any candidate canonical matches requested canonical, return true
-  if (reqCanon) {
-    for (const cc of candidateCanons) {
-      if (!cc) continue;
-      // direct equality
-      if (cc === reqCanon) return true;
-      // partial: requested contained in candidate (e.g. "in progress" vs "in progress qa")
-      if (cc.includes(reqCanon) || reqCanon.includes(cc)) return true;
-      // compound handling if either side has slash
-      if (reqCanon.includes("/")) {
-        const parts = reqCanon
-          .split("/")
-          .map((p) => p.trim())
-          .filter(Boolean);
-        if (parts.every((p) => cc.includes(p))) return true;
+    // If looks like JSON array or object try parse normally
+    if (s.startsWith("[") || s.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(s);
+        if (Array.isArray(parsed)) return parsed;
+        if (parsed && typeof parsed === "object") return [parsed];
+      } catch (e) {
+        // try relaxed parsing strategies below
       }
     }
-  }
 
-  // Fallback to normalized compare for older DB values
-  const reqNorm = normalizeForCompare(reqRaw);
-  const normalizedRowVals = (
-    Array.isArray(rowStatusCandidates) ? rowStatusCandidates : []
-  )
-    .map((v) => (v === null || v === undefined ? "" : String(v)))
-    .filter(Boolean)
-    .map(normalizeForCompare);
-
-  if (normalizedRowVals.length === 0) return false;
-
-  // compound: require all parts to be present in at least one candidate or across candidates
-  if (reqNorm.includes("/")) {
-    const parts = reqNorm
-      .split("/")
-      .map((p) => p.trim())
-      .filter(Boolean);
-    if (parts.length === 0) return false;
-    const ok = parts.every((part) =>
-      normalizedRowVals.some((rv) => rv === part || rv.includes(part))
-    );
-    if (ok) return true;
-  }
-
-  // single token: match if any candidate matches exactly or contains token
-  if (normalizedRowVals.some((rv) => rv === reqNorm || rv.includes(reqNorm))) {
-    return true;
-  }
-
-  // debug: when nothing matched, log the request and the canonical candidates (non-production only)
-  if (process && process.env && process.env.NODE_ENV !== "production") {
+    // Relaxed attempt: remove excessive escaping then try parse
     try {
-      const candidDisplay = JSON.stringify({
-        requested: { raw: reqRaw, canon: reqCanon, norm: reqNorm },
-        candidates: candidateCanons,
-        normalizedRowVals,
-      });
-      console.debug(
-        `[reportFilters] statusMatches NO MATCH => ${candidDisplay}`
-      );
+      const unq = s.replace(/\\+/g, "\\");
+      const parsed2 = JSON.parse(unq);
+      if (Array.isArray(parsed2)) return parsed2;
+      if (parsed2 && typeof parsed2 === "object") return [parsed2];
     } catch (e) {
-      /* ignore logging errors */
+      // continue
+    }
+
+    // Relaxed attempt: convert single quotes to double quotes when safe
+    try {
+      const dq = s.replace(/'/g, '"');
+      const parsed3 = JSON.parse(dq);
+      if (Array.isArray(parsed3)) return parsed3;
+      if (parsed3 && typeof parsed3 === "object") return [parsed3];
+    } catch (e) {
+      // continue
+    }
+
+    // Final fallback: try extracting JSON-like objects from the string using regex
+    try {
+      const arr = [];
+      const objRegex = /(\{[^}]*\})/g;
+      let m;
+      while ((m = objRegex.exec(s)) !== null) {
+        try {
+          const candidate = m[1].replace(/'/g, '"').replace(/\\+/g, "\\");
+          const parsed = JSON.parse(candidate);
+          if (parsed && typeof parsed === "object") arr.push(parsed);
+        } catch (e) {
+          // ignore
+        }
+      }
+      if (arr.length > 0) return arr;
+    } catch (e) {}
+
+    // Very last fallback: try to extract status token(s) from string
+    try {
+      const statuses = [];
+      const statusRegex = /"status"\s*:\s*"([^"]+)"/gi;
+      let m2;
+      while ((m2 = statusRegex.exec(s)) !== null) {
+        statuses.push({ status: String(m2[1]) });
+      }
+      if (statuses.length > 0) return statuses;
+    } catch (e) {}
+
+    return [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function hasActiveAssignment(assignedArray) {
+  if (!Array.isArray(assignedArray) || assignedArray.length === 0) return false;
+
+  const now = Date.now();
+
+  for (const entry of assignedArray) {
+    try {
+      if (!entry || typeof entry !== "object") continue;
+
+      const statusRaw =
+        entry.status || entry.Status || entry.assignmentStatus || "";
+      const returnDate =
+        entry.returnDate ||
+        entry.return_date ||
+        entry.returnedAt ||
+        entry.return ||
+        null;
+      const startDate = entry.startDate || entry.start_date || null;
+      const empId =
+        entry.employeeId || entry.employee_id || entry.employee || null;
+
+      const canonStatus = canonicalizeStatusToken(statusRaw) || "";
+
+      // Explicit negative tokens -> not active
+      if (
+        canonStatus === "returned" ||
+        canonStatus === "decommissioned" ||
+        canonStatus === "unassigned"
+      ) {
+        continue;
+      }
+
+      // If there's a returnDate and it's in the past or equal to now -> not active
+      if (returnDate && String(returnDate).trim() !== "") {
+        const d = new Date(returnDate);
+        if (!isNaN(d.getTime()) && d.getTime() <= now) {
+          continue;
+        }
+      }
+
+      // 1) startDate with no returnDate -> active (explicit assignment window)
+      if (startDate && (!returnDate || String(returnDate).trim() === "")) {
+        return true;
+      }
+
+      // 2) explicit assigned-like canonical tokens -> active
+      if (
+        ["assigned", "in use", "allocated", "issued", "using"].includes(
+          canonStatus
+        )
+      ) {
+        return true;
+      }
+
+      // 3) employee id present and no returnDate -> active (treat presence of employeeId as stronger evidence)
+      if (
+        empId &&
+        String(empId).trim() !== "" &&
+        (!returnDate || String(returnDate).trim() === "")
+      ) {
+        return true;
+      }
+
+      // Note: Do NOT treat entries that only have `name` (and empty employeeId/startDate/status)
+      // as active. Those are often placeholders or legacy text and cause false-positives.
+    } catch (e) {
+      // ignore and continue
+      continue;
     }
   }
 
   return false;
 }
 
+/**
+ * statusMatches(requestedStatus, rowStatusCandidates)
+ *
+ * - requestedStatus: token returned by normalizeStatusForQuery (string or null)
+ * - rowStatusCandidates: array of values from the row (e.g. [r.status, r.payment_status, r.assigned_to])
+ *
+ * Primary behavior:
+ *  - when requestedStatus canonicalizes to lifecycle tokens prefer evaluating assigned_to JSON/array values.
+ *  - otherwise fall back to canonical/string matching.
+ */
+function statusMatches(requestedStatus, rowStatusCandidates = []) {
+  try {
+    if (!requestedStatus) return true;
+    const reqRaw = String(requestedStatus || "").trim();
+    if (!reqRaw) return true;
+
+    const reqCanon = canonicalizeStatusToken(reqRaw);
+    const candArr = Array.isArray(rowStatusCandidates)
+      ? rowStatusCandidates
+      : typeof rowStatusCandidates === "string"
+      ? [rowStatusCandidates]
+      : [];
+
+    // If requested status is one of lifecycle tokens, prefer assigned_to parsing
+    const lifecycleTokens = [
+      "assigned",
+      "unassigned",
+      "returned",
+      "decommissioned",
+    ];
+    if (lifecycleTokens.includes(reqCanon)) {
+      for (const rawCand of candArr) {
+        try {
+          // parse assigned_to tolerantly
+          const assignedArr = parseAssignedToValue(rawCand);
+          if (Array.isArray(assignedArr) && assignedArr.length > 0) {
+            // check each entry's status (canonicalized)
+            for (const entry of assignedArr) {
+              const entStatus =
+                (entry &&
+                  (entry.status || entry.Status || entry.assignmentStatus)) ||
+                "";
+              const entCanon = canonicalizeStatusToken(entStatus) || "";
+              if (!entCanon) continue;
+              if (reqCanon === "assigned") {
+                // active assignment check: not returned/decommissioned AND no returnDate or has employee/start
+                const returnDate =
+                  (entry &&
+                    (entry.returnDate || entry.return_date || entry.return)) ||
+                  null;
+                const startDate =
+                  (entry && (entry.startDate || entry.start_date)) || null;
+                const isReturnedOrDecomm = [
+                  "returned",
+                  "decommissioned",
+                ].includes(entCanon);
+                if (
+                  !isReturnedOrDecomm &&
+                  (!returnDate || String(returnDate).trim() === "")
+                ) {
+                  return true;
+                }
+                // entries explicitly marked 'assigned' or 'in use'
+                if (
+                  entCanon === "assigned" ||
+                  entCanon === "in use" ||
+                  entCanon === "allocated"
+                )
+                  return true;
+              }
+              if (reqCanon === "unassigned") {
+                // all entries either returned/decommissioned or empty array = unassigned
+                if (
+                  entCanon === "returned" ||
+                  entCanon === "decommissioned" ||
+                  entCanon === "unassigned" ||
+                  !entCanon
+                ) {
+                  // continue searching; we'll only return true if we can tell it's unassigned
+                }
+              }
+              if (reqCanon === "returned" && entCanon === "returned")
+                return true;
+              if (
+                reqCanon === "decommissioned" &&
+                entCanon === "decommissioned"
+              )
+                return true;
+            }
+            // special case for unassigned: if assignedArr exists but none are active -> unassigned
+            if (reqCanon === "unassigned") {
+              const anyActive = hasActiveAssignment(assignedArr);
+              if (!anyActive) return true;
+            }
+            // continue to other candidates if no match
+            continue;
+          }
+
+          // If parse failed, try extracting status tokens using regex
+          if (typeof rawCand === "string") {
+            const match = rawCand.match(/"status"\s*:\s*"([^"]+)"/i);
+            if (match && match[1]) {
+              const candCanon = canonicalizeStatusToken(match[1]);
+              if (candCanon === reqCanon) return true;
+              if (
+                reqCanon === "assigned" &&
+                (candCanon === "assigned" || candCanon === "in use")
+              )
+                return true;
+            }
+          }
+        } catch (e) {
+          continue;
+        }
+      }
+      // If we reach here — assigned_to parsing did not find a match. Fall back to general matching below.
+    }
+
+    // General canonical matching (previous behavior)
+    const candidateCanons = candArr
+      .map((v) => (v === null || v === undefined ? "" : String(v)))
+      .filter(Boolean)
+      .map((v) => canonicalizeStatusToken(v));
+
+    if (reqCanon) {
+      for (const cc of candidateCanons) {
+        if (!cc) continue;
+        if (cc === reqCanon) return true;
+        if (cc.includes(reqCanon) || reqCanon.includes(cc)) return true;
+        if (reqCanon.includes("/")) {
+          const parts = reqCanon
+            .split("/")
+            .map((p) => p.trim())
+            .filter(Boolean);
+          if (parts.length > 0 && parts.every((p) => cc.includes(p)))
+            return true;
+        }
+      }
+    }
+
+    const reqNorm = normalizeForCompare(reqRaw);
+    const normalizedRowVals = candArr
+      .map((v) => (v === null || v === undefined ? "" : String(v)))
+      .filter(Boolean)
+      .map(normalizeForCompare);
+
+    if (normalizedRowVals.length === 0) return false;
+
+    if (reqNorm.includes("/")) {
+      const parts = reqNorm
+        .split("/")
+        .map((p) => p.trim())
+        .filter(Boolean);
+      if (parts.length === 0) return false;
+      const ok = parts.every((part) =>
+        normalizedRowVals.some((rv) => rv === part || rv.includes(part))
+      );
+      if (ok) return true;
+    }
+
+    if (
+      normalizedRowVals.some((rv) => rv === reqNorm || rv.includes(reqNorm))
+    ) {
+      return true;
+    }
+
+    if (process && process.env && process.env.NODE_ENV !== "production") {
+      try {
+        const candidDisplay = JSON.stringify({
+          requested: { raw: reqRaw, canon: reqCanon, norm: reqNorm },
+          candidates: candArr,
+          normalizedRowVals,
+        });
+        console.debug(
+          `[reportFilters] statusMatches NO MATCH => ${candidDisplay}`
+        );
+      } catch (e) {
+        /* ignore logging errors */
+      }
+    }
+
+    return false;
+  } catch (e) {
+    console.error("statusMatches error:", e && (e.message || e));
+    // On unexpected error, be conservative and return true to avoid accidental filtering-out of data
+    return true;
+  }
+}
+
 /* ------------------ Preview helpers ------------------ */
 
 /**
  * isPreviewRequest(req)
- * - returns true when request is intended for preview (JSON UI preview)
- * - checks ?preview=true OR Accept header indicating JSON
+ * Strict preview detection: only when ?preview=true (or '1') or boolean true.
+ * Do NOT treat Accept: application/json alone as a preview (that caused false positives).
  */
 function isPreviewRequest(req) {
   if (!req) return false;
   const q = req.query && req.query.preview;
-  const accept = req.headers && req.headers.accept;
-  return (
-    (typeof q === "string" && q.toLowerCase() === "true") ||
-    q === true ||
-    (accept && accept.includes("application/json"))
-  );
+
+  // Accept explicit boolean true / string 'true' / '1'
+  if (q === true) return true;
+  if (typeof q === "string") {
+    const v = q.toLowerCase().trim();
+    if (v === "true" || v === "1") return true;
+    return false;
+  }
+
+  // numeric 1
+  if (typeof q === "number") return q === 1;
+
+  return false;
 }
 
-/**
- * sendPreviewResponse(req, res, rows, message?)
- * - rows: array of preview rows (may be undefined/null)
- * - message: optional friendly message to include in response when rows empty
- *
- * Response shape (always 200):
- * { rows: [...], totalRows: N, message?: "...", meta?: { status, departmentName, employeeName } }
- *
- * Supports previewLimit via req.query.previewLimit (same behavior as before).
- */
 async function sendPreviewResponse(req, res, rows, message) {
   const limitRaw = req.query && req.query.previewLimit;
   let previewLimit = null;
@@ -551,25 +852,21 @@ async function sendPreviewResponse(req, res, rows, message) {
       ? safeRows.slice(0, previewLimit)
       : safeRows;
 
-  // Build metadata from request: status, departmentName (resolved), employeeName (if provided)
   const meta = {};
 
   try {
-    // raw status from query - preserve original form if possible then normalize
     const rawStatus = coerceToString(req.query && req.query.status, null);
     meta.status = rawStatus ? normalizeStatusForQuery(rawStatus) : null;
   } catch (e) {
     meta.status = null;
   }
 
-  // department name resolution (if department_id provided)
   try {
     const depId = coerceToString(
       req.query && (req.query.department_id || req.query.departmentId),
       null
     );
     if (depId) {
-      // prefer configured query if available
       if (queries && queries.GET_DEPARTMENT_NAME_BY_ID) {
         try {
           const nameRows = await reportUtils.fetchRows(
@@ -583,9 +880,7 @@ async function sendPreviewResponse(req, res, rows, message) {
               nameRows[0].department ||
               String(nameRows[0]).slice(0, 100);
           }
-        } catch (e) {
-          // ignore and fall through to fallback query
-        }
+        } catch (e) {}
       }
       if (!meta.departmentName) {
         try {
@@ -596,16 +891,11 @@ async function sendPreviewResponse(req, res, rows, message) {
           if (Array.isArray(rowsDept) && rowsDept[0] && rowsDept[0].name) {
             meta.departmentName = String(rowsDept[0].name);
           }
-        } catch (e) {
-          // ignore
-        }
+        } catch (e) {}
       }
     }
-  } catch (e) {
-    // ignore
-  }
+  } catch (e) {}
 
-  // employee name: prefer an explicit employee_name param (frontend will send when user typed name)
   try {
     const typedEmployeeName = coerceToString(
       req.query && (req.query.employee_name || req.query.employeeName),
@@ -619,7 +909,6 @@ async function sendPreviewResponse(req, res, rows, message) {
         null
       );
       if (empId) {
-        // try configured query first
         if (queries && queries.GET_EMPLOYEE_NAME_BY_ID) {
           try {
             const empRows = await reportUtils.fetchRows(
@@ -633,9 +922,7 @@ async function sendPreviewResponse(req, res, rows, message) {
                   " " +
                   (empRows[0].last_name || "");
             }
-          } catch (e) {
-            // ignore
-          }
+          } catch (e) {}
         }
         if (!meta.employeeName) {
           try {
@@ -646,15 +933,11 @@ async function sendPreviewResponse(req, res, rows, message) {
             if (Array.isArray(en) && en[0] && en[0].employee_name) {
               meta.employeeName = String(en[0].employee_name).trim();
             }
-          } catch (e) {
-            // ignore
-          }
+          } catch (e) {}
         }
       }
     }
-  } catch (e) {
-    // ignore
-  }
+  } catch (e) {}
 
   const out = { rows: outRows, totalRows };
   if (message && typeof message === "string" && message.trim().length > 0) {
@@ -736,7 +1019,6 @@ function parseDates(q) {
   const format = (rawFormat || "xlsx").toLowerCase();
 
   const rawStatus = coerceToString(q.status, null);
-  // if raw is "all" -> treated as null below by normalizeStatusForQuery
   const statusCandidate = rawStatus || null;
   const status = normalizeStatusForQuery(statusCandidate);
 
