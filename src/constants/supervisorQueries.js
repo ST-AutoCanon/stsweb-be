@@ -1,5 +1,3 @@
-
-
 module.exports = {
   GET_EMPLOYEES_UNDER_SUPERVISOR: `
     SELECT ep.employee_id, ep.position, CONCAT(e.first_name, ' ', e.last_name) AS name
@@ -13,9 +11,8 @@ module.exports = {
     WHERE employee_id = ?
     ORDER BY created_at ASC`,
 
-  
   UPDATE_SUPERVISOR_COMMENT: `
     UPDATE task_interactions
     SET supervisor_reply = ?
-    WHERE interaction_id = ? AND sender_role = 'employee'`
+    WHERE interaction_id = ? AND sender_role = 'employee'`,
 };

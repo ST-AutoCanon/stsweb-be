@@ -1,10 +1,3 @@
-// src/handlers/reportAssetsHandler.js
-// Strict status selection from assigned_to.status — fallback to heuristics only when missing.
-// Export behaviour: preview (JSON) unchanged; downloads (pdf/xlsx) will:
-//  - strip internal/debug fields (incl. lifecycle/raw_status/valuation_date/count)
-//  - map `status` column to canonical lifecycle tokens (assigned/unassigned/returned/decommissioned)
-//  - honor client `fields` but always remove internal keys
-
 const reportUtils = require("../services/reportUtils");
 const reportService = require("../services/reportIndex");
 const {
@@ -16,7 +9,6 @@ const {
   pickFields,
 } = require("../services/reportFilters");
 
-// fields we never want to expose in downloads
 const INTERNAL_KEYS_TO_STRIP = new Set([
   "__asset_lifecycle_status",
   "__asset_assigned_entries",
@@ -31,7 +23,6 @@ const INTERNAL_KEYS_TO_STRIP = new Set([
   "raw_status",
 ]);
 
-// simple canonicalizer (keeps parity with reportFilters canonicalization)
 function normalizeStringForSynonym(s) {
   if (s === null || s === undefined) return "";
   return String(s)
@@ -48,7 +39,6 @@ function canonicalizeStatusToken(raw) {
   const s = String(raw).trim();
   if (!s) return null;
   const norm = normalizeStringForSynonym(s);
-  // map common tokens
   if (norm.indexOf("in use") !== -1 || norm.indexOf("inuse") !== -1)
     return "assigned";
   if (["assigned", "assignedto", "assigned_to"].includes(norm))
@@ -58,15 +48,12 @@ function canonicalizeStatusToken(raw) {
   if (norm.indexOf("return") !== -1 || norm === "returned") return "returned";
   if (norm.indexOf("decomm") !== -1 || norm.indexOf("decommission") !== -1)
     return "decommissioned";
-  // other tokens fallback
   if (norm === "pending") return "pending";
   if (norm === "approved") return "approved";
   if (norm === "rejected") return "rejected";
-  // final fallback to cleaned token
   return norm || null;
 }
 
-/* ---------- Robust assigned_to parsing (tolerant same as before) ---------- */
 function robustParseAssignedTo(raw) {
   try {
     if (raw === null || raw === undefined) return [];
@@ -76,7 +63,6 @@ function robustParseAssignedTo(raw) {
     let s = String(raw).trim();
     if (!s) return [];
 
-    // If contains JSON array substring, try to parse first [...]
     const arrayMatch = s.match(/\[(?:[\s\S]*?)\]/);
     if (arrayMatch) {
       try {
@@ -92,7 +78,6 @@ function robustParseAssignedTo(raw) {
       }
     }
 
-    // single object
     if (s.startsWith("{") && s.endsWith("}")) {
       try {
         return [JSON.parse(s)];
@@ -106,7 +91,6 @@ function robustParseAssignedTo(raw) {
       }
     }
 
-    // concatenated objects -> split by '},{' (tolerant)
     if (s.indexOf("},{") !== -1 || s.indexOf("}{") !== -1) {
       try {
         let clean = s.replace(/^\[?/, "").replace(/\]?$/, "");
@@ -131,14 +115,12 @@ function robustParseAssignedTo(raw) {
       } catch (e) {}
     }
 
-    // final fallback: return single raw entry
     return [{ raw: s }];
   } catch (e) {
     return [];
   }
 }
 
-/* ---------- Flexible date parse ---------- */
 function parseDateFlexible(d) {
   if (!d && d !== 0) return null;
   try {
@@ -154,7 +136,6 @@ function parseDateFlexible(d) {
   }
 }
 
-/* ---------- Analyze entries but now STRICTLY prefer explicit assigned_to.status ---------- */
 function analyzeAssignedEntries(entries) {
   const normalized = (Array.isArray(entries) ? entries : []).map((e) => {
     if (!e || typeof e !== "object") return { raw: String(e) };
@@ -168,12 +149,10 @@ function analyzeAssignedEntries(entries) {
     };
   });
 
-  // If any entry has a non-empty status field -> pick authoritative status
   const entriesWithStatus = normalized.filter(
     (x) => x && x.status && String(x.status).trim() !== ""
   );
   if (entriesWithStatus.length > 0) {
-    // pick the most recent by date (prefer max(returnDate, startDate)). If no dates, pick last in array.
     let best = null;
     let bestTime = -Infinity;
     for (const en of entriesWithStatus) {
@@ -184,7 +163,6 @@ function analyzeAssignedEntries(entries) {
         rd ? rd.getTime() : -Infinity
       );
       if (candidateTime === -Infinity) {
-        // no date — will consider later
         continue;
       }
       if (candidateTime > bestTime) {
@@ -193,7 +171,6 @@ function analyzeAssignedEntries(entries) {
       }
     }
     if (!best) {
-      // no dated status entries — pick last status-bearing entry
       best = entriesWithStatus[entriesWithStatus.length - 1];
     }
 
@@ -212,7 +189,6 @@ function analyzeAssignedEntries(entries) {
     };
   }
 
-  // FALLBACK: No explicit statuses anywhere — infer (previous heuristics)
   let anyActive = false;
   const events = [];
   const nowMs = Date.now();
@@ -233,8 +209,7 @@ function analyzeAssignedEntries(entries) {
       events.push({ date: null, type: "status", statusCanon: sCanon });
 
     if (rd) {
-      if (rd.getTime() > nowMs)
-        anyActive = true; // future return => still active
+      if (rd.getTime() > nowMs) anyActive = true;
       else continue;
     }
     if (sd && (!rd || String(rd).trim() === "")) {
@@ -254,7 +229,6 @@ function analyzeAssignedEntries(entries) {
   }
 
   let lifecycle = anyActive ? "assigned" : "unassigned";
-  // attempt to infer returned/decommissioned via latest dated event
   if (!anyActive) {
     const dated = events
       .filter((e) => e.date)
@@ -276,7 +250,6 @@ function analyzeAssignedEntries(entries) {
     }
   }
 
-  // ensure canonical token set
   if (
     ![
       "assigned",
@@ -302,7 +275,6 @@ function analyzeAssignedEntries(entries) {
   };
 }
 
-/* ---------- Helper: map lifecycle canonical token to friendly label ---------- */
 function lifecycleLabelFromToken(tok) {
   if (!tok) return "";
   const t = String(tok).toLowerCase();
@@ -310,11 +282,9 @@ function lifecycleLabelFromToken(tok) {
   if (t === "unassigned") return "Unassigned";
   if (t === "returned") return "Returned";
   if (t === "decommissioned") return "Decommissioned";
-  // fallback: title case
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
-/* ---------- Handler ---------- */
 async function downloadAssetsReport(req, res) {
   try {
     const q = parseDates(req.query || {});
@@ -352,14 +322,13 @@ async function downloadAssetsReport(req, res) {
       ? canonicalizeStatusToken(rawStatus)
       : null;
 
-    // annotate rows with strict lifecycle from assigned_to.status (or fallback)
     const normalizedRows = rows.map((r) => {
       const row = Object.assign({}, r);
       try {
         const parsed = robustParseAssignedTo(row.assigned_to);
         const analyzed = analyzeAssignedEntries(parsed);
         row.__asset_assigned_entries = analyzed.entries;
-        row.__asset_lifecycle_status = analyzed.lifecycle; // *strict* canonical token
+        row.__asset_lifecycle_status = analyzed.lifecycle;
         row.__asset_has_active_assignment = !!analyzed.hasActive;
         row.__asset_latest_event = analyzed.latestEvent || null;
       } catch (e) {
@@ -371,18 +340,15 @@ async function downloadAssetsReport(req, res) {
       return row;
     });
 
-    // Strict filter: match equality on lifecycle token when requested
     const filtered = normalizedRows.filter((r) => {
       if (!requestedStatusToken) return true;
       const req = String(requestedStatusToken).toLowerCase();
       const lifecycle = (r.__asset_lifecycle_status || "").toLowerCase();
-      // Match exact tokens for fundamental lifecycle filters:
       if (
         ["assigned", "unassigned", "returned", "decommissioned"].includes(req)
       ) {
         return lifecycle === req;
       }
-      // Fallback permissive for other tokens: check lifecycle or raw assigned_to contains token
       if (lifecycle && lifecycle.indexOf(req) !== -1) return true;
       if (
         r.assigned_to &&
@@ -393,21 +359,16 @@ async function downloadAssetsReport(req, res) {
       return false;
     });
 
-    // PREVIEW: send full rows so UI preview still shows lifecycle derivation as before
     if (isPreviewRequest(req)) {
       return sendPreviewResponse(req, res, filtered);
     }
 
-    // DOWNLOAD: determine which fields to include in exported file (strip internal fields always)
     let exportFields = null;
     if (Array.isArray(q.fields) && q.fields.length > 0) {
-      // honor client's requested fields but strip internal keys and disallowed fields
       exportFields = q.fields
         .filter((f) => f && !INTERNAL_KEYS_TO_STRIP.has(String(f)))
         .map((f) => String(f));
     } else {
-      // default export fields for assets (purposefully excludes valuation_date, count,
-      // and any internal/raw status keys)
       exportFields = [
         "asset_id",
         "asset_name",
@@ -422,12 +383,10 @@ async function downloadAssetsReport(req, res) {
       ];
     }
 
-    // Always ensure we do not export truly internal fields accidentally
     exportFields = exportFields.filter(
       (f) => f && !INTERNAL_KEYS_TO_STRIP.has(String(f))
     );
 
-    // Ensure we always return something sensible
     if (!Array.isArray(exportFields) || exportFields.length === 0) {
       exportFields = [
         "asset_id",
@@ -443,18 +402,14 @@ async function downloadAssetsReport(req, res) {
       ];
     }
 
-    // Before pruning, map 'status' field to derived lifecycle (so downloads show assigned/unassigned/etc)
     const preparedForExport = filtered.map((r) => {
-      // clone shallow
       const copy = Object.assign({}, r);
 
-      // if client wants 'status' (or default includes it) - override with lifecycle label
       if (exportFields.includes("status")) {
         const canon = copy.__asset_lifecycle_status || copy.lifecycle || null;
         copy.status = lifecycleLabelFromToken(canon);
       }
 
-      // Remove internal keys from row to be safe (they will never be exported)
       for (const k of Object.keys(copy)) {
         if (INTERNAL_KEYS_TO_STRIP.has(k)) {
           try {
@@ -463,7 +418,6 @@ async function downloadAssetsReport(req, res) {
         }
       }
 
-      // Also remove raw valuation_date and count even when present in DB
       if (
         !exportFields.includes("valuation_date") &&
         copy.hasOwnProperty("valuation_date")
@@ -481,15 +435,12 @@ async function downloadAssetsReport(req, res) {
       return copy;
     });
 
-    // prune fields now
     const prunedRows = pickFields(preparedForExport, exportFields);
 
-    // If client requested an actual file format, attempt to render via reportService.
     const fmt = (q.format || "").toLowerCase();
     if (fmt === "pdf") {
       if (typeof reportService.renderPdfBuffer === "function") {
         try {
-          // small meta to help header/footer
           const meta = {
             status: coerceToString(req.query && req.query.status, null) || null,
             startDate: q.startDate || null,
@@ -508,7 +459,6 @@ async function downloadAssetsReport(req, res) {
           res.setHeader("Content-Length", pdfBuf.length);
           return res.send(pdfBuf);
         } catch (e) {
-          // fall through to JSON fallback
           console.warn(
             "[reportAssetsHandler] PDF render failed, falling back to JSON:",
             e && e.message
@@ -548,7 +498,6 @@ async function downloadAssetsReport(req, res) {
       }
     }
 
-    // final JSON response for client (downloads expect this shape when UI falls back)
     res.setHeader("Content-Type", "application/json");
     return res
       .status(200)

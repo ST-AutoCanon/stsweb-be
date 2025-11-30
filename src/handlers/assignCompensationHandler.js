@@ -22,26 +22,25 @@ const getWorkingDaysHandler = async (req, res) => {
     res.status(200).json({
       success: true,
       message: `Total working days for current month: ${totalWorkingDays}`,
-      data: { totalWorkingDays }
+      data: { totalWorkingDays },
     });
   } catch (error) {
     console.error("Error fetching working days:", error);
     res.status(500).json({
       success: false,
       error: "Failed to fetch working days",
-      details: error.message
+      details: error.message,
     });
   }
 };
 async function checkEmployeeAssignmentHandler(req, res) {
   try {
-    console.log("Received req.body:", req.body); // Debug log
     const { employeeId } = req.body;
 
     if (!employeeId) {
       return res.status(400).json({
         success: false,
-        error: "Missing required field: employeeId"
+        error: "Missing required field: employeeId",
       });
     }
 
@@ -49,17 +48,17 @@ async function checkEmployeeAssignmentHandler(req, res) {
 
     res.status(200).json({
       success: true,
-      message: result.hasAssignment 
+      message: result.hasAssignment
         ? `Employee ${employeeId} has existing assignments`
         : `No assignments found for employee ${employeeId}`,
-      data: result
+      data: result,
     });
   } catch (error) {
     console.error("❌ Error checking employee assignment:", error);
     res.status(500).json({
       success: false,
       error: "Failed to check employee assignment",
-      details: error.message
+      details: error.message,
     });
   }
 }
@@ -71,13 +70,18 @@ async function assignCompensationHandler(req, res) {
       employeeId = [],
       departmentIds = [],
       assignedBy,
-      assignedDate
+      assignedDate,
     } = req.body;
 
-    if (!compensationPlanName || (!employeeId.length && !departmentIds.length) || !assignedBy) {
+    if (
+      !compensationPlanName ||
+      (!employeeId.length && !departmentIds.length) ||
+      !assignedBy
+    ) {
       return res.status(400).json({
         success: false,
-        error: "Missing required fields: compensationPlanName, assignedBy, and at least one employeeId or departmentIds"
+        error:
+          "Missing required fields: compensationPlanName, assignedBy, and at least one employeeId or departmentIds",
       });
     }
 
@@ -86,32 +90,32 @@ async function assignCompensationHandler(req, res) {
       departmentIds,
       compensationPlanName,
       assignedBy,
-      assignedDate
+      assignedDate,
     });
 
     res.status(201).json({
       success: true,
       message: `Compensation plan ${compensationPlanName} assigned successfully`,
-      data: result
+      data: result,
     });
   } catch (error) {
     console.error("❌ Error assigning compensation:", error);
     res.status(500).json({
       success: false,
       error: "Failed to assign compensation",
-      details: error.message
+      details: error.message,
     });
   }
 }
 
 const getAssignedCompensationDetailsHandler = async (req, res) => {
-  console.log("Handler: getAssignedCompensationDetailsHandler called");
   try {
     const data = await getAssignedCompensationDetails();
-    console.log("Data retrieved:", data);
     res.status(200).json({
       success: true,
-      message: data.length ? "Assigned compensation data retrieved successfully" : "No assigned compensations found",
+      message: data.length
+        ? "Assigned compensation data retrieved successfully"
+        : "No assigned compensations found",
       data,
     });
   } catch (error) {
@@ -163,7 +167,6 @@ const addEmployeeBonusHandler = async (req, res) => {
 
 const addEmployeeBonusBulkHandler = async (req, res) => {
   try {
-    console.log("Received payload:", req.body);
     const {
       percentageCtc = null,
       percentageMonthlySalary = null,
@@ -171,7 +174,6 @@ const addEmployeeBonusBulkHandler = async (req, res) => {
       applicableMonth,
     } = req.body;
 
-    // Require applicableMonth
     if (!applicableMonth) {
       return res.status(400).json({
         success: false,
@@ -179,7 +181,6 @@ const addEmployeeBonusBulkHandler = async (req, res) => {
       });
     }
 
-    // At least one bonus type should be provided
     if (
       percentageCtc === null &&
       percentageMonthlySalary === null &&
@@ -187,18 +188,21 @@ const addEmployeeBonusBulkHandler = async (req, res) => {
     ) {
       return res.status(400).json({
         success: false,
-        error: "Please provide at least one bonus value (CTC%, Monthly Salary%, or Fixed Amount)",
+        error:
+          "Please provide at least one bonus value (CTC%, Monthly Salary%, or Fixed Amount)",
       });
     }
 
-    // Validate percentage ranges if provided
     if (percentageCtc !== null && (percentageCtc < 0 || percentageCtc > 100)) {
       return res.status(400).json({
         success: false,
         error: "Invalid percentageCtc: must be between 0 and 100",
       });
     }
-    if (percentageMonthlySalary !== null && (percentageMonthlySalary < 0 || percentageMonthlySalary > 100)) {
+    if (
+      percentageMonthlySalary !== null &&
+      (percentageMonthlySalary < 0 || percentageMonthlySalary > 100)
+    ) {
       return res.status(400).json({
         success: false,
         error: "Invalid percentageMonthlySalary: must be between 0 and 100",
@@ -227,7 +231,6 @@ const addEmployeeBonusBulkHandler = async (req, res) => {
   }
 };
 
-
 const getEmployeeBonusDetailsHandler = async (req, res) => {
   try {
     const data = await getEmployeeBonusDetails();
@@ -249,26 +252,23 @@ const getEmployeeBonusDetailsHandler = async (req, res) => {
 
 const addEmployeeAdvanceHandler = async (req, res) => {
   try {
-    console.log("Received advance payload:", req.body);
+    const { employeeId, advanceAmount, recoveryMonths, applicableMonth } =
+      req.body;
 
-    const {
-      employeeId,
-      advanceAmount,
-      recoveryMonths,
-      applicableMonth, // Accept from frontend
-    } = req.body;
-
-    const applicableMonths = applicableMonth; // Map it internally
+    const applicableMonths = applicableMonth;
 
     if (
       !employeeId ||
-      !advanceAmount || advanceAmount <= 0 ||
-      !recoveryMonths || recoveryMonths <= 0 ||
+      !advanceAmount ||
+      advanceAmount <= 0 ||
+      !recoveryMonths ||
+      recoveryMonths <= 0 ||
       !applicableMonths
     ) {
       return res.status(400).json({
         success: false,
-        error: "Missing or invalid required fields: employeeId, advanceAmount, recoveryMonths, or applicableMonths",
+        error:
+          "Missing or invalid required fields: employeeId, advanceAmount, recoveryMonths, or applicableMonths",
       });
     }
 
@@ -276,7 +276,7 @@ const addEmployeeAdvanceHandler = async (req, res) => {
       employeeId,
       advanceAmount,
       recoveryMonths,
-      applicableMonths, // Use mapped value
+      applicableMonths,
     });
 
     res.status(201).json({
@@ -316,7 +316,7 @@ const getEmployeeAdvanceDetailsHandler = async (req, res) => {
 const fetchEmployeeExtraHours = async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-    
+
     if (!startDate || !endDate) {
       return res.status(400).json({
         success: false,
@@ -328,78 +328,77 @@ const fetchEmployeeExtraHours = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Extra hours retrieved successfully",
-      data
+      data,
     });
   } catch (error) {
     console.error("Error fetching employee extra hours:", error);
     res.status(500).json({
       success: false,
       error: "Failed to fetch extra hours data",
-      details: error.message
+      details: error.message,
     });
   }
 };
 
 const handleAddOvertimeDetailsBulk = async (req, res) => {
   try {
-    const dataArray = req.body.data; // expects an array of overtime records
+    const dataArray = req.body.data;
     const result = await addOvertimeDetailsBulk(dataArray);
     res.status(200).json({
       success: true,
       message: "Overtime details added successfully",
-      data: result
+      data: result,
     });
   } catch (error) {
     console.error("Error in handleAddOvertimeDetailsBulk:", error);
     res.status(500).json({
       success: false,
       error: "Failed to add overtime details",
-      details: error.message
+      details: error.message,
     });
   }
 };
 
 const handleApproveOvertimeRow = async (req, res) => {
   try {
-    const row = req.body; // expects a single overtime row object
+    const row = req.body;
     const result = await approveOvertimeRow(row);
     res.status(200).json({
       success: true,
       message: "Overtime approved successfully",
-      data: result
+      data: result,
     });
   } catch (error) {
     console.error("Error in handleApproveOvertimeRow:", error);
     res.status(500).json({
       success: false,
       error: "Failed to approve overtime",
-      details: error.message
+      details: error.message,
     });
   }
 };
 
 const handleRejectOvertimeRow = async (req, res) => {
   try {
-    const row = req.body; // expects a single overtime row object
+    const row = req.body;
     const result = await rejectOvertimeRow(row);
     res.status(200).json({
       success: true,
       message: "Overtime rejected successfully",
-      data: result
+      data: result,
     });
   } catch (error) {
     console.error("Error in handleRejectOvertimeRow:", error);
     res.status(500).json({
       success: false,
       error: "Failed to reject overtime",
-      details: error.message
+      details: error.message,
     });
   }
 };
 
 const getOvertimeDetailsHandler = async (req, res) => {
   try {
-    console.log("⏳ Fetching all overtime details...");
     const data = await getAllOvertimeDetails();
     res.status(200).json({
       success: true,
@@ -422,14 +421,14 @@ const getEmployeeLopHandler = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "LOP details fetched successfully",
-      data: lopDetails
+      data: lopDetails,
     });
   } catch (error) {
     console.error("Error in getEmployeeLopHandler:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch LOP details",
-      error: error.message
+      error: error.message,
     });
   }
 };
@@ -449,6 +448,5 @@ module.exports = {
   handleRejectOvertimeRow,
   getOvertimeDetailsHandler,
   getEmployeeLopHandler,
-    getWorkingDaysHandler, // add this line
-
+  getWorkingDaysHandler,
 };

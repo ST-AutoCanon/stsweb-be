@@ -1,21 +1,9 @@
-// src/services/reportFilters.js
-// Collection of shared helpers used by handlers + reports module.
-//
-// Key changes in this version:
-// - Strict preview detection: only treat explicit query param preview=true (or '1') or boolean true as preview.
-//   This avoids accidental JSON preview responses for binary downloads when Accept: application/json is present.
-// - Robust & tolerant parsing of assigned_to column (parseAssignedToValue).
-// - Lifecycle/status matching uses assigned_to entries first for lifecycle tokens: assigned, unassigned, returned, decommissioned.
-// - Defensive behavior: parsing errors fall back gracefully instead of throwing.
-
 const fs = require("fs");
 const path = require("path");
 const util = require("util");
 
-const reportUtils = require("./reportUtils"); // provides fetchRows
+const reportUtils = require("./reportUtils");
 const queries = require("../constants/reportQueries");
-
-/* ----------------- Basic small helpers ----------------- */
 
 function coerceToString(val, fallback = null) {
   if (val === undefined || val === null) return fallback;
@@ -37,12 +25,6 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
-/* ----------------- Status synonyms & normalizer ----------------- */
-
-/**
- * STATUS_SYNONYMS
- * Map canonicalToken -> array of synonyms (all expected to be lower/clean forms).
- */
 const STATUS_SYNONYMS = {
   assigned: [
     "assigned",
@@ -92,18 +74,13 @@ function normalizeStringForSynonym(s) {
   return String(s)
     .toLowerCase()
     .trim()
-    .replace(/[\u2018\u2019\u201C\u201D]/g, "") // smart quotes
-    .replace(/[_\s\-–—]+/g, " ") // underscores/dashes -> space
-    .replace(/[^\w\s\/]+/g, "") // remove other punctuation except slash
+    .replace(/[\u2018\u2019\u201C\u201D]/g, "")
+    .replace(/[_\s\-–—]+/g, " ")
+    .replace(/[^\w\s\/]+/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-/**
- * canonicalizeStatusToken(raw)
- * - robustly normalizes a raw status string into a canonical token used across filters.
- * - returns null for empty/no-filter tokens such as "all", "null", etc.
- */
 function canonicalizeStatusToken(raw) {
   if (raw === undefined || raw === null) return null;
   let s = typeof raw === "string" ? raw.trim() : String(raw).trim();
@@ -115,7 +92,6 @@ function canonicalizeStatusToken(raw) {
 
   let normalized = normalizeStringForSynonym(s);
 
-  // QUICK FIX: treat typical lifecycle "in use" variants as assigned
   if (
     normalized === "in use" ||
     normalized === "inuse" ||
@@ -125,7 +101,6 @@ function canonicalizeStatusToken(raw) {
     return "assigned";
   }
 
-  // Quick recognition of explicit assigned_to-like tokens
   if (
     normalized === "assignedto" ||
     normalized === "assigned_to" ||
@@ -134,19 +109,16 @@ function canonicalizeStatusToken(raw) {
     return "assigned";
   }
 
-  // Negations mapping (simple heuristics)
   if (
     normalized.startsWith("not ") ||
     normalized.startsWith("not-") ||
     normalized.startsWith("no ")
   ) {
-    // examples: "not using" -> unassigned
     if (normalized.includes("use") || normalized.includes("using")) {
       return "unassigned";
     }
   }
 
-  // direct map of common tokens
   const directMap = {
     approve: "approved",
     approved: "approved",
@@ -186,7 +158,6 @@ function canonicalizeStatusToken(raw) {
     return directMap[normalized];
   }
 
-  // Check STATUS_SYNONYMS list for match
   for (const canon of Object.keys(STATUS_SYNONYMS)) {
     const syns = STATUS_SYNONYMS[canon] || [];
     for (const synRaw of syns) {
@@ -198,7 +169,6 @@ function canonicalizeStatusToken(raw) {
     }
   }
 
-  // compound slash tokens
   if (normalized.includes("/")) {
     const parts = normalized
       .split("/")
@@ -212,15 +182,12 @@ function canonicalizeStatusToken(raw) {
     }
   }
 
-  // fallback: return cleaned string so downstream fallback matching may apply
   return normalized;
 }
 
 function normalizeStatusForQuery(status) {
   return canonicalizeStatusToken(status);
 }
-
-/* ----------------- buildDateStatusParams (used by SQL fetchers) ---------------- */
 
 function buildDateStatusParams(startDate, endDate, status) {
   const s = startDate || null;
@@ -231,8 +198,6 @@ function buildDateStatusParams(startDate, endDate, status) {
   }
   return [s, s, e, e, st, st];
 }
-
-/* ----------------- Field selectors ----------------- */
 
 function keepOnlyFields(rows, requestedFields, defaultOrder) {
   if (!Array.isArray(rows)) return [];
@@ -275,8 +240,6 @@ function pickFields(rows, fields) {
   return keepOnlyFields(rows, fields, null);
 }
 
-/* ----------------- Reimbursement row normalization ----------------- */
-
 function normalizeReimbursementRow(raw) {
   const r = Object.assign({}, raw);
   if (!Object.prototype.hasOwnProperty.call(r, "approval_status")) {
@@ -315,8 +278,6 @@ function normalizeReimbursementRow(raw) {
   }
   return r;
 }
-
-/* ----------------- Employee / Department filters ----------------- */
 
 async function applyEmployeeAndDepartmentFilters(
   rows,
@@ -456,27 +417,16 @@ async function applyEmployeeAndDepartmentFilters(
   return filtered;
 }
 
-/* ------------------ Status matching utilities ----------------- */
-
 function normalizeForCompare(s) {
   if (s === undefined || s === null) return "";
   return String(s)
     .toLowerCase()
     .trim()
-    .replace(/[^\w\/]+/g, "") // keep slashes for compound statuses
+    .replace(/[^\w\/]+/g, "")
     .replace(/_+/g, "")
     .replace(/-+/g, "");
 }
 
-/**
- * parseAssignedToValue(v)
- * - Accepts either an array of objects or a JSON-string representation.
- * - Returns an array of normalized assignment entries (objects).
- * - Quietly returns [] if parsing fails.
- *
- * Expected entry shapes:
- *  { name, employeeId, startDate, returnDate, comments, status }
- */
 function parseAssignedToValue(v) {
   try {
     if (!v && v !== 0) return [];
@@ -485,38 +435,28 @@ function parseAssignedToValue(v) {
     const s = sRaw.trim();
     if (!s) return [];
 
-    // If looks like JSON array or object try parse normally
     if (s.startsWith("[") || s.startsWith("{")) {
       try {
         const parsed = JSON.parse(s);
         if (Array.isArray(parsed)) return parsed;
         if (parsed && typeof parsed === "object") return [parsed];
-      } catch (e) {
-        // try relaxed parsing strategies below
-      }
+      } catch (e) {}
     }
 
-    // Relaxed attempt: remove excessive escaping then try parse
     try {
       const unq = s.replace(/\\+/g, "\\");
       const parsed2 = JSON.parse(unq);
       if (Array.isArray(parsed2)) return parsed2;
       if (parsed2 && typeof parsed2 === "object") return [parsed2];
-    } catch (e) {
-      // continue
-    }
+    } catch (e) {}
 
-    // Relaxed attempt: convert single quotes to double quotes when safe
     try {
       const dq = s.replace(/'/g, '"');
       const parsed3 = JSON.parse(dq);
       if (Array.isArray(parsed3)) return parsed3;
       if (parsed3 && typeof parsed3 === "object") return [parsed3];
-    } catch (e) {
-      // continue
-    }
+    } catch (e) {}
 
-    // Final fallback: try extracting JSON-like objects from the string using regex
     try {
       const arr = [];
       const objRegex = /(\{[^}]*\})/g;
@@ -526,14 +466,11 @@ function parseAssignedToValue(v) {
           const candidate = m[1].replace(/'/g, '"').replace(/\\+/g, "\\");
           const parsed = JSON.parse(candidate);
           if (parsed && typeof parsed === "object") arr.push(parsed);
-        } catch (e) {
-          // ignore
-        }
+        } catch (e) {}
       }
       if (arr.length > 0) return arr;
     } catch (e) {}
 
-    // Very last fallback: try to extract status token(s) from string
     try {
       const statuses = [];
       const statusRegex = /"status"\s*:\s*"([^"]+)"/gi;
@@ -573,7 +510,6 @@ function hasActiveAssignment(assignedArray) {
 
       const canonStatus = canonicalizeStatusToken(statusRaw) || "";
 
-      // Explicit negative tokens -> not active
       if (
         canonStatus === "returned" ||
         canonStatus === "decommissioned" ||
@@ -582,7 +518,6 @@ function hasActiveAssignment(assignedArray) {
         continue;
       }
 
-      // If there's a returnDate and it's in the past or equal to now -> not active
       if (returnDate && String(returnDate).trim() !== "") {
         const d = new Date(returnDate);
         if (!isNaN(d.getTime()) && d.getTime() <= now) {
@@ -590,12 +525,10 @@ function hasActiveAssignment(assignedArray) {
         }
       }
 
-      // 1) startDate with no returnDate -> active (explicit assignment window)
       if (startDate && (!returnDate || String(returnDate).trim() === "")) {
         return true;
       }
 
-      // 2) explicit assigned-like canonical tokens -> active
       if (
         ["assigned", "in use", "allocated", "issued", "using"].includes(
           canonStatus
@@ -604,7 +537,6 @@ function hasActiveAssignment(assignedArray) {
         return true;
       }
 
-      // 3) employee id present and no returnDate -> active (treat presence of employeeId as stronger evidence)
       if (
         empId &&
         String(empId).trim() !== "" &&
@@ -612,11 +544,7 @@ function hasActiveAssignment(assignedArray) {
       ) {
         return true;
       }
-
-      // Note: Do NOT treat entries that only have `name` (and empty employeeId/startDate/status)
-      // as active. Those are often placeholders or legacy text and cause false-positives.
     } catch (e) {
-      // ignore and continue
       continue;
     }
   }
@@ -624,16 +552,6 @@ function hasActiveAssignment(assignedArray) {
   return false;
 }
 
-/**
- * statusMatches(requestedStatus, rowStatusCandidates)
- *
- * - requestedStatus: token returned by normalizeStatusForQuery (string or null)
- * - rowStatusCandidates: array of values from the row (e.g. [r.status, r.payment_status, r.assigned_to])
- *
- * Primary behavior:
- *  - when requestedStatus canonicalizes to lifecycle tokens prefer evaluating assigned_to JSON/array values.
- *  - otherwise fall back to canonical/string matching.
- */
 function statusMatches(requestedStatus, rowStatusCandidates = []) {
   try {
     if (!requestedStatus) return true;
@@ -647,7 +565,6 @@ function statusMatches(requestedStatus, rowStatusCandidates = []) {
       ? [rowStatusCandidates]
       : [];
 
-    // If requested status is one of lifecycle tokens, prefer assigned_to parsing
     const lifecycleTokens = [
       "assigned",
       "unassigned",
@@ -657,10 +574,8 @@ function statusMatches(requestedStatus, rowStatusCandidates = []) {
     if (lifecycleTokens.includes(reqCanon)) {
       for (const rawCand of candArr) {
         try {
-          // parse assigned_to tolerantly
           const assignedArr = parseAssignedToValue(rawCand);
           if (Array.isArray(assignedArr) && assignedArr.length > 0) {
-            // check each entry's status (canonicalized)
             for (const entry of assignedArr) {
               const entStatus =
                 (entry &&
@@ -669,7 +584,6 @@ function statusMatches(requestedStatus, rowStatusCandidates = []) {
               const entCanon = canonicalizeStatusToken(entStatus) || "";
               if (!entCanon) continue;
               if (reqCanon === "assigned") {
-                // active assignment check: not returned/decommissioned AND no returnDate or has employee/start
                 const returnDate =
                   (entry &&
                     (entry.returnDate || entry.return_date || entry.return)) ||
@@ -686,7 +600,6 @@ function statusMatches(requestedStatus, rowStatusCandidates = []) {
                 ) {
                   return true;
                 }
-                // entries explicitly marked 'assigned' or 'in use'
                 if (
                   entCanon === "assigned" ||
                   entCanon === "in use" ||
@@ -695,14 +608,12 @@ function statusMatches(requestedStatus, rowStatusCandidates = []) {
                   return true;
               }
               if (reqCanon === "unassigned") {
-                // all entries either returned/decommissioned or empty array = unassigned
                 if (
                   entCanon === "returned" ||
                   entCanon === "decommissioned" ||
                   entCanon === "unassigned" ||
                   !entCanon
                 ) {
-                  // continue searching; we'll only return true if we can tell it's unassigned
                 }
               }
               if (reqCanon === "returned" && entCanon === "returned")
@@ -713,16 +624,13 @@ function statusMatches(requestedStatus, rowStatusCandidates = []) {
               )
                 return true;
             }
-            // special case for unassigned: if assignedArr exists but none are active -> unassigned
             if (reqCanon === "unassigned") {
               const anyActive = hasActiveAssignment(assignedArr);
               if (!anyActive) return true;
             }
-            // continue to other candidates if no match
             continue;
           }
 
-          // If parse failed, try extracting status tokens using regex
           if (typeof rawCand === "string") {
             const match = rawCand.match(/"status"\s*:\s*"([^"]+)"/i);
             if (match && match[1]) {
@@ -739,10 +647,8 @@ function statusMatches(requestedStatus, rowStatusCandidates = []) {
           continue;
         }
       }
-      // If we reach here — assigned_to parsing did not find a match. Fall back to general matching below.
     }
 
-    // General canonical matching (previous behavior)
     const candidateCanons = candArr
       .map((v) => (v === null || v === undefined ? "" : String(v)))
       .filter(Boolean)
@@ -800,31 +706,20 @@ function statusMatches(requestedStatus, rowStatusCandidates = []) {
         console.debug(
           `[reportFilters] statusMatches NO MATCH => ${candidDisplay}`
         );
-      } catch (e) {
-        /* ignore logging errors */
-      }
+      } catch (e) {}
     }
 
     return false;
   } catch (e) {
     console.error("statusMatches error:", e && (e.message || e));
-    // On unexpected error, be conservative and return true to avoid accidental filtering-out of data
     return true;
   }
 }
 
-/* ------------------ Preview helpers ------------------ */
-
-/**
- * isPreviewRequest(req)
- * Strict preview detection: only when ?preview=true (or '1') or boolean true.
- * Do NOT treat Accept: application/json alone as a preview (that caused false positives).
- */
 function isPreviewRequest(req) {
   if (!req) return false;
   const q = req.query && req.query.preview;
 
-  // Accept explicit boolean true / string 'true' / '1'
   if (q === true) return true;
   if (typeof q === "string") {
     const v = q.toLowerCase().trim();
@@ -832,7 +727,6 @@ function isPreviewRequest(req) {
     return false;
   }
 
-  // numeric 1
   if (typeof q === "number") return q === 1;
 
   return false;
@@ -951,8 +845,6 @@ async function sendPreviewResponse(req, res, rows, message) {
   return res.status(200).json(out);
 }
 
-/* ------------------ Filename + Date window helpers ------------------ */
-
 function safeFilename(base, ext) {
   const now = new Date().toISOString().replace(/[:.]/g, "-");
   return `${base}_${now}.${ext}`;
@@ -1013,7 +905,6 @@ function ensureTwoMonthWindow(startDate, endDate) {
   return { ok: true, startDate, endDate };
 }
 
-/* ----------------- Date/Query parsing helper (for handlers) ---------------- */
 function parseDates(q) {
   const rawFormat = coerceToString(q.format, "xlsx");
   const format = (rawFormat || "xlsx").toLowerCase();
@@ -1042,41 +933,23 @@ function parseDates(q) {
   };
 }
 
-/* ----------------- Export ----------------- */
-
 module.exports = {
   coerceToString,
   escapeHtml,
-
-  // parsing + validation
   parseDates,
   ensureTwoMonthWindow,
   parseDateISO,
   daysBetweenInclusive,
   MAX_RANGE_DAYS,
-
-  // preview helpers
   isPreviewRequest,
   sendPreviewResponse,
-
-  // filename
   safeFilename,
-
-  // status/date params
   normalizeStatusForQuery,
   buildDateStatusParams,
-
-  // field helpers
   keepOnlyFields,
   pickFields,
-
-  // reimbursements normalization
   normalizeReimbursementRow,
-
-  // filtering
   applyEmployeeAndDepartmentFilters,
-
-  // status matcher (compat)
   normalizeForCompare,
   statusMatches,
 };

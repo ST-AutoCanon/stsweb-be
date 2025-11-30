@@ -41,7 +41,6 @@ exports.bulkAddEmployees = async (req, res) => {
         row.dob = excelSerialToJSDate(row.dob);
       }
     }
-    console.log(employeesData);
 
     fs.unlink(req.file.path, (err) => {
       if (err) console.warn("Temp file removal failed:", err);
@@ -93,7 +92,6 @@ exports.bulkAddEmployees = async (req, res) => {
 };
 
 exports.createFullEmployee = async (req, res) => {
-  console.log("[createFullEmployee] ⇒ start");
   try {
     const data = { ...req.body };
     const raw = req.body || {};
@@ -240,15 +238,9 @@ exports.createFullEmployee = async (req, res) => {
       if (files.length) data[urlKey] = files.map((f) => getWebPath(f.path));
     }
 
-    console.log("[createFullEmployee] calling service.addFullEmployee");
     const { employee_id } = await employeeService.addFullEmployee(data);
-    console.log("[createFullEmployee] ⇒ success", employee_id);
 
     try {
-      console.log(
-        "[createFullEmployee] attempting to send reset email to:",
-        data.email
-      );
       if (!process.env.SENDGRID_API_KEY) {
         console.warn(
           "[createFullEmployee] SENDGRID_API_KEY missing — skipping email send"
@@ -262,7 +254,6 @@ exports.createFullEmployee = async (req, res) => {
           data.email,
           `${data.first_name} ${data.last_name}`
         );
-        console.log("[createFullEmployee] reset email sent");
       }
     } catch (mailErr) {
       console.warn(
@@ -287,21 +278,13 @@ exports.createFullEmployee = async (req, res) => {
         )
       );
   } finally {
-    console.log("[createFullEmployee] ⇒ end");
   }
 };
 
 exports.updateFullEmployee = async (req, res) => {
-  console.log("[updateFullEmployee] ⇒ start");
   try {
     const raw = req.body || {};
     const data = { employee_id: req.params.employeeId, ...raw };
-
-    console.log(
-      "[updateFullEmployee] incoming raw body keys:",
-      Object.keys(raw)
-    );
-    console.log("👉 RAW req.files:", JSON.stringify(req.files || {}, null, 2));
 
     [
       "dob",
@@ -365,10 +348,6 @@ exports.updateFullEmployee = async (req, res) => {
         filesByField[field] = arr;
       }
     }
-    console.log(
-      "[updateFullEmployee] filesByField keys:",
-      Object.keys(filesByField)
-    );
 
     const simpleMap = {
       photo: "photo_url",
@@ -480,15 +459,6 @@ exports.updateFullEmployee = async (req, res) => {
       }
     }
 
-    console.log(
-      "[updateFullEmployee] final data keys to pass to service:",
-      Object.keys(data)
-    );
-
-    console.log("[updateFullEmployee] calling service.editFullEmployee");
-    await employeeService.editFullEmployee(data);
-
-    console.log("[updateFullEmployee] ⇒ success");
     return res
       .status(200)
       .json(ErrorHandler.generateSuccessResponse(200, "Employee updated."));
@@ -503,7 +473,6 @@ exports.updateFullEmployee = async (req, res) => {
         )
       );
   } finally {
-    console.log("[updateFullEmployee] ⇒ end");
   }
 };
 
@@ -558,16 +527,12 @@ const BASE_UPLOADS = path.join(__dirname, "../../../EmployeeDetails");
 exports.serveEmployeeFile = async (req, res) => {
   try {
     const relativePath = req.params[0];
-    console.log("[serveEmployeeFile] relativePath:", relativePath);
 
     const sanitizedPath = relativePath.replace(/\.\./g, "");
-    console.log("[serveEmployeeFile] sanitizedPath:", sanitizedPath);
-
     const fullPath = path.join(
       BASE_UPLOADS,
       sanitizedPath.replace(/^EmployeeDetails[\\/]/, "")
     );
-    console.log("[serveEmployeeFile] fullPath:", fullPath);
 
     if (!fs.existsSync(fullPath)) {
       console.warn("[serveEmployeeFile] file does not exist:", fullPath);
@@ -576,7 +541,6 @@ exports.serveEmployeeFile = async (req, res) => {
         .json({ status: "error", message: "File not found" });
     }
 
-    console.log("[serveEmployeeFile] sending file:", fullPath);
     return res.sendFile(fullPath);
   } catch (err) {
     console.error("[serveEmployeeFile] error:", err);

@@ -1,41 +1,18 @@
-// src/services/reportIndex.js
 const utils = require("./reportUtils");
 const filters = require("./reportFilters");
 const reports = require("./reports");
 const renders = require("./reportRenders");
 const reportMeta = require("./reportMeta");
 
-/**
- * Note on wrappers:
- * - Many render functions in reportRenders accept meta/title for metadata injection.
- * - To keep callers simple, the wrappers below accept `options` as the last argument.
- *   options = { title?: string, meta?: { status?, department?, departmentName?, employeeName?, _field_display_map? }, req?: ExpressRequest, query?: {}, component?: 'employees'|'attendance'|... }
- *
- * The normalizeMetaForRender helper will try to pick meta from:
- *   1) options.meta
- *   2) options.query (or options.req.query)
- *   3) top-level options keys (status, department_id, employee_name, etc)
- *
- * It returns an object shaped { status?, department?, employeeName? } which the renderers expect.
- */
-
 function withDefaultOptions(opts) {
   return opts && typeof opts === "object" ? opts : {};
 }
 
-/**
- * Extracts a possibly nested value (query/status) from a variety of places.
- * Accepts rawMeta which may be:
- *  - an object with { meta: {...} }
- *  - a request-like object { query: {...} }
- *  - a plain object with keys on top-level
- */
 function normalizeMetaForRender(raw) {
   const out = {};
 
   if (!raw || typeof raw !== "object") return out;
 
-  // accept either raw.meta or raw directly
   const source =
     raw.meta && typeof raw.meta === "object"
       ? raw.meta
@@ -45,15 +22,12 @@ function normalizeMetaForRender(raw) {
       ? raw.req.query
       : raw;
 
-  // helper to coerce val to trimmed string or null
   const norm = (v) => {
     if (v === undefined || v === null) return null;
     const s = String(v).trim();
     return s.length ? s : null;
   };
 
-  // STATUS
-  // Accept many variations, take raw value (we don't re-normalize tokens here)
   const statusCandidate =
     norm(source.status) ||
     norm(source.approval_status) ||
@@ -62,8 +36,6 @@ function normalizeMetaForRender(raw) {
     null;
   if (statusCandidate) out.status = statusCandidate;
 
-  // DEPARTMENT
-  // Prefer departmentName > department > department_name > departmentId (id may remain an id)
   const deptNameCandidate =
     norm(source.departmentName) ||
     norm(source.department) ||
@@ -73,14 +45,11 @@ function normalizeMetaForRender(raw) {
   if (deptNameCandidate) {
     out.department = deptNameCandidate;
   } else {
-    // fallback to id if provided
     const deptIdCandidate =
       norm(source.departmentId) || norm(source.department_id);
     if (deptIdCandidate) out.department = deptIdCandidate;
   }
 
-  // EMPLOYEE NAME
-  // Prefer employeeName > employee_name > employee > employeeId (id fallback)
   const empNameCandidate =
     norm(source.employeeName) ||
     norm(source.employee_name) ||
@@ -96,10 +65,6 @@ function normalizeMetaForRender(raw) {
   return out;
 }
 
-/**
- * Given a title or explicit component name, try to infer which component mapping to use
- * for pretty header labels. Acceptable components: employees, leaves, reimbursements, attendance, tasks, weekly_tasks, vendors, assets
- */
 function inferComponentFromTitle(title) {
   if (!title || typeof title !== "string") return null;
   const t = title.toLowerCase();
@@ -114,10 +79,6 @@ function inferComponentFromTitle(title) {
   return null;
 }
 
-/**
- * Ensure meta contains a _field_display_map (if a component mapping is available).
- * options.component explicit override preferred, then infer from title.
- */
 function attachFieldDisplayMapToMeta(meta, options = {}) {
   const outMeta = Object.assign({}, meta || {});
   try {
@@ -131,7 +92,6 @@ function attachFieldDisplayMapToMeta(meta, options = {}) {
       }
     }
   } catch (e) {
-    // don't break rendering if mapping fails
     console.warn(
       "[reportIndex] attachFieldDisplayMapToMeta failed:",
       e && e.message
@@ -140,13 +100,10 @@ function attachFieldDisplayMapToMeta(meta, options = {}) {
   return outMeta;
 }
 
-// ----------------- exports -----------------
 module.exports = {
-  // utils
   fetchRows: utils.fetchRows,
   coerceToString: utils.coerceToString,
 
-  // filters / normalizers
   normalizeStatusForQuery: filters.normalizeStatusForQuery,
   buildDateStatusParams: filters.buildDateStatusParams,
   keepOnlyFields: filters.keepOnlyFields,
@@ -156,7 +113,6 @@ module.exports = {
   statusMatches: filters.statusMatches,
   pickFields: filters.pickFields,
 
-  // report fetchers
   getLeaveRows: reports.getLeaveRows,
   getReimbursementRows: reports.getReimbursementRows,
   getEmployeeRows: reports.getEmployeeRows,
@@ -169,25 +125,13 @@ module.exports = {
   searchEmployees: reports.searchEmployees,
   getFieldDisplayNames: reports.getFieldDisplayNames,
 
-  // ----------------- renderers (wrappers) -----------------
-
-  // Excel / generic
   renderExcelBuffer: renders.renderExcelBuffer,
   renderTasksExcelBuffer: renders.renderTasksExcelBuffer,
 
-  /**
-   * HTML -> PDF
-   * Usage:
-   *   renderPdfBuffer(title, rows, { meta: { status, departmentName, employeeName }, component: 'employees' })
-   *
-   * This wrapper will accept meta in several shapes so handlers don't need to always build opts.meta.
-   * It will attach a `_field_display_map` into meta using reports.getFieldDisplayNames(component).
-   */
   renderPdfBuffer: async (title, rows, options) => {
     const opts = withDefaultOptions(options);
     const meta = normalizeMetaForRender(opts);
 
-    // debug: if meta empty, also try options.req?.query and options.query explicitly
     if (
       !meta.status &&
       !meta.department &&
@@ -215,13 +159,11 @@ module.exports = {
       }
     }
 
-    // attach field display map (component-aware)
     const metaWithMap = attachFieldDisplayMapToMeta(meta, {
       component: opts.component,
       title,
     });
 
-    // small debug help (no-op in production; you can remove or replace with proper logger)
     if (
       !metaWithMap.status &&
       !metaWithMap.department &&
@@ -234,15 +176,9 @@ module.exports = {
       } catch (e) {}
     }
 
-    // renderPdfBuffer in renders expects (title, rows, meta)
     return await renders.renderPdfBuffer(title, rows, metaWithMap);
   },
 
-  /**
-   * Excel -> PDF (via LibreOffice)
-   * Usage:
-   *   renderExcelToPdfBuffer(rows, headers, { title: 'Title', meta: { status, departmentName }, component: 'attendance' })
-   */
   renderExcelToPdfBuffer: async (rows, headers, options) => {
     const opts = withDefaultOptions(options);
     const meta = normalizeMetaForRender(opts);
@@ -267,17 +203,8 @@ module.exports = {
     );
   },
 
-  /**
-   * Raw HTML string -> PDF buffer
-   * Usage:
-   *   renderHtmlStringToPdfBuffer(htmlString)
-   */
   renderHtmlStringToPdfBuffer: renders.renderHtmlStringToPdfBuffer,
 
-  /**
-   * If you already have an XLSX buffer and want to attach meta:
-   *   renderXlsxBufferToPdfBuffer(xlsxBuffer, { title: 'Title', meta: {...}, component: 'employees' })
-   */
   renderXlsxBufferToPdfBuffer: async (xlsxBuffer, options) => {
     const opts = withDefaultOptions(options);
     const meta = normalizeMetaForRender(opts);
@@ -301,7 +228,6 @@ module.exports = {
     );
   },
 
-  // Tasks-specific flows
   renderTasksPdfBuffer: async (tasksRows, weeklyRows, options) => {
     const opts = withDefaultOptions(options);
     const meta = normalizeMetaForRender(opts);
@@ -350,7 +276,6 @@ module.exports = {
 
   renderTasksPdfBufferFromXlsx: renders.renderTasksPdfBufferFromXlsx,
 
-  // utilities
   createPdfFromPng: renders.createPdfFromPng,
   findLibreOfficeBinary: renders.findLibreOfficeBinary,
 };

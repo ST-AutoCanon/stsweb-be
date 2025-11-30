@@ -1,4 +1,3 @@
-
 const db = require("../config");
 const queries = require("../constants/planQueries");
 
@@ -16,9 +15,6 @@ const saveWeeklyPlan = async (planData) => {
       planData.task_days,
       planData.messages,
     ];
-
-    console.log("SQL query:", sql);
-    console.log("SQL params:", params);
 
     const [result] = await db.query(sql, params);
     return result.insertId;
@@ -46,7 +42,10 @@ const updatePlanMessages = async (planId, newMessage) => {
       throw new Error("Plan not found");
     }
 
-    const [result] = await db.query(queries.UPDATE_MESSAGE, [newMessage, planId]);
+    const [result] = await db.query(queries.UPDATE_MESSAGE, [
+      newMessage,
+      planId,
+    ]);
     if (result.affectedRows === 0) {
       throw new Error("Plan not found");
     }

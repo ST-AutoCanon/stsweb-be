@@ -1,6 +1,3 @@
-// src/services/reportRenders.js
-// Updated: centers tables with few columns (<=3) so they don't shrink to left
-
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -107,7 +104,6 @@ async function renderExcelBuffer(rows, headers) {
 async function renderTasksExcelBuffer(tasksRows, weeklyRows) {
   const workbook = new ExcelJS.Workbook();
 
-  // Helper: produce an ordered union of keys across rows (first occurrence order)
   function unionKeysFromRows(rowsArray) {
     const seen = new Set();
     const keys = [];
@@ -124,7 +120,6 @@ async function renderTasksExcelBuffer(tasksRows, weeklyRows) {
   }
 
   function addSheet(name, rows, fallbackRows = []) {
-    // make shallow copies
     let safeRows = Array.isArray(rows) ? rows.map((r) => ({ ...r })) : [];
     const fallbackSafe = Array.isArray(fallbackRows)
       ? fallbackRows.map((r) => ({ ...r }))
@@ -132,16 +127,12 @@ async function renderTasksExcelBuffer(tasksRows, weeklyRows) {
 
     let cols;
 
-    // If primary rows are empty but fallback has data, use fallback as sheet data
-    // This ensures the sheet isn't left header-only when fallbackRows are intended as the data source.
     let usedRowsForCols = safeRows.length > 0 ? safeRows : fallbackSafe;
     if (safeRows.length === 0 && fallbackSafe.length > 0) {
-      // use fallback as the actual rows for this sheet (helps avoid empty sheet)
       safeRows = fallbackSafe.slice();
     }
 
     if (usedRowsForCols.length > 0) {
-      // create columns from union of keys across sample rows so headers include all fields
       const keys = unionKeysFromRows(usedRowsForCols);
       cols = keys.map((k) => ({ header: k, key: k, width: 20 }));
     } else {
@@ -174,9 +165,7 @@ async function renderTasksExcelBuffer(tasksRows, weeklyRows) {
     }
   }
 
-  // Tasks sheet: primary tasksRows, fallback weeklyRows
   addSheet("Tasks", tasksRows, weeklyRows);
-  // Weekly Tasks sheet: primary weeklyRows, fallback tasksRows
   addSheet("Weekly Tasks", weeklyRows, tasksRows);
 
   const buf = await workbook.xlsx.writeBuffer();

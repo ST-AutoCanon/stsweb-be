@@ -1,9 +1,7 @@
-
 const vendorService = require("../services/vendorService");
 
 const addVendorHandler = async (req, res) => {
   try {
-    // Extract text fields from req.body
     const {
       name,
       contact_person,
@@ -41,25 +39,30 @@ const addVendorHandler = async (req, res) => {
       msme_status,
     } = req.body;
 
-    // Extract file paths from req.files
     const files = req.files || {};
-    const gst_certificate = files.gst_certificate ? files.gst_certificate[0].path : null;
+    const gst_certificate = files.gst_certificate
+      ? files.gst_certificate[0].path
+      : null;
     const pan_card = files.pan_card ? files.pan_card[0].path : null;
-    const cancelled_cheque = files.cancelled_cheque ? files.cancelled_cheque[0].path : null;
-    const msme_certificate = files.msme_certificate ? files.msme_certificate[0].path : null;
-    const incorporation_certificate = files.incorporation_certificate ? files.incorporation_certificate[0].path : null;
+    const cancelled_cheque = files.cancelled_cheque
+      ? files.cancelled_cheque[0].path
+      : null;
+    const msme_certificate = files.msme_certificate
+      ? files.msme_certificate[0].path
+      : null;
+    const incorporation_certificate = files.incorporation_certificate
+      ? files.incorporation_certificate[0].path
+      : null;
 
-    // Validate required fields
     if (!company_name) {
       return res.status(400).json({ error: "Company name is required" });
     }
-    if (!gst_certificate || !pan_card ) {
+    if (!gst_certificate || !pan_card) {
       return res.status(400).json({
         error: "GST Certificate, PAN Card, and Cancelled Cheque are required",
       });
     }
 
-    // Prepare vendor data array for the query
     const vendorData = [
       company_name || null,
       registered_address || null,
@@ -101,11 +104,12 @@ const addVendorHandler = async (req, res) => {
     res.status(201).json({ message: "Vendor added successfully", result });
   } catch (error) {
     console.error("Error in addVendorHandler:", error);
-    res.status(500).json({ error: "Failed to add vendor", details: error.message });
+    res
+      .status(500)
+      .json({ error: "Failed to add vendor", details: error.message });
   }
 };
 
-// Get all vendors
 const getAllVendorsHandler = async (req, res) => {
   try {
     const vendors = await vendorService.getAllVendors();
@@ -157,21 +161,25 @@ const updateVendorHandler = async (req, res) => {
     } = req.body;
 
     const files = req.files || {};
-    const new_gst_certificate = files.gst_certificate ? files.gst_certificate[0].path : null;
+    const new_gst_certificate = files.gst_certificate
+      ? files.gst_certificate[0].path
+      : null;
     const new_pan_card = files.pan_card ? files.pan_card[0].path : null;
-    const new_cancelled_cheque = files.cancelled_cheque ? files.cancelled_cheque[0].path : null;
-    const new_msme_certificate = files.msme_certificate ? files.msme_certificate[0].path : null;
+    const new_cancelled_cheque = files.cancelled_cheque
+      ? files.cancelled_cheque[0].path
+      : null;
+    const new_msme_certificate = files.msme_certificate
+      ? files.msme_certificate[0].path
+      : null;
     const new_incorporation_certificate = files.incorporation_certificate
       ? files.incorporation_certificate[0].path
       : null;
 
-    // Fetch existing vendor data
     const [existingVendor] = await vendorService.getVendorById(vendorId);
     if (!existingVendor) {
       return res.status(404).json({ error: "Vendor not found" });
     }
 
-    // Validate required fields
     if (!company_name) {
       return res.status(400).json({ error: "Company name is required" });
     }
@@ -184,7 +192,6 @@ const updateVendorHandler = async (req, res) => {
       });
     }
 
-    // Prepare vendor data, preserving existing document paths if not updated
     const vendorData = [
       company_name || null,
       registered_address || null,
@@ -216,17 +223,28 @@ const updateVendorHandler = async (req, res) => {
       years_of_experience || null,
       new_gst_certificate || gst_path || existingVendor.gst_certificate || null,
       new_pan_card || pan_path || existingVendor.pan_card || null,
-      new_cancelled_cheque || cheque_path || existingVendor.cancelled_cheque || null,
-      new_msme_certificate || msme_path || existingVendor.msme_certificate || null,
+      new_cancelled_cheque ||
+        cheque_path ||
+        existingVendor.cancelled_cheque ||
+        null,
+      new_msme_certificate ||
+        msme_path ||
+        existingVendor.msme_certificate ||
+        null,
       msme_status || null,
-      new_incorporation_certificate || incorporation_path || existingVendor.incorporation_certificate || null,
+      new_incorporation_certificate ||
+        incorporation_path ||
+        existingVendor.incorporation_certificate ||
+        null,
     ];
 
     const result = await vendorService.updateVendorById(vendorData, vendorId);
     res.status(200).json({ message: "Vendor updated successfully", result });
   } catch (error) {
     console.error("Error in updateVendorHandler:", error);
-    res.status(500).json({ error: "Failed to update vendor", details: error.message });
+    res
+      .status(500)
+      .json({ error: "Failed to update vendor", details: error.message });
   }
 };
 

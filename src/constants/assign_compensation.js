@@ -1,4 +1,3 @@
-
 module.exports = {
   ADD_COMPENSATION_ASSIGNMENT: `
     INSERT INTO assigned_compensations (
@@ -48,8 +47,7 @@ module.exports = {
       )
   `,
 
- // In ../constants/assign_compensation.js
-GET_ASSIGNED_COMPENSATION_DETAILS: `
+  GET_ASSIGNED_COMPENSATION_DETAILS: `
 SELECT 
     ac.id,
     ac.compensation_plan_name,
@@ -79,7 +77,7 @@ LIMIT 0, 1000;
     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
   `,
 
- ADD_EMPLOYEE_BONUS_BULK: `
+  ADD_EMPLOYEE_BONUS_BULK: `
     INSERT INTO employee_bonus_details (
       percentage_ctc,
       percentage_monthly_salary,
@@ -102,7 +100,6 @@ LIMIT 0, 1000;
     ORDER BY applicable_month DESC, id ASC
     LIMIT 0, 1000
   `,
-// Advance queries
   ADD_EMPLOYEE_ADVANCE: `
   INSERT INTO employee_advance_details (
     employee_id,
@@ -114,7 +111,7 @@ LIMIT 0, 1000;
   VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
 `,
 
- GET_EMPLOYEE_ADVANCE_DETAILS: `
+  GET_EMPLOYEE_ADVANCE_DETAILS: `
   SELECT 
     ead.id,
     ead.employee_id,
@@ -131,65 +128,7 @@ LIMIT 0, 1000;
   LIMIT 0, 1000
 `,
 
-//   GET_EMPLOYEE_EXTRA_HOURS: `
-//   SELECT 
-//     ea.punch_id,
-//     ea.employee_id,
-//     CONCAT(e.first_name, ' ', e.last_name) AS employee_name,
-//     DATE(ea.punchin_time) AS work_date,
-//     ea.punchin_time,
-//     ea.punchout_time,
-
-//     -- ✅ Total worked hours (handles overnight correctly)
-//     ROUND(TIMESTAMPDIFF(SECOND, ea.punchin_time, ea.punchout_time) / 3600, 2) AS total_worked_hours,
-
-//     -- ✅ Default working hours (from compensation plan)
-//     CAST(
-//       JSON_UNQUOTE(
-//         JSON_EXTRACT(cp.plan_data, '$.defaultWorkingHours')
-//       ) AS DECIMAL(5,2)
-//     ) AS default_working_hours,
-
-//     -- ✅ Extra hours only if worked > default
-//     GREATEST(
-//       ROUND(TIMESTAMPDIFF(SECOND, ea.punchin_time, ea.punchout_time) / 3600, 2)
-//       - CAST(JSON_UNQUOTE(JSON_EXTRACT(cp.plan_data, '$.defaultWorkingHours')) AS DECIMAL(5,2)),
-//       0
-//     ) AS extra_hours,
-
-//     COALESCE(od.status, 'Pending') AS status,
-//     COALESCE(od.rate, 0) AS rate,
-//     od.project,
-//     CONCAT(sup.first_name, ' ', sup.last_name) AS supervisor_name,
-//     od.comments
-
-//   FROM emp_attendence ea
-//   LEFT JOIN overtime_details od 
-//     ON ea.punch_id = od.punch_id
-//   LEFT JOIN employees e 
-//     ON ea.employee_id = e.employee_id
-//   LEFT JOIN employee_professional ep 
-//     ON e.employee_id = ep.employee_id
-//   LEFT JOIN employees sup 
-//     ON ep.supervisor_id = sup.employee_id
-
-//   -- ✅ Compensation plan joins
-//   LEFT JOIN assigned_compensations ac 
-//     ON JSON_UNQUOTE(JSON_EXTRACT(ac.assigned_data, '$.employee_id')) = e.employee_id
-//   LEFT JOIN compensation_plans cp 
-//     ON ac.compensation_plan_name = cp.compensation_plan_name
-
-//   WHERE 
-//     ea.punchin_time IS NOT NULL
-//     AND ea.punchout_time IS NOT NULL
-//     AND ea.punchin_time >= ?
-//     AND ea.punchin_time < DATE_ADD(?, INTERVAL 1 DAY)
-
-//   ORDER BY ea.employee_id, DATE(ea.punchin_time), ea.punchin_time
-
-// `
-
-GET_EMPLOYEE_EXTRA_HOURS: `
+  GET_EMPLOYEE_EXTRA_HOURS: `
   SELECT 
     ea.punch_id,
     ea.employee_id,
@@ -224,12 +163,9 @@ GET_EMPLOYEE_EXTRA_HOURS: `
     AND ea.punchin_time < DATE_ADD(?, INTERVAL 1 DAY)
 
   ORDER BY ea.employee_id, ea.punchin_time;
-`
+`,
 
-,
-
-
-ADD_OVERTIME_DETAILS_BULK: `
+  ADD_OVERTIME_DETAILS_BULK: `
   INSERT INTO overtime_details (
     punch_id,
     work_date,
@@ -254,10 +190,7 @@ ADD_OVERTIME_DETAILS_BULK: `
     updated_at = CURRENT_TIMESTAMP
 `,
 
-
-
-// Insert a single row as "Approved"
-ADD_OVERTIME_DETAILS_APPROVED: `
+  ADD_OVERTIME_DETAILS_APPROVED: `
   INSERT INTO overtime_details (
     punch_id,
     work_date,
@@ -274,8 +207,7 @@ ADD_OVERTIME_DETAILS_APPROVED: `
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Approved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `,
 
-// Insert a single row as "Rejected"
-ADD_OVERTIME_DETAILS_REJECTED: `
+  ADD_OVERTIME_DETAILS_REJECTED: `
   INSERT INTO overtime_details (
     punch_id,
     work_date,
@@ -291,7 +223,7 @@ ADD_OVERTIME_DETAILS_REJECTED: `
   )
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Rejected', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 `,
-GET_ALL_OVERTIME_DETAILS : `
+  GET_ALL_OVERTIME_DETAILS: `
   SELECT 
   punch_id,
   work_date,
@@ -411,10 +343,8 @@ WHERE status = 'Approved'
     )
   )
 ORDER BY work_date DESC, updated_at DESC;
-`
-,
-
-GET_EMPLOYEE_LOP_DAYS_FOR_CURRENT_PERIOD: `
+`,
+  GET_EMPLOYEE_LOP_DAYS_FOR_CURRENT_PERIOD: `
   SELECT
     employee_id,
     lop
@@ -435,10 +365,9 @@ GET_EMPLOYEE_LOP_DAYS_FOR_CURRENT_PERIOD: `
         ELSE year = YEAR(CURDATE())
       END
     )
-`
+`,
 
-  ,
-CHECK_EMPLOYEE_ASSIGNMENT: `
+  CHECK_EMPLOYEE_ASSIGNMENT: `
     SELECT id, compensation_plan_name
 FROM assigned_compensations
 WHERE JSON_CONTAINS(assigned_data, ?, '$.employee_id')
@@ -452,7 +381,6 @@ WHERE JSON_CONTAINS(assigned_data, ?, '$.employee_id')
     )
     VALUES (?, ?, ?, CURRENT_TIMESTAMP)
   `,
-
 
   GET_WORKING_DAYS_CURRENT_MONTH: `
     WITH RECURSIVE month_days AS (
@@ -488,9 +416,5 @@ WHERE JSON_CONTAINS(assigned_data, ?, '$.employee_id')
           WHERE MONTH(date) = MONTH(NOW()) 
             AND YEAR(date) = YEAR(NOW())
       );
-  `
-
-
-
+  `,
 };
-

@@ -1,4 +1,3 @@
-// src/handlers/reportLeavesHandler.js
 const reportService = require("../services/reportIndex");
 const { coerceToString } = require("../services/reportUtils");
 const {
@@ -9,14 +8,13 @@ const {
 } = require("../services/reportFilters");
 const db = require("../config");
 
-/* helper to run raw exec returning [rows, fields] using db.execute/query */
 async function dbExecRaw(sql, params = []) {
   if (!Array.isArray(params)) params = [params];
   if (db && typeof db.execute === "function") {
-    return await db.execute(sql, params); // returns [rows, fields]
+    return await db.execute(sql, params);
   }
   if (db && typeof db.query === "function") {
-    return await db.query(sql, params); // returns [rows, fields]
+    return await db.query(sql, params);
   }
   return new Promise((resolve, reject) => {
     if (db && typeof db.query === "function") {
@@ -28,7 +26,6 @@ async function dbExecRaw(sql, params = []) {
   });
 }
 
-/* grab employee id from request headers/body (robust) */
 function tryParseCandidate(raw) {
   if (raw === null || typeof raw === "undefined") return null;
   if (typeof raw === "object") {
@@ -103,12 +100,10 @@ function findEmployeeIdInRequest(req) {
   return null;
 }
 
-/* find departments managed by managerEmpId (defensive) */
 async function findDepartmentsManagedBy(managerEmpId) {
   if (!managerEmpId) return [];
   const out = [];
 
-  // 1) attempt SHOW COLUMNS (robustly)
   try {
     const [cols] = await dbExecRaw("SHOW COLUMNS FROM departments");
     const colNames = Array.isArray(cols)
@@ -160,7 +155,6 @@ async function findDepartmentsManagedBy(managerEmpId) {
     console.warn("[reportLeavesHandler] SHOW COLUMNS failed:", e && e.message);
   }
 
-  // 2) fallback: check employee_professional supervisor mapping (common)
   try {
     const [rows] = await dbExecRaw(
       "SELECT DISTINCT department_id AS id FROM employee_professional WHERE supervisor_id = ? AND department_id IS NOT NULL",
@@ -182,7 +176,6 @@ async function findDepartmentsManagedBy(managerEmpId) {
   return Array.from(new Set(out));
 }
 
-/* normalize candidate to plain string (handles object/json/id/name) */
 function normalizeToPlainString(candidate, kind = "generic") {
   if (candidate === null || typeof candidate === "undefined") return null;
   if (typeof candidate === "object") {
@@ -209,14 +202,11 @@ function normalizeToPlainString(candidate, kind = "generic") {
     try {
       const parsed = JSON.parse(candidate);
       return normalizeToPlainString(parsed, kind);
-    } catch (e) {
-      // continue
-    }
+    } catch (e) {}
   }
   return String(candidate);
 }
 
-/* simple meta builder that produces only human-readable strings */
 async function buildMetaFromReqQuery(query = {}) {
   const meta = {
     filters: [],
@@ -335,7 +325,6 @@ async function buildMetaFromReqQuery(query = {}) {
   return meta;
 }
 
-/* helper to detect explicit manager-scope intent */
 function isExplicitManagerScope(req) {
   try {
     const header = String(
@@ -358,12 +347,7 @@ function isExplicitManagerScope(req) {
   return false;
 }
 
-/* main handler */
 async function downloadLeavesReport(req, res) {
-  console.log(
-    "[reportLeavesHandler] downloadLeavesReport called - query:",
-    req.query || {}
-  );
   try {
     const parsed = parseDates(req.query || {});
     let { startDate, endDate, status, format, fields } = parsed;
@@ -384,7 +368,6 @@ async function downloadLeavesReport(req, res) {
         requesterEmpId
       );
 
-    // admin detection (only when req.user exists)
     let isAdmin = false;
     try {
       const u = req.user || req.authUser || req.session?.user;
@@ -399,7 +382,6 @@ async function downloadLeavesReport(req, res) {
       isAdmin = false;
     }
 
-    // derive department if not provided
     let managerEmpId = null;
     if (!departmentIdQuery && requesterEmpId) {
       try {
@@ -414,7 +396,6 @@ async function downloadLeavesReport(req, res) {
             departmentIdQuery
           );
         } else {
-          // Allow manager scoping for previews as well — user expects preview to be scoped
           if (!isAdmin && isExplicitManagerScope(req)) {
             managerEmpId = requesterEmpId;
             console.debug(
@@ -428,7 +409,6 @@ async function downloadLeavesReport(req, res) {
           }
         }
       } catch (e) {
-        // allow fallback manager scoping if explicit manager or flag present
         if (!isAdmin && isExplicitManagerScope(req)) {
           managerEmpId = requesterEmpId;
           console.debug(
@@ -451,7 +431,6 @@ async function downloadLeavesReport(req, res) {
     let rows = [];
 
     if (employeeIdQuery || departmentIdQuery) {
-      // explicit scoping -> call service directly
       rows = await reportService.getLeaveRows(
         startDate,
         endDate,
@@ -462,7 +441,6 @@ async function downloadLeavesReport(req, res) {
       );
       rows = Array.isArray(rows) ? rows : [];
     } else if (managerEmpId) {
-      // manager scoping
       let managedDeptIds = [];
       try {
         managedDeptIds = await findDepartmentsManagedBy(managerEmpId);
@@ -499,7 +477,6 @@ async function downloadLeavesReport(req, res) {
           if (p && p.leave_id) map.set(String(p.leave_id), p);
         rows = Array.from(map.values());
       } else {
-        // fallback: fetch all and filter by supervisor mapping
         try {
           const all = await reportService.getLeaveRows(
             startDate,
@@ -537,7 +514,6 @@ async function downloadLeavesReport(req, res) {
         }
       }
     } else {
-      // no scoping - full fetch
       rows = await reportService.getLeaveRows(
         startDate,
         endDate,
@@ -547,7 +523,6 @@ async function downloadLeavesReport(req, res) {
       rows = Array.isArray(rows) ? rows : [];
     }
 
-    // Preview
     if (isPreviewRequest(req)) {
       console.debug(
         "[reportLeavesHandler] preview rows:",
@@ -566,11 +541,9 @@ async function downloadLeavesReport(req, res) {
         .json({ message: "No leave data for selected date range" });
     }
 
-    // Build meta (so PDF header shows applied filters, employee/department names)
     const meta = await buildMetaFromReqQuery(req.query || {});
     console.debug("[reportLeavesHandler] PDF meta:", meta);
 
-    // Output format handling (pdf/xlsx)
     if (format === "pdf") {
       if (typeof reportService.renderPdfBuffer !== "function")
         return res.status(500).json({ message: "PDF renderer not available" });

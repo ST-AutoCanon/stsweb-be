@@ -1,11 +1,9 @@
-// services/overtimeDetailsService.js
 const pool = require("../config"); // ← VERY IMPORTANT: DB connection
 const {
   UPSERT_OVERTIME_DETAILS,
   GET_OVERTIME_STATUS_SUMMARY,
 } = require("../constants/overtimeQueries");
 
-// Save or update overtime records (used by Approve/Reject)
 const upsertOvertimeRecords = async (records, approvedById) => {
   const connection = await pool.getConnection();
   try {
@@ -15,14 +13,14 @@ const upsertOvertimeRecords = async (records, approvedById) => {
     for (const rec of records) {
       const {
         punch_id,
-        work_date,        // "2025-11-20"
+        work_date,
         employee_id,
-        extra_hours,      // "2.50"
-        rate,             // "150.00"
+        extra_hours,
+        rate,
         project = null,
         supervisor = null,
         comments = null,
-        status,           // "Approved" or "Rejected"
+        status,
       } = rec;
 
       const [result] = await connection.query(UPSERT_OVERTIME_DETAILS, [
@@ -51,9 +49,11 @@ const upsertOvertimeRecords = async (records, approvedById) => {
   }
 };
 
-// Optional: Get approved/rejected records for status summary
 const getOvertimeStatusSummary = async (startDate, endDate) => {
-  const [rows] = await pool.query(GET_OVERTIME_STATUS_SUMMARY, [startDate, endDate]);
+  const [rows] = await pool.query(GET_OVERTIME_STATUS_SUMMARY, [
+    startDate,
+    endDate,
+  ]);
   return rows;
 };
 

@@ -64,7 +64,6 @@ router.get("/departments/:filename", (req, res) => {
 
   fs.access(filePath, fs.constants.F_OK, (err) => {
     if (err) {
-      console.log(err);
       return res.status(404).json({ message: "Image not found" });
     }
     res.sendFile(filePath);

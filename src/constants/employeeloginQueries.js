@@ -1,36 +1,3 @@
-// const getTodayAndYesterdayPunchDataQuery = `
-//   SELECT *,
-//     CASE 
-//       WHEN DATE(punchin_time) = CURDATE() THEN 'Today'
-//       WHEN DATE(punchin_time) = CURDATE() - INTERVAL 1 DAY THEN 'Yesterday'
-//     END AS record_day
-//   FROM emp_attendence
-//   WHERE DATE(punchin_time) IN (CURDATE(), CURDATE() - INTERVAL 1 DAY);
-// `;
-
-// module.exports = {
-//   getTodayAndYesterdayPunchDataQuery
-// };
-
-// const getTodayAndYesterdayPunchDataQuery = `
-//   SELECT ea.*, 
-//          e.first_name, 
-//          e.last_name, 
-//          e.photo_url,
-//          CASE 
-//            WHEN DATE(ea.punchin_time) = CURDATE() THEN 'Today'
-//            WHEN DATE(ea.punchin_time) = CURDATE() - INTERVAL 1 DAY THEN 'Yesterday'
-//          END AS record_day
-//   FROM emp_attendence ea
-//   JOIN employees e ON ea.employee_id = e.employee_id
-//   WHERE DATE(ea.punchin_time) IN (CURDATE(), CURDATE() - INTERVAL 1 DAY);
-// `;
-
-// module.exports = {
-//   getTodayAndYesterdayPunchDataQuery
-// };
-
-
 const getTodayAndYesterdayPunchDataQuery = `
   SELECT ea.punch_id,
          ea.employee_id,
@@ -55,5 +22,5 @@ const getTodayAndYesterdayPunchDataQuery = `
 `;
 
 module.exports = {
-  getTodayAndYesterdayPunchDataQuery
+  getTodayAndYesterdayPunchDataQuery,
 };

@@ -93,7 +93,6 @@ function deleteFilesByUrlsMixed(val) {
       const full = webUrlToFullPath(url);
       if (full && fs.existsSync(full)) {
         fs.unlinkSync(full);
-        console.log("[file-delete] removed:", full);
       } else {
       }
     } catch (e) {
@@ -107,8 +106,6 @@ function deleteFilesByUrlsMixed(val) {
 }
 
 exports.addFullEmployee = async (data) => {
-  console.log("[addFullEmployee] ⇒ start", { email: data.email });
-
   const requiredFields = [
     "first_name",
     "last_name",
@@ -128,11 +125,9 @@ exports.addFullEmployee = async (data) => {
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
-    console.log("[addFullEmployee] began transaction");
 
     const password = crypto.randomBytes(8).toString("hex");
     const hash = await bcrypt.hash(password, 10);
-    console.log("[addFullEmployee] generated temp password & hash");
 
     const [coreRes] = await conn.execute(queries.ADD_EMPLOYEE_CORE, [
       data.first_name,
@@ -142,13 +137,11 @@ exports.addFullEmployee = async (data) => {
       data.phone_number,
       data.dob,
     ]);
-    console.log("[addFullEmployee] core insert result:", coreRes);
 
     const [[{ employee_id: eid }]] = await conn.execute(
       `SELECT employee_id FROM employees WHERE email = ?`,
       [data.email]
     );
-    console.log("[addFullEmployee] new employee_id:", eid);
 
     const personalFileKeys = [
       "spouse_gov_doc_url",
@@ -168,7 +161,6 @@ exports.addFullEmployee = async (data) => {
       if (k in data) data[k] = arrayToJsonOrNull(data[k]);
     });
 
-    console.log("[addFullEmployee] inserting personal details");
     await conn.execute(queries.ADD_EMPLOYEE_PERSONAL, [
       eid,
       data.address || null,
@@ -214,7 +206,6 @@ exports.addFullEmployee = async (data) => {
       data.child3_gov_doc_url || null,
     ]);
 
-    console.log("[addFullEmployee] inserting education details");
     await conn.execute(queries.ADD_EMPLOYEE_EDU, [
       eid,
       data.tenth_institution || null,
@@ -256,7 +247,6 @@ exports.addFullEmployee = async (data) => {
       }
     }
 
-    console.log("[addFullEmployee] inserting professional details");
     await conn.execute(queries.ADD_EMPLOYEE_PRO, [
       eid,
       data.domain || null,
@@ -270,7 +260,6 @@ exports.addFullEmployee = async (data) => {
       arrayToJsonOrNull(data.resume_url || data.resume || data.resume_urls),
     ]);
 
-    console.log("[addFullEmployee] inserting other document records");
     const otherDocsRaw = data.other_docs_urls || data.other_docs || null;
     const otherDocs = ensureArrayField(otherDocsRaw);
     if (otherDocs.length) {
@@ -279,7 +268,6 @@ exports.addFullEmployee = async (data) => {
       }
     }
 
-    console.log("[addFullEmployee] inserting bank details");
     const fullName = `${data.first_name} ${data.last_name}`.trim();
     await conn.execute(queries.ADD_EMPLOYEE_BANK, [
       eid,
@@ -290,7 +278,6 @@ exports.addFullEmployee = async (data) => {
       data.branch_name || null,
     ]);
 
-    console.log("[addFullEmployee] inserting experience entries");
     if (Array.isArray(data.experience)) {
       for (let exp of data.experience) {
         const docUrls = exp.doc_urls || exp.files || exp.doc || null;
@@ -306,10 +293,8 @@ exports.addFullEmployee = async (data) => {
     }
 
     await conn.commit();
-    console.log("[addFullEmployee] committed transaction");
 
     try {
-      console.log("[addFullEmployee] sending reset email to:", data.email);
       const mailRes = await sendResetEmail(
         data.email,
         `${data.first_name} ${data.last_name}`
@@ -328,8 +313,6 @@ exports.addFullEmployee = async (data) => {
           );
         }
       }
-
-      console.log("[addFullEmployee] reset email sent");
     } catch (mailErr) {
       console.warn(
         "[addFullEmployee] warning: reset‐email failed — not rolling back:",
@@ -361,22 +344,18 @@ exports.addFullEmployee = async (data) => {
         relErr && (relErr.stack || relErr)
       );
     }
-    console.log("[addFullEmployee] ⇒ end");
   }
 };
 
 exports.editFullEmployee = async (data) => {
-  console.log("[editFullEmployee] ⇒ start", { employee_id: data.employee_id });
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
-    console.log("[editFullEmployee] began transaction");
 
     const eid = data.employee_id;
 
     const [existingRows] = await conn.execute(queries.GET_FULL_EMPLOYEE, [eid]);
     const existing = existingRows && existingRows[0] ? existingRows[0] : {};
-    console.log("[editFullEmployee] loaded existing row for fallback");
 
     const hasKey = (k) => Object.prototype.hasOwnProperty.call(data, k);
 
@@ -586,7 +565,6 @@ exports.editFullEmployee = async (data) => {
         }
       }
     } else {
-      console.log("[editFullEmployee] skipping additional_certs (no key)");
     }
 
     const chosenResume = (() => {
@@ -625,7 +603,6 @@ exports.editFullEmployee = async (data) => {
         }
       }
     } else {
-      console.log("[editFullEmployee] skipping other_docs (no key)");
     }
 
     const fullName = `${pick("first_name") || existing.first_name || ""} ${
@@ -667,11 +644,9 @@ exports.editFullEmployee = async (data) => {
         ]);
       }
     } else {
-      console.log("[editFullEmployee] skipping experience (no key)");
     }
 
     await conn.commit();
-    console.log("[editFullEmployee] committed");
   } catch (err) {
     await conn.rollback();
     console.error("[editFullEmployee] error:", err);
@@ -772,11 +747,6 @@ exports.searchEmployees = async (search, fromDate, toDate) => {
       params.push(formattedToDate);
     }
 
-    console.log("🔍 Executing Query:", query);
-    console.log("🕒 From Date:", formattedFromDate);
-    console.log("🕒 To Date:", formattedToDate);
-    console.log("📌 Query Parameters:", params);
-
     const [rows] = await db.execute(query, params);
     return rows;
   } catch (error) {
@@ -860,12 +830,10 @@ exports.assignSupervisor = async (employeeId, supervisorId, startDate) => {
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
-    // 1) close existing
     await conn.execute(queries.UPDATE_SUPERVISOR_ASSIGNMENT_END, [
       startDate,
       employeeId,
     ]);
-    // 2) add new
     const [addRes] = await conn.execute(queries.ADD_SUPERVISOR_ASSIGNMENT, [
       employeeId,
       supervisorId,

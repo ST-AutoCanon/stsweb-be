@@ -12,8 +12,6 @@ const getFinancialYear = (invoiceDate) => {
 
   const fy = `${String(startYear).slice(2)}-${String(endYear).slice(2)}`;
 
-  console.log("Financial Year (Raw):", fy);
-
   return fy
     .normalize("NFKD")
     .replace(/[^\d-]/g, "")
@@ -149,12 +147,10 @@ const createInvoice = async (invoiceData) => {
   const connection = await db.getConnection();
 
   try {
-    console.log("Generating Invoice Number...");
     const invoiceNo = await generateInvoiceNo(
       invoiceData.invoiceDate,
       invoiceData.invoiceType
     );
-    console.log("Generated Invoice No:", invoiceNo);
 
     const [results] = await connection.execute(invoiceQueries.INSERT_INVOICE, [
       invoiceData.projectId,
@@ -220,7 +216,6 @@ const updateInvoice = async (id, invoiceData) => {
     invoiceQueries.UPDATE_INVOICE_BASIC,
     basicValues
   );
-  console.log("Basic invoice update executed. Results:", basicResults);
 
   return await getInvoiceById(id);
 };
@@ -294,77 +289,41 @@ const updateInvoiceExtra = async (id, invoiceData) => {
 const updateSequence = async (invoiceType) => {
   const connection = await db.getConnection();
   try {
-    console.log(
-      "[updateSequence] Starting updateSequence for invoiceType:",
-      invoiceType
-    );
-
     const today = new Date();
     const financialYear = getFinancialYear(today);
-    console.log("[updateSequence] Financial Year (Raw):", financialYear);
 
     const cleanedFinancialYear = financialYear.trim();
-    console.log(
-      "[updateSequence] Cleaned Financial Year:",
-      cleanedFinancialYear
-    );
-
-    console.log(
-      "[updateSequence] Cleaned Financial Year Length:",
-      cleanedFinancialYear.length
-    );
 
     const cleanInvoiceType = invoiceType.toString().trim().toLowerCase();
-    console.log("[updateSequence] Cleaned Invoice Type:", cleanInvoiceType);
 
-    console.log("[updateSequence] Fetching next available sequence...");
     const [existing] = await connection.execute(
       invoiceQueries.GET_NEXT_SEQUENCE,
       [cleanInvoiceType, cleanedFinancialYear]
     );
 
     if (existing.length === 0) {
-      console.log(
-        "[updateSequence] No existing sequence found, inserting initial sequence."
-      );
     } else {
-      console.log(
-        "[updateSequence] Existing sequence found:",
-        existing[0]?.next_sequence || 1
-      );
     }
 
     const nextSequence = existing[0]?.next_sequence || 1;
-    console.log("[updateSequence] Next Sequence: ", nextSequence);
 
-    console.log("[updateSequence] Updating sequence in the database...");
     const [updateResult] = await connection.execute(
       invoiceQueries.UPDATE_SEQUENCE,
       [nextSequence, cleanInvoiceType, cleanedFinancialYear]
     );
 
-    console.log("[updateSequence] Sequence update result:", updateResult);
-
     if (updateResult.affectedRows === 0) {
-      console.log(
-        "[updateSequence] Affected rows is 0, inserting initial sequence..."
-      );
       await connection.execute(invoiceQueries.INSERT_INITIAL_SEQUENCE, [
         cleanInvoiceType,
         cleanedFinancialYear,
         nextSequence,
       ]);
-      console.log("[updateSequence] Initial sequence inserted.");
 
-      console.log(
-        "[updateSequence] Now updating the sequence after initial insertion..."
-      );
       await connection.execute(invoiceQueries.UPDATE_SEQUENCE, [
         nextSequence,
         cleanInvoiceType,
         cleanedFinancialYear,
       ]);
-      console.log("[updateSequence] Sequence updated after insertion.");
     }
 
     return { updatedSequence: nextSequence };
@@ -372,7 +331,6 @@ const updateSequence = async (invoiceType) => {
     console.error("[updateSequence] Error:", err);
     throw new Error("Failed to update sequence: " + err.message);
   } finally {
-    console.log("[updateSequence] Releasing connection.");
     connection.release();
   }
 };

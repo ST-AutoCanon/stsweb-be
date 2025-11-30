@@ -1,6 +1,5 @@
 const invoiceService = require("../services/invoiceService");
 
-// GET /invoices?projectId=...
 const getInvoices = async (req, res) => {
   const { projectId } = req.query;
   if (!projectId) {
@@ -14,11 +13,8 @@ const getInvoices = async (req, res) => {
   }
 };
 
-// POST /invoices
 const createInvoice = async (req, res) => {
-  console.log("Reached createInvoice handler");
   const invoiceData = req.body;
-  console.log("invoice data", invoiceData);
 
   if (!invoiceData.projectId || !invoiceData.invoiceDate) {
     return res
@@ -28,7 +24,6 @@ const createInvoice = async (req, res) => {
 
   try {
     const invoice = await invoiceService.createInvoice(invoiceData);
-    console.log("Invoice created:", invoice);
     res.status(201).json(invoice);
   } catch (error) {
     console.error("createInvoice error", error);
@@ -51,7 +46,6 @@ const updateInvoice = async (req, res) => {
 const updateInvoiceExtra = async (req, res) => {
   try {
     const invoiceData = req.body;
-    console.log("Received invoice update body:", invoiceData);
 
     const updatedInvoice = await invoiceService.updateInvoiceExtra(
       req.params.id,
@@ -60,14 +54,12 @@ const updateInvoiceExtra = async (req, res) => {
 
     res.json(updatedInvoice);
   } catch (err) {
-    console.log(err);
     res.status(500).json({ error: err.message });
   }
 };
 
 const generateTemplateInvoice = async (req, res) => {
   const { invoiceType } = req.query;
-  console.log(req.query);
   if (!invoiceType) {
     return res.status(400).json({ error: "invoiceType is required" });
   }
@@ -82,14 +74,12 @@ const generateTemplateInvoice = async (req, res) => {
 };
 
 const updateInvoiceSequence = async (req, res) => {
-  // invoiceType comes from the route parameter. Example: "tax", "proforma", "quotation"
   const { invoiceType } = req.params;
   if (!invoiceType) {
     return res.status(400).json({ error: "invoiceType is required" });
   }
 
   try {
-    // Call the service to update the sequence for today's financial year
     const result = await invoiceService.updateSequence(invoiceType);
     res.json({ message: "Sequence updated successfully", ...result });
   } catch (error) {

@@ -46,12 +46,10 @@ router.get("/pjattachments/:filename", (req, res) => {
 router.get("/projects/:id/attachments/download", async (req, res) => {
   try {
     const projectId = req.params.id;
-    // Use projectService.getProjectById directly
     const project = await projectService.getProjectById(projectId);
     if (!project) {
       return res.status(404).send("Project not found");
     }
-    // Ensure attachments is an array. It might be stored as a JSON string.
     let attachments = [];
     if (typeof project.attachment_url === "string") {
       try {
@@ -67,17 +65,14 @@ router.get("/projects/:id/attachments/download", async (req, res) => {
       return res.status(404).send("No attachments found for this project.");
     }
 
-    // Set headers for ZIP download
     res.attachment(`project-${projectId}-attachments.zip`);
 
-    // Create a zip archive and pipe it to the response
     const archive = archiver("zip", { zlib: { level: 9 } });
     archive.on("error", (err) => {
       throw err;
     });
     archive.pipe(res);
 
-    // Add each attachment file to the archive.
     attachments.forEach((fileName) => {
       const filePath = path.join(__dirname, "../../projects", fileName);
       archive.file(filePath, { name: fileName });

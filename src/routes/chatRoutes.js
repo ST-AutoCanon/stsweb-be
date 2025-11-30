@@ -1,10 +1,8 @@
-// src/routes/chatRoutes.js
 const express = require("express");
 const router = express.Router();
 const simpleAuth = require("../middleware/simpleAuth");
 const chatHandler = require("../handlers/chatHandler");
 
-// apply on all /api/chat routes:
 router.use(simpleAuth);
 
 router.post("/rooms", chatHandler.createRoom);

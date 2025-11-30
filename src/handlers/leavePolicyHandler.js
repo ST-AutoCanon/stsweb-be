@@ -1,4 +1,3 @@
-// src/handlers/leavePolicyHandler.js
 const LeavePolicyService = require("../services/leavePolicyService");
 const ErrorHandler = require("../utils/errorHandler");
 
@@ -300,7 +299,6 @@ class LeavePolicyHandler {
 
 exports.autoExtendHandler = async (req, res) => {
   try {
-    // actorId: prefer header x-employee-id, fallback to body.actorId or "system"
     const actorFromHeader = req.headers["x-employee-id"];
     const actorId = actorFromHeader || req.body?.actorId || "system";
     const extensionDays = Number(req.body?.extensionDays) || 90;

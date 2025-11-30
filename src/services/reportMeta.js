@@ -1,4 +1,3 @@
-// src/services/reportMeta.js
 const escapeHtml = (s) => {
   if (s === undefined || s === null) return "";
   return String(s)
@@ -8,18 +7,13 @@ const escapeHtml = (s) => {
     .replace(/"/g, "&quot;");
 };
 
-/**
- * formatTimestampAsiaKolkata()
- * Returns timestamp string in "YYYY-MM-DD HH:mm:ss (Asia/Kolkata)".
- */
 function formatTimestampAsiaKolkata(d = new Date()) {
-  // produce a localized string then reformat to YYYY-MM-DD HH:mm:ss
   const s = d.toLocaleString("en-GB", {
     timeZone: "Asia/Kolkata",
     hour12: false,
-  }); // "DD/MM/YYYY, HH:MM:SS"
+  });
   const parts = s.split(",").map((p) => p.trim());
-  const datePart = parts[0]; // DD/MM/YYYY
+  const datePart = parts[0];
   const timePart = parts[1] || "";
   const dp = datePart.split("/");
   if (dp.length === 3) {
@@ -32,11 +26,6 @@ function formatTimestampAsiaKolkata(d = new Date()) {
   return `${s} (Asia/Kolkata)`;
 }
 
-/**
- * generateMetaHtml(meta)
- * meta: { status?, departmentName?, employeeName? }
- * Returns a small HTML block (with inline CSS) that can be inserted above the table.
- */
 function generateMetaHtml(meta = {}) {
   const status =
     meta.status === null || meta.status === undefined
@@ -53,7 +42,6 @@ function generateMetaHtml(meta = {}) {
 
   const timestamp = formatTimestampAsiaKolkata();
 
-  // Only render items that exist
   const leftItems = [];
   if (status)
     leftItems.push(
@@ -68,7 +56,6 @@ function generateMetaHtml(meta = {}) {
       `<div class="meta-item"><strong>Employee:</strong> ${employee}</div>`
     );
 
-  // if nothing, you may still want to show timestamp only
   const leftHtml = leftItems.length
     ? leftItems.join("")
     : `<div class="meta-item"><em>No filters</em></div>`;

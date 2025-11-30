@@ -2,7 +2,6 @@ const db = require("../config");
 const queries = require("../constants/leaveQueries");
 const LeavePolicyService = require("./leavePolicyService");
 
-/* ---------- helpers ---------- */
 const toLocalDateString = (dateInput) => {
   if (!dateInput) return "";
   const d = new Date(dateInput);
@@ -44,7 +43,6 @@ const computeInclusiveDays = (startDateStr, endDateStr, h_f_day = "") => {
   return dayCount;
 };
 
-/* ---------- read helpers ---------- */
 const getLeaveQueries = async (filters = {}) => {
   const { status, search, from_date, to_date } = filters;
   try {
@@ -73,7 +71,6 @@ const getLeaveQueries = async (filters = {}) => {
     if (whereConditions.length > 0)
       query += ` AND ${whereConditions.join(" AND ")}`;
 
-    console.log("Executing SQL:", query, params);
     const [rows] = await db.execute(query, params);
     rows.forEach((r) => {
       r.start_date = toLocalDateString(r.start_date);
@@ -89,7 +86,6 @@ const getLeaveQueries = async (filters = {}) => {
   }
 };
 
-/* ---------- updateLeaveRequest (transactional) ---------- */
 const updateLeaveRequest = async (payload) => {
   const {
     leaveId,
@@ -101,16 +97,11 @@ const updateLeaveRequest = async (payload) => {
     preserved_leave_days = null,
     actorId = null,
     total_days = null,
-    // NOTE: we no longer trust client-supplied `is_defaulted` directly.
-    // The client can send a raw value, but server will only honor it when
-    // payload.__internal_system === true.
     is_defaulted: raw_is_defaulted = false,
   } = payload;
 
   const bind = (v) => (v === undefined ? null : v);
 
-  // Trust gate: client may include is_defaulted, but server honours it
-  // ONLY if caller also provides explicit internal marker __internal_system === true.
   const providedInternal = payload && payload.__internal_system === true;
   const is_defaulted = providedInternal ? Boolean(raw_is_defaulted) : false;
   if (raw_is_defaulted && !providedInternal) {
@@ -122,12 +113,6 @@ const updateLeaveRequest = async (payload) => {
   let conn = null;
   let transactionStarted = false;
   try {
-    console.log("[updateLeaveRequest] called with payload:", payload);
-
-    // Load leave (pool non-transactional read)
-    console.log("[updateLeaveRequest] executing GET_LEAVE_BY_LEAVEID", [
-      leaveId,
-    ]);
     const [leaveRows] = await db.execute(queries.GET_LEAVE_BY_LEAVEID, [
       leaveId,
     ]);
@@ -137,7 +122,6 @@ const updateLeaveRequest = async (payload) => {
       throw err;
     }
     const leave = leaveRows[0];
-    console.log("[updateLeaveRequest] loaded leave:", leave);
 
     const currentStatus = (leave.status || "").toLowerCase();
     if (currentStatus && currentStatus !== "pending") {
@@ -148,13 +132,11 @@ const updateLeaveRequest = async (payload) => {
       throw err;
     }
 
-    // validate totals
     const computedTotalDays = computeInclusiveDays(
       leave.start_date,
       leave.end_date,
       leave.H_F_day
     );
-    console.log("[updateLeaveRequest] computedTotalDays:", computedTotalDays);
     const EPS = 1e-6;
     let totalDays;
     if (
@@ -174,13 +156,8 @@ const updateLeaveRequest = async (payload) => {
       totalDays = computedTotalDays;
     }
 
-    // read remaining balance (non-transactional)
     let remaining = 0;
     try {
-      console.log("[updateLeaveRequest] selecting remaining balance", [
-        leave.employee_id,
-        leave.leave_type,
-      ]);
       const [balRows] = await db.execute(
         `SELECT remaining FROM employee_leave_balances WHERE employee_id = ? AND leave_type = ? LIMIT 1`,
         [leave.employee_id, leave.leave_type]
@@ -194,19 +171,11 @@ const updateLeaveRequest = async (payload) => {
         throw err;
       }
     }
-    console.log("[updateLeaveRequest] remaining balance:", remaining);
 
-    // Approved branch: do all writes in a transaction
     if (status === "Approved") {
       const c = Number(compensated_days) || 0;
       const d = Number(deducted_days) || 0;
       const l = Number(loss_of_pay_days) || 0;
-      console.log("[updateLeaveRequest] incoming splits", {
-        compensated: c,
-        deducted: d,
-        lop: l,
-        is_defaulted,
-      });
 
       if (Math.abs(c + d + l - totalDays) > EPS) {
         const err = new Error(
@@ -216,13 +185,11 @@ const updateLeaveRequest = async (payload) => {
         throw err;
       }
 
-      // acquire a dedicated connection for transaction
       conn = await db.getConnection();
       try {
         await conn.beginTransaction();
         transactionStarted = true;
       } catch (e) {
-        // if beginTransaction fails, release connection and rethrow
         try {
           conn.release();
         } catch (_) {}
@@ -230,10 +197,8 @@ const updateLeaveRequest = async (payload) => {
       }
 
       try {
-        // prepare write values
         const c_write = Number(c.toFixed(2));
         const d_write = Number(d.toFixed(2));
-        // if is_defaulted -> do NOT write the LoP into leavequeries.loss_of_pay_days (write zero)
         const l_write = Number(l.toFixed(2));
         const preserved_write =
           preserved_leave_days === null
@@ -241,35 +206,24 @@ const updateLeaveRequest = async (payload) => {
             : Number(Number(preserved_leave_days).toFixed(2));
         const isDefaultFlagNum = is_defaulted ? 1 : 0;
 
-        // UPDATE leave row (order must match query)
         const paramsUpdateLeave = [
           bind(status),
           bind(comments),
           bind(c_write),
           bind(d_write),
-          // if is_defaulted -> write zero to loss_of_pay_days; otherwise write actual l_write
           bind(isDefaultFlagNum ? 0 : l_write),
           bind(preserved_write),
           bind(isDefaultFlagNum),
           bind(leaveId),
         ];
-        console.log(
-          "[updateLeaveRequest] executing UPDATE_LEAVE_STATUS_EXTENDED with params:",
-          paramsUpdateLeave
-        );
+
         await conn.execute(
           queries.UPDATE_LEAVE_STATUS_EXTENDED,
           paramsUpdateLeave
         );
 
-        // adjust leave balance if there are deducted days
         if (d_write > EPS) {
           try {
-            console.log("[updateLeaveRequest] executing ADJUST_LEAVE_BALANCE", [
-              d_write,
-              leave.employee_id,
-              leave.leave_type,
-            ]);
             await conn.execute(queries.ADJUST_LEAVE_BALANCE, [
               d_write,
               leave.employee_id,
@@ -286,14 +240,7 @@ const updateLeaveRequest = async (payload) => {
           }
         }
 
-        // Insert LoP record — only if actual LoP > 0 AND not defaulted.
         if (!isDefaultFlagNum && l_write > EPS) {
-          console.log("[updateLeaveRequest] executing INSERT_LOP_RECORD", [
-            leave.employee_id,
-            leaveId,
-            l_write,
-            `LoP for leave ${leaveId}`,
-          ]);
           await conn.execute(queries.INSERT_LOP_RECORD, [
             leave.employee_id,
             leaveId,
@@ -301,15 +248,8 @@ const updateLeaveRequest = async (payload) => {
             `LoP for leave ${leaveId}`,
           ]);
         } else {
-          console.log(
-            "[updateLeaveRequest] skipping INSERT_LOP_RECORD because is_defaulted =",
-            isDefaultFlagNum,
-            "or l_write =",
-            l_write
-          );
         }
 
-        // Insert audit. If audit table missing -> non-fatal warning.
         try {
           const auditPayload = {
             compensated_days: c_write,
@@ -319,12 +259,7 @@ const updateLeaveRequest = async (payload) => {
             is_defaulted: Boolean(isDefaultFlagNum),
           };
           const auditDetails = JSON.stringify(auditPayload);
-          console.log("[updateLeaveRequest] executing INSERT_LEAVE_AUDIT", [
-            leaveId,
-            actorId || "system",
-            `update:${status}`,
-            auditDetails,
-          ]);
+
           await conn.execute(queries.INSERT_LEAVE_AUDIT, [
             leaveId,
             actorId || "system",
@@ -335,7 +270,6 @@ const updateLeaveRequest = async (payload) => {
           if (auditErr && auditErr.code === "ER_NO_SUCH_TABLE") {
             console.warn("leave_audit missing — skipping audit insert.");
           } else {
-            // Unexpected audit failure should cause rollback
             console.error(
               "[updateLeaveRequest] audit insert failed (fatal):",
               auditErr && auditErr.message ? auditErr.message : auditErr
@@ -344,9 +278,7 @@ const updateLeaveRequest = async (payload) => {
           }
         }
 
-        // commit
         await conn.commit();
-        console.log("[updateLeaveRequest] transaction committed successfully");
       } catch (txErr) {
         console.error(
           "[updateLeaveRequest] transaction error, attempting rollback:",
@@ -355,7 +287,6 @@ const updateLeaveRequest = async (payload) => {
         try {
           if (transactionStarted && conn) {
             await conn.rollback();
-            console.log("[updateLeaveRequest] rollback successful");
           }
         } catch (rbErr) {
           console.error(
@@ -379,7 +310,6 @@ const updateLeaveRequest = async (payload) => {
         }
       }
 
-      // recompute monthly LOP outside transaction (best-effort)
       try {
         const leaveStart = parseDateOnly(leave.start_date);
         const leaveEnd = parseDateOnly(leave.end_date);
@@ -398,9 +328,6 @@ const updateLeaveRequest = async (payload) => {
             const month = cursor.getMonth() + 1;
             const year = cursor.getFullYear();
             try {
-              console.log(
-                `[updateLeaveRequest] recomputing monthly LOP for ${leave.employee_id} for ${month}-${year}`
-              );
               await LeavePolicyService.computeAndStoreMonthlyLOP(
                 leave.employee_id,
                 month,
@@ -430,25 +357,19 @@ const updateLeaveRequest = async (payload) => {
 
       return;
     } else {
-      // Rejection or other non-Approved: update non-transactionally
-      // Use the computed is_defaulted flag so DB accurately reflects server-trusted value.
       const isDefaultFlagNum = is_defaulted ? 1 : 0;
 
       const paramsReject = [
         bind(status),
         bind(comments),
-        bind(0), // compensated
-        bind(0), // deducted
-        bind(0), // loss_of_pay - rejected path sets 0
+        bind(0),
+        bind(0),
+        bind(0),
         bind(preserved_leave_days),
-        // is_defaulted as determined by server (only true for trusted internal calls)
         bind(isDefaultFlagNum),
         bind(leaveId),
       ];
-      console.log(
-        "[updateLeaveRequest] executing UPDATE_LEAVE_STATUS_EXTENDED (non-approved) with params:",
-        paramsReject
-      );
+
       await db.execute(queries.UPDATE_LEAVE_STATUS_EXTENDED, paramsReject);
       return;
     }
@@ -459,31 +380,21 @@ const updateLeaveRequest = async (payload) => {
     );
     throw err;
   } finally {
-    // final defensive release if something left open
     try {
       if (conn) {
-        // if transaction still open try to rollback
         try {
           if (transactionStarted) {
             await conn.rollback();
             transactionStarted = false;
           }
-        } catch (rb) {
-          // ignore
-        }
+        } catch (rb) {}
         try {
           conn.release();
-        } catch (releaseErr) {
-          // ignore
-        }
+        } catch (releaseErr) {}
       }
-    } catch (e) {
-      // ignore final release failures
-    }
+    } catch (e) {}
   }
 };
-
-/* ---------- remaining functions (unchanged) ---------- */
 
 const submitLeaveRequest = async ({
   employeeId,
@@ -595,7 +506,6 @@ const getLeaveRequests = async (
     if (!/\border\s+by\b/i.test(finalQuery))
       finalQuery += " ORDER BY lq.created_at DESC";
     const finalParams = initialParams.concat(filterParams);
-    console.log("[getLeaveRequests] SQL:", finalQuery, "params:", finalParams);
     const [rows] = await db.execute(finalQuery, finalParams);
     rows.forEach((row) => {
       row.start_date = toLocalDateString(row.start_date);
@@ -738,7 +648,6 @@ const constructWhereClause = (
 
 const getLeaveQueriesForTeamLead = async (filters = {}, teamLeadId) => {
   try {
-    // fetch professional profile for requester
     const [profRows] = await db.execute(queries.GET_EMP_PROF_BY_ID, [
       teamLeadId,
     ]);
@@ -747,7 +656,6 @@ const getLeaveQueriesForTeamLead = async (filters = {}, teamLeadId) => {
     const prof = profRows[0];
     const roleName = (prof.role || "").toString().trim().toLowerCase();
 
-    // define identity sets
     const supervisorOrAbove = new Set([
       "supervisor",
       "manager",
@@ -768,7 +676,6 @@ const getLeaveQueriesForTeamLead = async (filters = {}, teamLeadId) => {
 
     const employeeIdSet = new Set();
 
-    // add direct reports if requester is supervisor or above
     if (supervisorOrAbove.has(roleName)) {
       const [directRows] = await db.execute(
         queries.GET_EMPLOYEES_BY_SUPERVISOR,
@@ -779,7 +686,6 @@ const getLeaveQueriesForTeamLead = async (filters = {}, teamLeadId) => {
       });
     }
 
-    // add department employees if requester is manager-or-above and department exists
     if (managerOrAbove.has(roleName) && prof.department_id) {
       try {
         const [deptRows] = await db.execute(
@@ -797,10 +703,7 @@ const getLeaveQueriesForTeamLead = async (filters = {}, teamLeadId) => {
       }
     }
 
-    // IMPORTANT: ensure supervisors do not see their own leave in the "team" view.
-    // Only manager-or-above should see their own leaves in the team listing.
     if (!managerOrAbove.has(roleName)) {
-      // remove the teamLeadId from the set if present
       if (employeeIdSet.has(String(teamLeadId))) {
         employeeIdSet.delete(String(teamLeadId));
         console.debug(
@@ -808,13 +711,11 @@ const getLeaveQueriesForTeamLead = async (filters = {}, teamLeadId) => {
         );
       }
     } else {
-      // If manager or above, ensure the manager can see themselves (keep teamLeadId)
       employeeIdSet.add(String(teamLeadId));
     }
 
     const employeeIds = Array.from(employeeIdSet);
 
-    // build where clause and params
     const { whereConditions, params } = constructWhereClause(
       filters,
       employeeIds,
@@ -823,7 +724,6 @@ const getLeaveQueriesForTeamLead = async (filters = {}, teamLeadId) => {
     const query =
       queries.GET_LEAVE_QUERIES_FOR_TEAM +
       (whereConditions.length ? " AND " + whereConditions.join(" AND ") : "");
-    console.log("[getLeaveQueriesForTeamLead] SQL:", query, "params:", params);
     const [rows] = await db.execute(query, params);
     rows.forEach((row) => {
       row.start_date = toLocalDateString(row.start_date);
@@ -841,7 +741,7 @@ const getLeaveQueriesForTeamLead = async (filters = {}, teamLeadId) => {
 
 module.exports = {
   getLeaveQueries,
-  updateLeaveRequest, // ensure you export the full updateLeaveRequest implemented above
+  updateLeaveRequest,
   submitLeaveRequest,
   getLeaveRequests,
   editLeaveRequest,

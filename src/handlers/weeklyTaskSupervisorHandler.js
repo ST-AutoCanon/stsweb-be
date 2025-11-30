@@ -1,4 +1,3 @@
-
 const {
   fetchEmployeesBySupervisor,
   fetchAllEmployees,
@@ -15,7 +14,9 @@ const getEmployees = async (req, res) => {
   try {
     const supervisorId = req.headers["x-employee-id"];
     if (!supervisorId) {
-      return res.status(400).json({ error: "Supervisor ID is required in headers" });
+      return res
+        .status(400)
+        .json({ error: "Supervisor ID is required in headers" });
     }
     const employees = await fetchEmployeesBySupervisor(supervisorId);
     res.json({ success: true, employees });
@@ -75,7 +76,9 @@ const createTask = async (req, res) => {
   try {
     const taskData = req.body;
     const newTask = await insertNewTask(taskData);
-    res.status(201).json({ success: true, message: "Task created successfully", newTask });
+    res
+      .status(201)
+      .json({ success: true, message: "Task created successfully", newTask });
   } catch (error) {
     console.error("Error creating task:", error);
     res.status(500).json({ error: "Internal server error" });
@@ -84,9 +87,8 @@ const createTask = async (req, res) => {
 
 const getConfig = async (req, res) => {
   try {
-    const rows = await fetchConfig(); // SELECT `key`, `value` FROM config
+    const rows = await fetchConfig();
 
-    // Convert row array → key-value object
     const configData = rows.reduce((acc, row) => {
       acc[row.key] = row.value;
       return acc;
@@ -94,16 +96,14 @@ const getConfig = async (req, res) => {
 
     res.json({
       success: true,
-      config: configData, // ✅ Clean object
-      raw: rows          // Optional - keep raw array for debugging
+      config: configData,
+      raw: rows,
     });
-
   } catch (error) {
     console.error("Error fetching config:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 };
-
 
 const updateConfigValue = async (req, res) => {
   try {

@@ -1,5 +1,3 @@
-
-
 const GET_EMPLOYEES_BY_SUPERVISOR = `
   SELECT 
     sup.employee_id AS supervisor_id,

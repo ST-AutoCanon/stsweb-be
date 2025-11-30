@@ -1,5 +1,3 @@
-
-
 module.exports = {
   GET_EMPLOYEES_BY_SUPERVISOR: `
     SELECT 
@@ -101,7 +99,7 @@ module.exports = {
       parent_task_id
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
   `,
- GET_CONFIG: `
+  GET_CONFIG: `
   SELECT \`key\`, \`value\` FROM sukalpadata.config;
 `,
 

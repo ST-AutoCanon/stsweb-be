@@ -1,6 +1,3 @@
-// Raw SQL queries for salary_calculation_period table
-// Use parameterized queries to avoid SQL injection
-
 const ADD_SALARY_PERIOD = `
   INSERT INTO salary_calculation_period (cutoff_date) VALUES (?) 
   ON DUPLICATE KEY UPDATE cutoff_date = VALUES(cutoff_date), updated_at = CURRENT_TIMESTAMP

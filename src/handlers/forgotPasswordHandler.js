@@ -8,20 +8,13 @@ const ErrorHandler = require("../utils/errorHandler");
 
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
-/**
- * @param {object} req - The HTTP request object containing the email.
- * @param {object} res - The HTTP response object used to send the response to the client.
- */
 exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
-    console.log("Forgot password requested for:", email);
 
-    // 1. Try to load an ACTIVE employee by email
     const employee = await getEmployeeByEmail(email);
     if (!employee) {
       console.warn("No active user found for:", email);
-      // generateErrorResponse returns { statusCode, message, ... }
       const notFound = ErrorHandler.generateErrorResponse(
         404,
         "No active account found with that email."
@@ -33,15 +26,11 @@ exports.forgotPassword = async (req, res) => {
       `${employee.first_name || ""} ${employee.last_name || ""}`.trim() ||
       "User";
 
-    // 2. Generate a unique reset token
     const resetToken = crypto.randomBytes(32).toString("hex");
     const tokenExpiry = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000); // 3 days
 
-    // 3. Save token to DB
     await saveResetToken(email, resetToken, tokenExpiry);
-    console.log("Reset token saved for:", email);
 
-    // 4. Prepare email
     const resetLink = `${process.env.FRONTEND_URL}/ResetPassword?token=${resetToken}`;
     const emailContent = {
       to: email,
@@ -80,10 +69,8 @@ info@sukalpatech.com`,
 
     try {
       await sgMail.send(emailContent);
-      console.log("Reset email sent successfully to:", email);
     } catch (sgErr) {
       console.error("SendGrid send failed:", sgErr.response?.body || sgErr);
-      // wrap or rethrow so your outer catch handles it
       throw ErrorHandler.generateErrorResponse(
         502,
         "Failed to send reset email. Please try again later."
@@ -97,12 +84,10 @@ info@sukalpatech.com`,
   } catch (err) {
     console.error("Forgot password error:", err);
 
-    // If we threw an ErrorHandler response, pass it through
     if (err.statusCode) {
       return res.status(err.statusCode).json(err);
     }
 
-    // Otherwise, generic 500
     const serverError = ErrorHandler.generateErrorResponse(
       500,
       "An internal error occurred. Please try again later."
