@@ -1,9 +1,5 @@
-// src/services/reportUtils.js
 const db = require("../config");
 
-/**
- * Count placeholders (?) that are not inside string literals.
- */
 function countPlaceholders(sql) {
   if (!sql || typeof sql !== "string") return 0;
   let inSingle = false;
@@ -22,9 +18,6 @@ function countPlaceholders(sql) {
   return count;
 }
 
-/**
- * Simple sanitizer: remove accidental trailing commas and fix common small mistakes.
- */
 function sanitizeSql(sql) {
   if (!sql || typeof sql !== "string") return sql;
   let s = sql;
@@ -37,9 +30,6 @@ function sanitizeSql(sql) {
   return s;
 }
 
-/**
- * Expand array parameters in params into multiple '?' placeholders in SQL and flatten params.
- */
 function expandArrayParams(sql, params) {
   if (!Array.isArray(params) || params.length === 0) return { sql, params };
 
@@ -94,19 +84,10 @@ function expandArrayParams(sql, params) {
   return { sql: newSql, params: newParams };
 }
 
-/**
- * Sleep helper
- */
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/**
- * fetchRows
- * - Executes SQL with params using configured DB client (db.query or db.execute).
- * - Adds retries on transient errors (ETIMEDOUT/ECONNRESET/EPIPE/ENOTFOUND).
- * - Expands array params into (?,?,?) sequences.
- */
 async function fetchRows(rawSql, rawParams = []) {
   if (!rawSql || typeof rawSql !== "string") {
     console.error("[reportUtils] fetchRows called with invalid SQL:", rawSql);
@@ -148,18 +129,12 @@ async function fetchRows(rawSql, rawParams = []) {
     }
   } catch (e) {}
 
-  // retry logic
   const maxRetries = 2;
   let attempt = 0;
   let lastErr = null;
 
   while (attempt <= maxRetries) {
     try {
-      console.log(
-        "[reportUtils] Executing SQL (preview):",
-        (sql || "").slice(0, 1000)
-      );
-      console.log("[reportUtils] Params:", JSON.stringify(params));
       const t0 = Date.now();
 
       let res;
@@ -193,24 +168,14 @@ async function fetchRows(rawSql, rawParams = []) {
 
       const took = Date.now() - t0;
       if (Array.isArray(res) && res.length > 0 && Array.isArray(res[0])) {
-        console.log(
-          `[reportUtils] SQL OK — rows: ${res[0].length} (took ${took} ms)`
-        );
         return res[0];
       }
       if (Array.isArray(res)) {
-        console.log(
-          `[reportUtils] SQL OK — rows: ${res.length} (took ${took} ms)`
-        );
         return res;
       }
       if (res && typeof res === "object" && Array.isArray(res.rows)) {
-        console.log(
-          `[reportUtils] SQL OK — rows: ${res.rows.length} (took ${took} ms)`
-        );
         return res.rows;
       }
-      console.log(`[reportUtils] SQL OK — rows: 0 (took ${took} ms)`);
       return [];
     } catch (err) {
       lastErr = err;

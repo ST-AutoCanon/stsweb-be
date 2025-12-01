@@ -1,5 +1,3 @@
-
-
 const INSERT_VENDOR = `
   INSERT INTO vendors (
     company_name, registered_address, city, state, pin_code, gst_number, pan_number, company_type,

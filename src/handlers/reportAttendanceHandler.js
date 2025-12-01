@@ -1,4 +1,3 @@
-// src/handlers/reportAttendanceHandler.js
 const reportService = require("../services/reportIndex");
 const {
   coerceToString,
@@ -10,25 +9,17 @@ const {
 } = require("../services/reportFilters");
 
 const db = require("../config");
-const mysql = require("mysql2"); // keep if you use mysql formatting elsewhere
+const mysql = require("mysql2");
 
-/**
- * dbExec - supports both promise-style and callback-style mysql clients.
- * - Sanitizes params (undefined -> null).
- * - Prefers db.query (promise or callback) and falls back to db.execute.
- * Returns [rows, fields] or throws.
- */
 async function dbExec(sql, params = []) {
   try {
     if (!Array.isArray(params)) params = [params];
-    // sanitize undefined -> null
     params = params.map((p) => (typeof p === "undefined" ? null : p));
 
-    // Prefer db.query (promise or callback)
     if (db && typeof db.query === "function") {
       const maybePromise = db.query(sql, params);
       if (maybePromise && typeof maybePromise.then === "function") {
-        const result = await maybePromise; // mysql2/promise pool.query returns [rows, fields]
+        const result = await maybePromise;
         if (Array.isArray(result)) return result;
         return [result, null];
       } else {
@@ -41,11 +32,10 @@ async function dbExec(sql, params = []) {
       }
     }
 
-    // Fallback to db.execute
     if (db && typeof db.execute === "function") {
       const maybePromise = db.execute(sql, params);
       if (maybePromise && typeof maybePromise.then === "function") {
-        const result = await maybePromise; // returns [rows, fields]
+        const result = await maybePromise;
         if (Array.isArray(result)) return result;
         return [result, null];
       } else {
@@ -68,10 +58,6 @@ async function dbExec(sql, params = []) {
   }
 }
 
-/**
- * Find employee id in request. Handles strings, numbers and JSON-stringified objects.
- * Returns a plain employee id string (e.g. "STS105") or null.
- */
 function findEmployeeIdInRequest(req) {
   const safe = (v) =>
     v === undefined || v === null ? null : String(v).trim() || null;
@@ -96,9 +82,7 @@ function findEmployeeIdInRequest(req) {
             null
           );
         }
-      } catch (e) {
-        // not JSON — ignore
-      }
+      } catch (e) {}
     }
     return s;
   };
@@ -128,9 +112,7 @@ function findEmployeeIdInRequest(req) {
             safe(p.email) ||
             null;
           if (extracted) return extracted;
-        } catch (e) {
-          // fallthrough
-        }
+        } catch (e) {}
       }
       if (candidate && !candidate.startsWith("{")) return candidate;
     }
@@ -185,9 +167,7 @@ function findEmployeeIdInRequest(req) {
           safe(payload.user_id) ||
           null;
         if (candidate) return candidate;
-      } catch (e) {
-        // ignore invalid token
-      }
+      } catch (e) {}
     }
   }
 
@@ -203,11 +183,6 @@ function findEmployeeIdInRequest(req) {
   return null;
 }
 
-/**
- * More tolerant local filter for attendance rows:
- * - accepts employeeId or departmentId/name
- * - compares numeric dept ids when possible, otherwise case-insensitive name match
- */
 function filterAttendanceRows(rows, employeeId, departmentId) {
   if (!Array.isArray(rows) || rows.length === 0) return [];
   if (!employeeId && !departmentId) return rows;
@@ -215,22 +190,18 @@ function filterAttendanceRows(rows, employeeId, departmentId) {
   const empIdStr = employeeId ? String(employeeId).trim() : null;
   const deptIdRaw = departmentId ? String(departmentId).trim() : null;
 
-  // detect if dept filter is numeric id or a name
   const deptFilterNum =
     deptIdRaw && /^-?\d+$/.test(deptIdRaw) ? Number(deptIdRaw) : null;
   const deptFilterName =
     deptFilterNum === null && deptIdRaw ? deptIdRaw.toLowerCase() : null;
 
   return rows.filter((r) => {
-    // normalize row employee id
     const rowEmpId =
       r.employee_id != null ? String(r.employee_id).trim() : null;
 
-    // normalize potential dept fields on the row (multiple shapes)
     let rowDeptId = null;
     let rowDeptName = null;
 
-    // common column names returned by your SQL/service
     if (r.department_id != null) rowDeptId = Number(r.department_id);
     if (r.pr_department_id != null) rowDeptId = Number(r.pr_department_id);
     if (r.departmentId != null) rowDeptId = Number(r.departmentId);
@@ -241,33 +212,25 @@ function filterAttendanceRows(rows, employeeId, departmentId) {
     if (!rowDeptName && r.department != null)
       rowDeptName = String(r.department).toLowerCase();
 
-    // employee filtering — strict
     if (empIdStr && rowEmpId !== empIdStr) return false;
 
-    // department filtering
     if (deptFilterNum !== null) {
-      // if filter is numeric, require rowDeptId to match
       if (rowDeptId == null) return false;
       if (Number(rowDeptId) !== Number(deptFilterNum)) return false;
       return true;
     } else if (deptFilterName !== null) {
-      // filter is a name — compare against rowDeptName or rowDeptId converted via depts table later
       if (rowDeptName && rowDeptName === deptFilterName) return true;
-      // also allow numeric rowDeptId if the caller passed a name that is numeric-like (rare)
       if (rowDeptId != null && String(rowDeptId) === deptIdRaw) return true;
       return false;
     }
 
-    // no department filter — row passed employee filter (or neither filter present)
     return true;
   });
 }
 
-// Example: robust function to fetch professional rows for a list of employee ids
 async function fetchEmployeeProfessionalRowsByIds(dbExecFn, empIds = []) {
   if (!Array.isArray(empIds) || empIds.length === 0) return [];
 
-  // columns we want
   const columns = [
     "employee_id",
     "department_id",
@@ -280,21 +243,15 @@ async function fetchEmployeeProfessionalRowsByIds(dbExecFn, empIds = []) {
     "resume_url",
     "joining_date",
   ];
-  const selectCols = columns.join(", "); // IMPORTANT: join without trailing comma
+  const selectCols = columns.join(", ");
 
-  // build placeholders for the IN clause
   const placeholders = empIds.map(() => "?").join(",");
 
   const sql = `SELECT ${selectCols} FROM employee_professional WHERE employee_id IN (${placeholders})`;
-  // pass empIds array as params; ensure order/length matches placeholders
   const [rows] = await dbExecFn(sql, empIds);
   return Array.isArray(rows) ? rows : [];
 }
 
-/**
- * Map employees in rows to their department_id (if missing on rows) by querying employee_professional.
- * Mutates rows in-place to add pr_department_id when found.
- */
 async function attachDeptInfoForRows(rows) {
   if (!Array.isArray(rows) || rows.length === 0) return;
 
@@ -308,7 +265,6 @@ async function attachDeptInfoForRows(rows) {
 
   if (empIds.length === 0) return;
 
-  // Build placeholders and params
   const placeholders = empIds.map(() => "?").join(",");
   const sql = `SELECT employee_id, department_id FROM employee_professional WHERE employee_id IN (${placeholders})`;
   try {
@@ -320,19 +276,16 @@ async function attachDeptInfoForRows(rows) {
           map.set(String(dr.employee_id), dr.department_id);
       }
     }
-    // attach
     for (const r of rows) {
       const eid = r.employee_id != null ? String(r.employee_id) : null;
       if (eid && r.pr_department_id == null && r.department_id == null) {
         const did = map.get(eid);
         if (typeof did !== "undefined" && did !== null) {
-          // set pr_department_id so filterAttendanceRows will see it
           r.pr_department_id = did;
         }
       }
     }
   } catch (e) {
-    // don't hard-fail the whole flow — just log and continue (filter may still remove rows)
     console.warn(
       "[reportAttendanceHandler] attachDeptInfoForRows failed:",
       e && e.message
@@ -340,11 +293,6 @@ async function attachDeptInfoForRows(rows) {
   }
 }
 
-/**
- * Build render meta from request query.
- * - Prefer department_name / departmentName / department if present.
- * - If only department_id / departmentId present and numeric, lookup departments table to get readable name.
- */
 async function buildMetaFromReqQuery(query = {}) {
   const meta = {};
   const rawStatus =
@@ -358,7 +306,6 @@ async function buildMetaFromReqQuery(query = {}) {
     }
   }
 
-  // Employee name or fallback to id
   const typedEmployeeName =
     coerceToString(query.employee_name, null) ||
     coerceToString(query.employeeName, null) ||
@@ -372,7 +319,6 @@ async function buildMetaFromReqQuery(query = {}) {
     if (empId) meta.employeeName = empId;
   }
 
-  // Department: prefer name-like fields, otherwise resolve department_id -> name
   let typedDept =
     coerceToString(query.department_name, null) ||
     coerceToString(query.departmentName, null) ||
@@ -381,13 +327,11 @@ async function buildMetaFromReqQuery(query = {}) {
   if (typedDept) {
     meta.department = typedDept;
   } else {
-    // try department_id or departmentId
     const deptId =
       coerceToString(query.department_id, null) ||
       coerceToString(query.departmentId, null);
 
     if (deptId) {
-      // if deptId is numeric, try lookup in departments table
       if (/^\d+$/.test(deptId)) {
         try {
           const [rows] = await dbExec(
@@ -403,7 +347,6 @@ async function buildMetaFromReqQuery(query = {}) {
             if (name) meta.department = name;
             else meta.department = String(rec.id);
           } else {
-            // no row found — fallback to raw id string
             meta.department = deptId;
           }
         } catch (e) {
@@ -411,11 +354,9 @@ async function buildMetaFromReqQuery(query = {}) {
             "[reportAttendanceHandler] lookup department name failed:",
             e && e.message
           );
-          // fallback to raw id if lookup fails
           meta.department = deptId;
         }
       } else {
-        // deptId isn't numeric — treat it as a name
         meta.department = deptId;
       }
     }
@@ -425,11 +366,6 @@ async function buildMetaFromReqQuery(query = {}) {
 }
 
 async function downloadAttendanceReport(req, res) {
-  console.log(
-    "[reportAttendanceHandler] downloadAttendanceReport called - query:",
-    req.query
-  );
-
   try {
     const parsed = parseDates(req.query || {});
     let { startDate, endDate, status, format, fields } = parsed;
@@ -437,7 +373,6 @@ async function downloadAttendanceReport(req, res) {
     const employeeIdQuery = coerceToString(req.query.employee_id, null);
     let departmentIdQuery = coerceToString(req.query.department_id, null);
 
-    // find requester employee id and derive department if needed
     const requesterEmpId = findEmployeeIdInRequest(req);
     if (requesterEmpId) {
       console.debug(
@@ -505,13 +440,11 @@ async function downloadAttendanceReport(req, res) {
       status,
       fields,
       employeeIdQuery,
-      null // pass null dept to service; we'll do local scoping if required
+      null
     );
 
-    // ensure rows is array
     rows = Array.isArray(rows) ? rows : [];
 
-    // debug: log effective date window and number of rows returned BEFORE local filtering
     console.debug("[reportAttendanceHandler] effective date window:", {
       startDate,
       endDate,
@@ -534,12 +467,10 @@ async function downloadAttendanceReport(req, res) {
       }
     }
 
-    // If department filter present but rows lack department info, try to attach department info for rows
     const needLocalFiltering = Boolean(
       employeeIdQuery || departmentIdQuery || requesterEmpId
     );
     if (needLocalFiltering && rows.length > 0) {
-      // If dept filter present and no rows contain any department columns, attach mapping from employee_professional
       const anyHasDept = rows.some(
         (r) =>
           r.department_id != null ||
@@ -549,11 +480,9 @@ async function downloadAttendanceReport(req, res) {
       );
 
       if (!anyHasDept && departmentIdQuery) {
-        // attach department info for rows
         await attachDeptInfoForRows(rows);
       }
 
-      // Now run the tolerant local filter (emp or dept)
       rows = filterAttendanceRows(
         rows,
         employeeIdQuery || null,
@@ -565,7 +494,6 @@ async function downloadAttendanceReport(req, res) {
       );
     }
 
-    // Preview: always 200 JSON; include friendly message when empty
     if (isPreviewRequest(req)) {
       const msg =
         rows.length === 0
@@ -583,11 +511,9 @@ async function downloadAttendanceReport(req, res) {
         .status(404)
         .json({ message: "No attendance data for selected date range" });
 
-    // build meta for rendering
     const meta = await buildMetaFromReqQuery(req.query || {});
     console.debug("[reportAttendanceHandler] render meta:", meta);
 
-    // Excel output
     if (format === "xlsx") {
       if (typeof reportService.renderExcelBuffer !== "function")
         return res
@@ -623,7 +549,6 @@ async function downloadAttendanceReport(req, res) {
       return res.send(buf);
     }
 
-    // PDF output
     if (format === "pdf") {
       if (typeof reportService.renderPdfBuffer !== "function")
         return res.status(500).json({ message: "PDF renderer not available" });

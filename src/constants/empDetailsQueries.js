@@ -678,7 +678,6 @@ LEFT JOIN (
      AND end_date IS NULL
 `,
 
-  // 2) insert the new assignment
   ADD_SUPERVISOR_ASSIGNMENT: `
   INSERT INTO supervisor_assignments
     (employee_id, supervisor_id, start_date)

@@ -13,13 +13,11 @@ const path = require("path");
 const numberToWords = require("number-to-words");
 
 exports.generateDocx = async (claim, employee) => {
-  console.log("Generating DOCX for Claim:", claim);
   if (!claim || !claim.id) {
     console.error("Invalid Claim ID:", claim);
     throw new Error("Claim ID is undefined, cannot generate document.");
   }
 
-  // ✅ Company Header
   const companyHeader = new Paragraph({
     children: [
       new TextRun({
@@ -32,7 +30,6 @@ exports.generateDocx = async (claim, employee) => {
     spacing: { after: 300 },
   });
 
-  // ✅ Form Title with Claim Type Next to it
   const formTitle = new Paragraph({
     children: [
       new TextRun({ text: "Reimbursement Form", bold: true, size: 30 }),
@@ -42,7 +39,6 @@ exports.generateDocx = async (claim, employee) => {
     spacing: { after: 200 },
   });
 
-  // ✅ Employee Details in Grid Form
   const employeeDetailsGrid = [
     new Paragraph({
       children: [
@@ -64,7 +60,6 @@ exports.generateDocx = async (claim, employee) => {
     }),
   ];
 
-  // ✅ Reimbursement Table Header
   const reimbursementTableRows = [
     new TableRow({
       children: [
@@ -118,7 +113,7 @@ exports.generateDocx = async (claim, employee) => {
   ];
 
   const addClaimRow = (date, description, unit, price, amount) => {
-    const safeText = (value) => (value ? value.toString() : "-"); // Ensure non-null values
+    const safeText = (value) => (value ? value.toString() : "-");
 
     reimbursementTableRows.push(
       new TableRow({
@@ -158,7 +153,6 @@ exports.generateDocx = async (claim, employee) => {
     );
   };
 
-  // ✅ Handling Date Column for Different Claims
   let formattedDate = "-";
   if (claim.from_date && claim.to_date) {
     formattedDate = `${new Date(
@@ -226,19 +220,15 @@ exports.generateDocx = async (claim, employee) => {
     return claimDetails;
   };
 
-  // ✅ Now integrate this function in the main document generation logic
   const claimDetails = getClaimDetails(claim);
   claimDetails.forEach(({ description, value }) => {
     addClaimRow(formattedDate, description, "1", value, value);
   });
 
-  // Ensure at least 8 rows for uniformity
   while (reimbursementTableRows.length < 15) {
-    // Adjust number as needed
     addClaimRow(" ", " ", " ", " ", " ");
   }
 
-  // ✅ Add Total Amount Row (adjusted column span for 5 columns)
   reimbursementTableRows.push(
     new TableRow({
       children: [
@@ -264,21 +254,16 @@ exports.generateDocx = async (claim, employee) => {
     })
   );
 
-  // ✅ Reimbursement Table
   const reimbursementTable = new Table({
-    width: { size: 100, type: WidthType.PERCENTAGE }, // Make it full width
+    width: { size: 100, type: WidthType.PERCENTAGE },
     rows: reimbursementTableRows,
-    margins: { top: 0, bottom: 0, left: 0, right: 0 }, // Reduce internal cell margins
+    margins: { top: 0, bottom: 0, left: 0, right: 0 },
   });
 
-  // Convert total amount to words
   const amountWords = numberToWords.toWords(claim.total_amount);
   const formattedAmountWords =
     amountWords.charAt(0).toUpperCase() + amountWords.slice(1) + " only.";
 
-  console.log("Amount in Words:", formattedAmountWords);
-
-  // ✅ Amount in Words in the Document
   const amountInWords = new Paragraph({
     children: [
       new TextRun({
@@ -315,9 +300,8 @@ exports.generateDocx = async (claim, employee) => {
             spacing: { after: 200 },
           }),
         ]
-      : []; // If not approved, return an empty array
+      : [];
 
-  // ✅ Footer Note
   const footerNote = new Paragraph({
     children: [
       new TextRun({
@@ -329,7 +313,6 @@ exports.generateDocx = async (claim, employee) => {
     spacing: { before: 400 },
   });
 
-  // ✅ Outer Table for Page Border
   const outerTable = new Table({
     width: { size: 100, type: WidthType.PERCENTAGE },
     rows: [
@@ -358,29 +341,25 @@ exports.generateDocx = async (claim, employee) => {
     },
   });
 
-  // ✅ Document setup with adjusted margins
   const doc = new Document({
     sections: [
       {
         properties: {
-          pageSize: { width: 11906, height: 16838 }, // A4 size
-          pageMargins: { top: 50, right: 50, bottom: 50, left: 50 }, // Reduce margins
+          pageSize: { width: 11906, height: 16838 },
+          pageMargins: { top: 50, right: 50, bottom: 50, left: 50 },
         },
         children: [outerTable],
       },
     ],
   });
 
-  // ✅ Save DOCX File
   const docxPath = path.join(
     __dirname,
     `../temp/Reimbursement_${claim.id}.docx`
   );
-  console.log("Saving DOCX file to:", docxPath);
 
   const buffer = await Packer.toBuffer(doc);
   fs.writeFileSync(docxPath, buffer);
-  console.log("✅ DOCX file generated successfully!");
 
   return docxPath;
 };

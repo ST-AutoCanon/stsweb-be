@@ -1,9 +1,3 @@
-/**
- * SQL Queries for database operations.
- *
- * @module queries
- */
-
 module.exports = {
   GET_USER_BY_EMAIL: `
     SELECT
@@ -27,7 +21,6 @@ module.exports = {
     WHERE e.email = ?;
   `,
 
-  // Query to fetch admin details by employee_id
   GET_ADMIN_DETAILS: `
     SELECT
       pr.role,
@@ -43,7 +36,6 @@ module.exports = {
     WHERE e.employee_id = ?;
   `,
 
-  // Query to fetch admin dashboard statistics
   GET_ADMIN_DASHBOARD: `
     SELECT
       COUNT(DISTINCT e.employee_id) AS total_employees,
@@ -67,7 +59,6 @@ module.exports = {
       ON e.employee_id = a.employee_id AND DATE(a.date) = CURDATE();
   `,
 
-  // Query to fetch salary distribution data
   GET_SALARY_DISTRIBUTION: `
     SELECT
       AVG(pr.salary) AS average_salary,
@@ -76,7 +67,6 @@ module.exports = {
     FROM employee_professional pr;
   `,
 
-  // Query to fetch department-wise employee distribution
   GET_DEPARTMENT_DISTRIBUTION: `
     SELECT
       d.name AS department_name,
@@ -87,7 +77,6 @@ module.exports = {
     GROUP BY pr.department_id, d.name;
   `,
 
-  // Query to fetch financial statistics for the previous month
   GET_FINANCIAL_STATS: `
     SELECT
       SUM(total_expenses) AS previous_month_expenses,
@@ -98,7 +87,6 @@ module.exports = {
       AND YEAR(month) = YEAR(CURRENT_DATE - INTERVAL 1 MONTH);
   `,
 
-  // Query to fetch current projects
   GET_CURRENT_PROJECTS: `
     SELECT
       project_name,
@@ -111,7 +99,6 @@ module.exports = {
     WHERE CURRENT_DATE BETWEEN start_date AND end_date;
   `,
 
-  // Query to fetch upcoming projects
   GET_UPCOMING_PROJECTS: `
     SELECT
       project_name,
@@ -124,7 +111,6 @@ module.exports = {
     WHERE start_date > CURRENT_DATE;
   `,
 
-  // Query to fetch previous projects
   GET_PREVIOUS_PROJECTS: `
     SELECT
       project_name,
@@ -137,7 +123,6 @@ module.exports = {
     WHERE end_date < CURRENT_DATE;
   `,
 
-  // Query to fetch login data grouped by hourly ranges
   GET_HOURLY_LOGIN_DATA: `
     SELECT
       CASE
@@ -152,7 +137,6 @@ module.exports = {
     GROUP BY timing;
   `,
 
-  // Query to fetch employee dashboard statistics
   GET_EMPLOYEE_DASHBOARD: `
     SELECT
       CONCAT(e.first_name, ' ', e.last_name) AS name,
@@ -203,7 +187,6 @@ module.exports = {
     WHERE e.employee_id = ?;
   `,
 
-  // Query to fetch sidebar menu by roles
   GET_SIDEBAR_MENU: `
     SELECT label, path, icon
     FROM sidebar_menu
@@ -223,7 +206,6 @@ module.exports = {
     GROUP BY d.name;
   `,
 
-  // Attendance summary for today
   GET_ATTENDANCE_STATUS_COUNT: `
     SELECT
       (SELECT COUNT(*) FROM employees) AS totalEmployees,
@@ -246,7 +228,6 @@ module.exports = {
             AND status = 'Approved')) AS absent;
   `,
 
-  // Login distribution over past month by hour
   GET_EMPLOYEE_LOGIN_DATA_COUNT: `WITH FirstPunch AS (
 SELECT 
     employee_id, 
@@ -278,7 +259,6 @@ ORDER BY STR_TO_DATE(SUBSTRING_INDEX(punchin_label, ' ', 1), '%H');
 
 `,
 
-  // Salary range distribution (from professional)
   GET_EMPLOYEE_SALARY_RANGE: `
     SELECT
       CASE
@@ -294,7 +274,6 @@ ORDER BY STR_TO_DATE(SUBSTRING_INDEX(punchin_label, ' ', 1), '%H');
     ORDER BY FIELD(salary_range, '<30k', '30k-50k', '50k-70k', '70k+', '90k+');
   `,
 
-  // Quick department gender summary (alias of count by department)
   GET_EMPLOYEE_BY_DEPARTMENT: `
     SELECT
       d.name AS department_name,
@@ -308,7 +287,6 @@ ORDER BY STR_TO_DATE(SUBSTRING_INDEX(punchin_label, ' ', 1), '%H');
     GROUP BY d.name;
   `,
 
-  // Fetch payroll cards
   GET_EMPLOYEE_PAYROLL: `
     SELECT
       SUM(CASE WHEN card_label = 'Previous Month Credit' THEN card_value ELSE 0 END) AS total_previous_month_credit,
@@ -318,7 +296,6 @@ ORDER BY STR_TO_DATE(SUBSTRING_INDEX(punchin_label, ' ', 1), '%H');
     WHERE card_label IN ('Previous Month Credit', 'Previous Month Expenses', 'Previous Month Salary');
   `,
 
-  // Recent leave queries for an employee
   GET_LEAVE_QUERIES_IN_DASHBOARD: `
     SELECT
       leave_type AS 'Leave Type',
@@ -334,7 +311,6 @@ ORDER BY STR_TO_DATE(SUBSTRING_INDEX(punchin_label, ' ', 1), '%H');
     LIMIT 5;
   `,
 
-  // Reimbursement stats current vs previous
   GET_REIMBURSEMENT_STATS: `
     SELECT
       SUM(CASE WHEN status = 'Approved'

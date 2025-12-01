@@ -1,4 +1,3 @@
-// src/services/reportHelpers.js
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -44,7 +43,6 @@ function parseDates(q = {}) {
   };
 }
 
-/* ---------- Date range enforcement (2 months) ---------- */
 const MAX_RANGE_DAYS = 62;
 
 function parseDateISO(d) {
@@ -107,7 +105,6 @@ function ensureTwoMonthWindow(startDate, endDate) {
   return { ok: true, startDate, endDate };
 }
 
-/* ---------- Preview detection / preview response ---------- */
 function isPreviewRequest(req) {
   const q = req && req.query && req.query.preview;
   const accept = req && req.headers && req.headers.accept;
@@ -135,13 +132,11 @@ function sendPreviewResponse(req, res, rows) {
   return res.status(200).json({ rows: outRows, totalRows });
 }
 
-/* ---------- filename helper ---------- */
 function safeFilename(base, ext) {
   const now = new Date().toISOString().replace(/[:.]/g, "-");
   return `${base}_${now}.${ext}`;
 }
 
-/* ---------- pick fields helper (used by handlers) ---------- */
 function pickFields(rows, fields) {
   if (!Array.isArray(rows)) return [];
   if (!fields || fields.length === 0) return rows.map((r) => ({ ...r }));

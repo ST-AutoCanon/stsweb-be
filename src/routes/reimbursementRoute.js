@@ -53,13 +53,12 @@ const storage = multer.diskStorage({
     );
     if (!fs.existsSync(basePath)) {
       fs.mkdirSync(basePath, { recursive: true });
-      console.log(`Directory created: ${basePath}`);
     }
     cb(null, basePath);
   },
   filename: (req, file, cb) => {
     const now = new Date();
-    const date = now.toISOString().split("T")[0]; // YYYY-MM-DD
+    const date = now.toISOString().split("T")[0];
     const { employeeId } = req.body;
     const uploadDir = path.join(
       __dirname,
@@ -85,7 +84,6 @@ const storage = multer.diskStorage({
   },
 });
 
-// ── MULTER INSTANCE ───────────────────────────────────────────────────────────
 const upload = multer({
   storage,
   fileFilter,
@@ -93,31 +91,26 @@ const upload = multer({
 });
 
 router.get("/reimbursements", reimbursementHandler.getAllReimbursements);
-// Routes for reimbursements
 router.get(
   "/reimbursement/:employeeId",
   reimbursementHandler.getReimbursementsByEmployee
 );
 
-// Route to update reimbursement status (approval/rejection)
 router.put(
   "/reimbursement/status/:id",
   reimbursementHandler.updateReimbursementStatus
 );
 
-// New route: Update payment status (only for admin, finance manager, team lead)
 router.put(
   "/reimbursement/payment-status/:id",
   reimbursementHandler.updatePaymentStatus
 );
 
-// Updated route with multiple file uploads
 router.post(
   "/reimbursement",
   upload.array("attachments", 5),
   reimbursementHandler.createReimbursement
 );
-console.log("fileuploads", createReimbursement);
 
 router.put(
   "/reimbursement/:id",
@@ -160,7 +153,6 @@ router.post(
   }
 );
 
-// Secure file retrieval route
 router.get("/reimbursement/:year/:month/:employeeId/:filename", (req, res) => {
   const { year, month, employeeId, filename } = req.params;
 

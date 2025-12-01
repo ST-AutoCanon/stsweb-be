@@ -1,4 +1,4 @@
-const express = require('express');
+const express = require("express");
 const {
   checkEmployeeAssignmentHandler,
   assignCompensationHandler,
@@ -13,40 +13,28 @@ const {
   handleApproveOvertimeRow,
   handleRejectOvertimeRow,
   getOvertimeDetailsHandler,
-  
+
   getEmployeeLopHandler,
-  getWorkingDaysHandler 
-} = require('../handlers/assignCompensationHandler'); // Adjust path if needed
+  getWorkingDaysHandler,
+} = require("../handlers/assignCompensationHandler");
 
 const router = express.Router();
 
-// Log imported handlers
-console.log('checkEmployeeAssignmentHandler:', typeof checkEmployeeAssignmentHandler);
-console.log('assignCompensationHandler:', typeof assignCompensationHandler);
+router.post("/check-assignment", checkEmployeeAssignmentHandler);
 
-// Check if an employee has an existing assignment
-router.post('/check-assignment', checkEmployeeAssignmentHandler);
+router.post("/assign", assignCompensationHandler);
 
-// Assign a compensation plan to an employee or department
-router.post('/assign', assignCompensationHandler);
+router.get("/assigned", getAssignedCompensationDetailsHandler);
 
-// Get all assigned compensation details
-router.get('/assigned', getAssignedCompensationDetailsHandler);
+router.post("/add-bonus", addEmployeeBonusHandler);
 
-// Add bonus to a single employee
-router.post('/add-bonus', addEmployeeBonusHandler);
+router.post("/add-bonus-bulk", addEmployeeBonusBulkHandler);
 
-// Add bonus to multiple employees (bulk)
-router.post('/add-bonus-bulk', addEmployeeBonusBulkHandler);
+router.get("/bonus-list", getEmployeeBonusDetailsHandler);
 
-// Get all employee bonus details
-router.get('/bonus-list', getEmployeeBonusDetailsHandler);
+router.post("/advance", addEmployeeAdvanceHandler);
 
-// Add advance to an employee
-router.post('/advance', addEmployeeAdvanceHandler);
-
-// Get all employee advance details
-router.get('/advance-details', getEmployeeAdvanceDetailsHandler);
+router.get("/advance-details", getEmployeeAdvanceDetailsHandler);
 
 router.get("/salary-cutoff", async (req, res) => {
   try {
@@ -61,7 +49,7 @@ router.get("/salary-cutoff", async (req, res) => {
     }
     res.status(200).json({
       success: true,
-      cutoff_date: rows[0].cutoff_date || 25, // Default to 25 if null
+      cutoff_date: rows[0].cutoff_date || 25,
     });
   } catch (error) {
     console.error("Error fetching salary cutoff:", error);
@@ -72,31 +60,22 @@ router.get("/salary-cutoff", async (req, res) => {
     });
   }
 });
-// Get all employee extra hours details
 router.get("/employee-extra-hours", fetchEmployeeExtraHours);
 
-// Add overtime details in bulk
 router.post("/overtime-bulk", handleAddOvertimeDetailsBulk);
 
-// Approve a single overtime row
 router.post("/overtime/approve", handleApproveOvertimeRow);
 
-// Reject a single overtime row
 router.post("/overtime/reject", handleRejectOvertimeRow);
 
-// Get all overtime details
 router.get("/overtime-status-summary", getOvertimeDetailsHandler);
 
-// Get LOP details for current period
 router.get("/lop-details", getEmployeeLopHandler);
 
 router.get("/working-days", getWorkingDaysHandler);
 
-
-// Log registered routes
 router.stack.forEach((r) => {
   if (r.route) {
-    console.log(`Router registered: ${Object.keys(r.route.methods)} ${r.route.path}`);
   }
 });
 

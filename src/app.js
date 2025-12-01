@@ -6,7 +6,6 @@ require("dotenv").config();
 const path = require("path");
 const session = require("express-session");
 const { Server } = require("socket.io");
-//tasks
 const planRoutes = require("./routes/planRoute");
 const supervisorEmployeesRoutes = require("./routes/supervisorEmployeesRoutes");
 const supervisorRoutes = require("./routes/supervisorRoutes");
@@ -17,8 +16,7 @@ const employeeTaskRoutes = require("./routes/employeeTaskUpdateRoutes");
 const weeklyTaskSupervisorRoutes = require("./routes/weekly_task_supervisor");
 const weekTaskRoutes = require("./routes/weekTaskRoutes");
 const report = require("./routes/reportRoutes");
-const overtimeSupervisorRoutes = require('./routes/overtimeSupervisorRoutes');
-
+const overtimeSupervisorRoutes = require("./routes/overtimeSupervisorRoutes");
 
 const EmployeeQueries = require("./services/employeeQueries");
 const chatService = require("./services/chatService");
@@ -56,31 +54,25 @@ const reimbursementRoutes = require("./routes/reimbursementRoute");
 const adminSalaryStatementRoutes = require("./routes/adminSalaryStatementRoute");
 const assetsRoutes = require("./routes/assetsRoutes");
 const validateApiKey = require("./middleware/apiKeyMiddleware");
-//attendancetracker
 const adminAttendanceRoutes = require("./routes/adminAttendancetrackerRoute");
 const adminAttendancetrackerRoute = require("./routes/adminAttendancetrackerRoute");
 const face_admin_page = require("./routes/face_adminpageRoutes");
 const employeeloginRoutes = require("./routes/employeeloginRoutes");
-// require("./services/punchCronService");
 const employeeBirthdayRoutes = require("./routes/employeeBirthday");
 
 const meetingRoutes = require("./routes/meetingRoutes");
 const notificationsRouter = require("./routes/notifications");
 
-//vendors
 const vendorRoutes = require("./routes/vendorRoutes");
 const configRoutes = require("./routes/configRoutes");
-//generatepaysliproutes
 const oldEmployeeRoutes = require("./routes/oldEmployeeDetailsRoute");
 const oldEmployeeDetailsRoutes = require("./routes/oldEmployeeDetailsRoute");
 const empExcelRoutes = require("./routes/emp_excelsheetRoutes");
 
-//letters
 const letterRoutes = require("./routes/letterRoutes");
 const letterheadRoutes = require("./routes/letterheadRoute");
 const letterheadTemplateRoutes = require("./routes/letterheadTemplateRoutes");
 
-//compensation
 const compensationRoutes = require("./routes/compensationRoutes");
 const assignCompensationRoutes = require("./routes/assignCompensationRoute");
 const employeeRoutesforsalarybreakup = require("./routes/compensationRoutes");
@@ -89,21 +81,18 @@ const overtimeSummaryRoutes = require("./routes/overtimeSummaryRoutes");
 const employeeProjectsRoute = require("./routes/employeeProjectsRoute");
 const lossofPayCalculationRoutes = require("./routes/lossofPayCalculationRoutes");
 const incentivesRoutes = require("./routes/incentivesRoutes");
-const salaryRoutes2 = require('./routes/salaryCalculationPeriodRoutes');
-const salaryDetailsRoutes = require('./routes/salaryDetailsRoutes'); // Adjust path if needed
-const employeeBankReportRoutes = require('./routes/employeebankreportroute');
+const salaryRoutes2 = require("./routes/salaryCalculationPeriodRoutes");
+const salaryDetailsRoutes = require("./routes/salaryDetailsRoutes"); // Adjust path if needed
+const employeeBankReportRoutes = require("./routes/employeebankreportroute");
 const salaryStatementRouter = require("./routes/salaryRoutes");
-// const salaryRoutes = require("./routes/salaryRoutes");
 const salaryDetailsRouter = require("./routes/salaryDetailsRouter");
 const app = express();
 const server = http.createServer(app);
 
-// ✅ JSON + body parser must come FIRST
 app.use(express.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
-// 🔹 CORS setup
 const allowedOrigins = [
   "https://localhost",
   "capacitor://localhost",
@@ -111,8 +100,8 @@ const allowedOrigins = [
   "https://sts-test.site",
   "http://localhost:3000",
   "http://127.0.0.1:3000",
-   "http://192.168.1.2:3000",
-  "http://122.166.77.12:3000", // ✅ added from second file
+  "http://192.168.1.2:3000",
+  "http://122.166.77.12:3000",
 ];
 
 app.use((req, res, next) => {
@@ -142,7 +131,6 @@ app.use((req, res, next) => {
   next();
 });
 
-//assets
 app.use("/api/weekly_task_supervisor", weeklyTaskSupervisorRoutes);
 app.use("/api/week_tasks", weekTaskRoutes);
 app.use("/api/tasks", taskRoutes);
@@ -153,7 +141,7 @@ app.use("/api/supervisor", supervisorEmployeesRoutes);
 app.use("/api", configRoutes);
 app.use("/api/task-emp-emp", taskEmployeesRoutes);
 app.use("/api/employee-tasks", employeeTaskRoutes);
-app.use('/api', salaryRoutes2);
+app.use("/api", salaryRoutes2);
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 app.use("/api/salary-statement", salaryStatementRouter);
 app.use("/api/salary-details", salaryDetailsRouter);
@@ -165,14 +153,12 @@ const webpush = require("web-push");
 const cron = require("node-cron");
 const policyNotificationService = require("./services/policyNotificationService");
 
-// ✅ Cron job #1
 cron.schedule(
   "30 17 * * *",
   async () => {
     try {
       await policyNotificationService.sendPolicyEndNotifications(10);
       await policyNotificationService.sendPolicyEndNotifications(5);
-      console.log("[cron] policy end alerts executed at 17:22 Asia/Kolkata");
     } catch (err) {
       console.error("[cron] policy alert error:", err);
     }
@@ -180,14 +166,12 @@ cron.schedule(
   { timezone: "Asia/Kolkata" }
 );
 
-// ✅ Cron job #2 (from second file)
 cron.schedule(
   "00 12 * * *",
   async () => {
     try {
       await policyNotificationService.sendPolicyEndNotifications(10);
       await policyNotificationService.sendPolicyEndNotifications(5);
-      console.log("[cron] policy end alerts executed at 12:00 Asia/Kolkata");
     } catch (err) {
       console.error("[cron] policy alert error:", err);
     }
@@ -195,13 +179,9 @@ cron.schedule(
   { timezone: "Asia/Kolkata" }
 );
 
-// ✅ Profile Missing Notifier (from second file)
 const { scheduleJob } = require("./jobs/profileMissingNotifier");
 (async function initProfileNotifier() {
   if (process.env.ENABLE_PROFILE_NOTIFIER !== "true") {
-    console.log(
-      "[startup] profileMissingNotifier disabled (ENABLE_PROFILE_NOTIFIER != true)"
-    );
     return;
   }
 
@@ -213,7 +193,6 @@ const { scheduleJob } = require("./jobs/profileMissingNotifier");
       attempt++;
       await db.execute("SELECT 1");
       scheduleJob();
-      console.log("[startup] profileMissingNotifier scheduled (DB ready)");
       return;
     } catch (err) {
       console.warn(
@@ -228,7 +207,6 @@ const { scheduleJob } = require("./jobs/profileMissingNotifier");
   );
 })();
 
-// Push notifications
 const subscriptions = [];
 webpush.setVapidDetails(
   "mailto:vaibhavichinchure@gmail.com",
@@ -244,15 +222,12 @@ app.get("/vapidPublicKey", (req, res) => {
 });
 
 app.post("/subscribe", (req, res) => {
-  console.log("Request headers:", req.headers);
-  console.log("Raw body:", req.body);
   const sub = req.body;
   if (!sub || !sub.endpoint) {
     return res.status(400).send("Invalid subscription");
   }
   if (!subscriptions.find((s) => s.endpoint === sub.endpoint)) {
     subscriptions.push(sub);
-    console.log("New subscription stored:", sub.endpoint);
   }
   res.status(201).json({ success: true });
 });
@@ -263,13 +238,7 @@ app.post("/check-subscription", (req, res) => {
   res.json({ exists });
 });
 
-cron.schedule('0 20 * * 1-6', async () => {
-  console.log(
-    "Sending daily notifications to",
-    subscriptions.length,
-    "subscribers:",
-    subscriptions.map((s) => s.endpoint)
-  );
+cron.schedule("0 20 * * 1-6", async () => {
   const payload = JSON.stringify({
     title: "Friendly Reminder",
     body: "🕒 After today’s work, please log off 💻from STS Web.",
@@ -285,7 +254,6 @@ cron.schedule('0 20 * * 1-6', async () => {
   }
 });
 
-// 🔹 Secure routes AFTER push/public routes
 app.use(apiKeyMiddleware);
 
 app.use(
@@ -301,16 +269,6 @@ app.use(
     },
   })
 );
-//tasks
-// app.use("/api/task-emp-emp", taskEmployeesRoutes);
-// app.use("/api/supervisor", supervisorRoutes);
-// app.use("/api/plans", planRoutes);
-
-// app.use("/api/tasks", taskRoutes);
-// app.use("/api/messages", taskMessagesRoutes);
-// app.use("/api/task-emp-emp", taskEmployeesRoutes);
-
-//tasks
 
 app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
 app.use("/assets", express.static(path.join(__dirname, "assets")));
@@ -318,7 +276,6 @@ app.use("/api/leave-policies", leavePolicy);
 
 app.use(idleTimeout);
 
-// ✅ Your routes (unchanged below) …
 app.use("/", holidayRoutes);
 app.use("/", loginRoutes);
 app.use("/", leaveRoutes);
@@ -362,7 +319,6 @@ app.use("/assets", assetsRoutes);
 app.use("/api/assets", assetsRoutes);
 app.use("/api", assetsRoutesforreturn);
 
-//attendancetracker
 app.use("/api/attendance", adminAttendanceRoutes);
 app.use("/admin/attendance", adminAttendanceRoutes);
 app.use("/admin-attendance", adminAttendanceRoutes);
@@ -371,14 +327,11 @@ app.use("/api/employeelogin", employeeloginRoutes);
 app.use("/api", empExcelRoutes);
 app.use("/api/employee", employeeBirthdayRoutes);
 
-// vendor routes
 app.use("/", vendorRoutes);
 
-//generatepayslip
 app.use("/", oldEmployeeRoutes);
 app.use("/", oldEmployeeDetailsRoutes);
 
-//letters
 app.use("/api", letterRoutes);
 app.use(
   "/letterheadfiles",
@@ -391,32 +344,26 @@ app.get("/", (req, res) => {
 });
 app.use("/api/templates", letterheadTemplateRoutes);
 
-//lossof pay and employee project names
 app.use("/api", employeeProjectsRoute);
 app.use("/api/lop", lossofPayCalculationRoutes);
 
-//add incentives
 app.use("/api/incentives", incentivesRoutes);
 
-//compensation
 app.use("/api/overtime", overtimeRoutes);
 app.use("/api/overtime-summary", overtimeSummaryRoutes);
-app.use('/api/compensation', overtimeSupervisorRoutes);
+app.use("/api/compensation", overtimeSupervisorRoutes);
 app.use("/api/compensations", compensationRoutes);
 app.use("/api/compensation", assignCompensationRoutes);
 app.use("/api", employeeRoutesforsalarybreakup);
-app.use('/api/salary-details', salaryDetailsRoutes);
-app.use('/api/compensation', employeeBankReportRoutes);
-////////////
+app.use("/api/salary-details", salaryDetailsRoutes);
+app.use("/api/compensation", employeeBankReportRoutes);
 
-// server side (app.js)
 const io = new Server(server, {
   cors: { origin: process.env.FRONTEND_URL || "*", credentials: true },
   path: "/api/socket.io",
 });
 app.set("io", io);
 
-// keep/replace your io.use(...) with the permissive one we used earlier:
 io.use((socket, next) => {
   const queryUser = socket.handshake.query?.userId || null;
   const authUser = socket.handshake.auth?.userId || null;
@@ -441,7 +388,6 @@ io.on("connection", (socket) => {
     auth: socket.handshake.auth,
   });
 
-  // If we have a userId from handshake, join their chat rooms + query rooms.
   if (socket.userId) {
     chatService
       .getUserRooms(socket.userId)
@@ -469,7 +415,6 @@ io.on("connection", (socket) => {
     );
   }
 
-  // joinThread (employee queries)
   socket.on("joinThread", (threadId) => {
     try {
       console.log(`[socket:${socket.id}] joinThread ${threadId}`);
@@ -479,7 +424,6 @@ io.on("connection", (socket) => {
     }
   });
 
-  // sendQueryMessage (employee queries) — prefer socket.userId but respect payload.sender_id
   socket.on("sendQueryMessage", async (payload, callback) => {
     console.log(`[socket:${socket.id}] sendQueryMessage payload:`, payload);
     try {
@@ -529,10 +473,8 @@ io.on("connection", (socket) => {
       };
 
       io.to(`query_${String(payload.thread_id)}`).emit("newMessage", newMsg);
-      // ack to sender
       if (typeof callback === "function")
         callback({ success: true, message: newMsg });
-      // also emit an immediate ack event (compat)
       socket.emit("messageAck", newMsg);
     } catch (err) {
       console.error(
@@ -545,9 +487,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  // send_message (chat) — accept missing location, accept sender from socket or payload
   socket.on("send_message", async (payload = {}, ack) => {
-    // payload: { roomId, content, type, fileUrl, location, senderId }
     console.log(
       `[socket:${socket.id}] send_message payload:`,
       payload && { ...payload, location: payload?.location ? "present" : null }
@@ -574,7 +514,6 @@ io.on("connection", (socket) => {
         return;
       }
 
-      // allow location to be missing
       const lat = location?.lat ?? null;
       const lng = location?.lng ?? null;
       const address = location?.address ?? null;
@@ -622,7 +561,6 @@ io.on("connection", (socket) => {
     }
   });
 
-  // create_room (unchanged, but with logs)
   socket.on("create_room", async ({ name, isGroup, members } = {}) => {
     try {
       const roomId = await chatService.createRoom(
@@ -640,7 +578,6 @@ io.on("connection", (socket) => {
     }
   });
 
-  // optional: clean disconnect log
   socket.on("disconnect", (reason) => {
     console.log(
       `[socket] ${socket.id} disconnected (${reason}) userId=${socket.userId}`

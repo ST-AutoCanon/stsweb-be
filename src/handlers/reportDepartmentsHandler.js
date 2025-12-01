@@ -2,7 +2,6 @@ const reportService = require("../services/reportIndex");
 const db = require("../config");
 
 async function getDepartments(req, res) {
-  console.log("[departmentsHandler] getDepartments called");
   try {
     if (reportService && typeof reportService.getDepartments === "function") {
       const out = await reportService.getDepartments(req);

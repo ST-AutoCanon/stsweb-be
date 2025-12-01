@@ -1,4 +1,3 @@
-// src/handlers/reportEmployeesHandler.js
 const reportService = require("../services/reportIndex");
 const { coerceToString } = require("../services/reportUtils");
 const {
@@ -11,7 +10,6 @@ const {
 } = require("../services/reportFilters");
 const db = require("../config");
 
-/* db raw exec helper */
 async function dbExecRaw(sql, params = []) {
   if (!Array.isArray(params)) params = [params];
   if (db && typeof db.execute === "function") {
@@ -30,10 +28,8 @@ async function dbExecRaw(sql, params = []) {
   });
 }
 
-/* robust employee id extraction */
 function tryParseCandidate(raw) {
   if (raw === null || typeof raw === "undefined") return null;
-  // If it's already an object, try to pull common fields
   if (typeof raw === "object") {
     try {
       return (
@@ -106,7 +102,6 @@ function findEmployeeIdInRequest(req) {
   return null;
 }
 
-/* find departments managed by managerEmpId (defensive) */
 async function findDepartmentsManagedBy(managerEmpId) {
   if (!managerEmpId) return [];
   const out = [];
@@ -164,7 +159,6 @@ async function findDepartmentsManagedBy(managerEmpId) {
     );
   }
 
-  // fallback to employee_professional mapping
   try {
     const [rows] = await dbExecRaw(
       "SELECT DISTINCT department_id AS id FROM employee_professional WHERE supervisor_id = ? AND department_id IS NOT NULL",
@@ -185,13 +179,10 @@ async function findDepartmentsManagedBy(managerEmpId) {
   return Array.from(new Set(out));
 }
 
-/* normalize candidate (id/name/object/json) to plain string */
 function normalizeToPlainString(candidate, kind = "generic") {
   if (candidate === null || typeof candidate === "undefined") return null;
-  // if object -> try common fields
   if (typeof candidate === "object") {
     const o = candidate;
-    // employee-like
     if (o.employee_name || o.name || o.first_name || o.last_name) {
       const name =
         o.employee_name ||
@@ -201,31 +192,24 @@ function normalizeToPlainString(candidate, kind = "generic") {
       const id = o.employee_id || o.employeeId || o.id || null;
       return id && name ? `${name} (${id})` : name || String(id || "");
     }
-    // department-like
     if (o.department_name || o.name) {
       return o.department_name || o.name || (o.id ? String(o.id) : null);
     }
-    // fallback to JSON string
     try {
       return JSON.stringify(o);
     } catch (e) {
       return String(o);
     }
   }
-  // if string that looks like JSON, try parse
   if (typeof candidate === "string" && candidate.trim().startsWith("{")) {
     try {
       const parsed = JSON.parse(candidate);
       return normalizeToPlainString(parsed, kind);
-    } catch (e) {
-      // not valid json, continue
-    }
+    } catch (e) {}
   }
-  // otherwise simple string
   return String(candidate);
 }
 
-/* small meta builder used by downloads - defensive and returns simple strings */
 async function buildMetaFromReqQuery(query = {}) {
   const meta = {
     filters: [],
@@ -235,7 +219,6 @@ async function buildMetaFromReqQuery(query = {}) {
   };
 
   try {
-    // date range
     const startDate =
       coerceToString(query.startDate, null) ||
       coerceToString(query.start_date, null) ||
@@ -254,7 +237,6 @@ async function buildMetaFromReqQuery(query = {}) {
       else meta.filters.push(`To: ${endDate}`);
     }
 
-    // status - coerce to plain string
     const rawStatus =
       coerceToString(query.status, null) ||
       coerceToString(query.approval_status, null) ||
@@ -264,7 +246,6 @@ async function buildMetaFromReqQuery(query = {}) {
       meta.filters.push(`Status: ${meta.status}`);
     }
 
-    // employee: accept id OR object OR typed name
     let empCandidate =
       query.employee_id ??
       query.employeeId ??
@@ -272,15 +253,12 @@ async function buildMetaFromReqQuery(query = {}) {
       query.employee_name ??
       query.employeeName ??
       null;
-    // if empty string convert to null
     if (typeof empCandidate === "string" && empCandidate.trim() === "")
       empCandidate = null;
 
     if (empCandidate) {
-      // if it's an id-like primitive, try to resolve to readble name from DB
       const idCandidate = tryParseCandidate(empCandidate);
       if (idCandidate) {
-        // attempt DB lookup
         try {
           const [rows] = await dbExecRaw(
             "SELECT employee_id, first_name, last_name, email FROM employees WHERE employee_id = ? LIMIT 1",
@@ -297,7 +275,6 @@ async function buildMetaFromReqQuery(query = {}) {
             meta.employee = `${name} (${er.employee_id})`;
             meta.filters.push(`Employee: ${meta.employee}`);
           } else {
-            // not found - normalize input to string
             meta.employee = normalizeToPlainString(empCandidate, "employee");
             meta.filters.push(`Employee: ${meta.employee}`);
           }
@@ -311,7 +288,6 @@ async function buildMetaFromReqQuery(query = {}) {
       }
     }
 
-    // department: accept id or object or typed name
     let deptCandidate =
       query.department_id ??
       query.departmentId ??
@@ -323,7 +299,6 @@ async function buildMetaFromReqQuery(query = {}) {
       deptCandidate = null;
 
     if (deptCandidate) {
-      // if candidate looks like id, attempt lookup
       const deptIdStr = coerceToString(deptCandidate, null);
       if (deptIdStr && /^\d+$/.test(String(deptIdStr))) {
         try {
@@ -364,7 +339,6 @@ async function buildMetaFromReqQuery(query = {}) {
   return meta;
 }
 
-/* helper to detect explicit manager-scope intent */
 function isExplicitManagerScope(req) {
   try {
     const header = String(
@@ -380,7 +354,6 @@ function isExplicitManagerScope(req) {
     ).toLowerCase();
     if (header === "1" || header === "true") return true;
     if (q1 === "1" || q1 === "true") return true;
-    // if req.user exists and role implies manager, treat as explicit
     const u = req.user || req.authUser || req.session?.user;
     if (u && u.role && /manager|supervisor|lead/i.test(String(u.role)))
       return true;
@@ -388,12 +361,7 @@ function isExplicitManagerScope(req) {
   return false;
 }
 
-/* main handler */
 async function downloadEmployeesReport(req, res) {
-  console.log(
-    "[reportEmployeesHandler] downloadEmployeesReport called - query:",
-    req.query || {}
-  );
   try {
     const parsed = parseDates(req.query || {});
     let { startDate, endDate, status, format, fields } = parsed;
@@ -414,7 +382,6 @@ async function downloadEmployeesReport(req, res) {
         requesterEmpId
       );
 
-    // admin detection (only when req.user exists)
     let isAdmin = false;
     try {
       const u = req.user || req.authUser || req.session?.user;
@@ -429,7 +396,6 @@ async function downloadEmployeesReport(req, res) {
       isAdmin = false;
     }
 
-    // derive department if not provided
     let managerEmpId = null;
     if (!departmentIdQuery && requesterEmpId) {
       try {
@@ -444,7 +410,6 @@ async function downloadEmployeesReport(req, res) {
             departmentIdQuery
           );
         } else {
-          // only perform manager scoping if explicitly requested OR user role indicates manager
           if (
             !isAdmin &&
             !isPreviewRequest(req) &&
@@ -494,7 +459,6 @@ async function downloadEmployeesReport(req, res) {
       );
       rows = Array.isArray(rows) ? rows : [];
     } else if (managerEmpId) {
-      // manager scoping
       let managedDeptIds = [];
       try {
         managedDeptIds = await findDepartmentsManagedBy(managerEmpId);
@@ -531,7 +495,6 @@ async function downloadEmployeesReport(req, res) {
           if (p && p.employee_id) map.set(String(p.employee_id), p);
         rows = Array.from(map.values());
       } else {
-        // fallback: fetch all and filter by supervisor mapping
         try {
           const all = await reportService.getEmployeeRows(
             startDate,
@@ -578,7 +541,6 @@ async function downloadEmployeesReport(req, res) {
       rows = Array.isArray(rows) ? rows : [];
     }
 
-    // preview
     if (isPreviewRequest(req)) {
       console.debug(
         "[reportEmployeesHandler] preview rows:",
@@ -599,7 +561,6 @@ async function downloadEmployeesReport(req, res) {
         .json({ message: "No employee data for selected date range" });
     }
 
-    // apply pickFields and produce output
     const rowsToExport = pickFields(rows, fields);
     const meta = await buildMetaFromReqQuery(req.query || {});
     console.debug("[reportEmployeesHandler] PDF meta:", meta);

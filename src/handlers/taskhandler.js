@@ -1,5 +1,3 @@
-
-
 const taskService = require("../services/tasksServices");
 
 const taskHandler = {
@@ -36,19 +34,6 @@ const taskHandler = {
     }
   },
 
-  // updateTask: async (req, res) => {
-  //   try {
-  //     const affectedRows = await taskService.updateTask(req.params.id, req.body);
-  //     if (!affectedRows) {
-  //       return res.status(404).json({ error: "Task not found" });
-  //     }
-  //     res.json({ message: "Task updated successfully" });
-  //   } catch (error) {
-  //     console.error("Error updating task:", error);
-  //     res.status(500).json({ error: "Internal Server Error" });
-  //   }
-  // },
-
   deleteTask: async (req, res) => {
     try {
       const affectedRows = await taskService.deleteTask(req.params.id);
@@ -60,7 +45,7 @@ const taskHandler = {
       console.error("Error deleting task:", error);
       res.status(500).json({ error: "Internal Server Error" });
     }
-  }
+  },
 };
 
 module.exports = taskHandler;

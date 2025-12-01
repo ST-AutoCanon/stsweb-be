@@ -1,9 +1,5 @@
-// src/handlers/reportTasksHandler.js
-// Fully updated — strict department enforcement when employee_name is typed.
-// Keeps preview behavior and export behavior intact.
-
 const reportService = require("../services/reportIndex");
-const reportUtils = require("../services/reportUtils"); // fetchRows, coerce helpers if needed
+const reportUtils = require("../services/reportUtils");
 const {
   coerceToString,
   parseDates,
@@ -17,8 +13,6 @@ const {
 } = require("../services/reportFilters");
 
 const MAX_DOWNLOAD_FIELDS_TASKS = 13;
-
-/* -------------------- helpers -------------------- */
 
 async function getEmployeeDepartment(employeeId) {
   if (!employeeId) return null;
@@ -45,13 +39,9 @@ async function getEmployeeDepartment(employeeId) {
   }
 }
 
-/**
- * Verify employee belongs to department. Returns true only when both provided and match.
- * If departmentId is not provided, returns true (no strict check).
- */
 async function verifyEmployeeInDepartment(employeeId, departmentId) {
   if (!employeeId) return false;
-  if (!departmentId) return true; // nothing to verify against
+  if (!departmentId) return true;
   try {
     const mapped = await getEmployeeDepartment(employeeId);
     if (mapped === null) return false;
@@ -65,11 +55,6 @@ async function verifyEmployeeInDepartment(employeeId, departmentId) {
   }
 }
 
-/**
- * Resolve typed employee name -> array of employee_ids.
- * If departmentId provided, only returns ids mapped to that department.
- * Uses reportService.searchEmployees if available, else falls back to DB lookup.
- */
 async function resolveEmployeeIdsFromTypedName(typedName, departmentId) {
   if (!typedName || !typedName.trim()) return [];
   const q = String(typedName).trim();
@@ -85,7 +70,6 @@ async function resolveEmployeeIdsFromTypedName(typedName, departmentId) {
       else if (res && Array.isArray(res.results)) items = res.results;
       else if (res && Array.isArray(res.data)) items = res.data;
     } else {
-      // fallback DB lookup (returns employee_id and department_id)
       const pattern = `%${q}%`;
       const sql =
         "SELECT e.employee_id, pr.department_id FROM employees e LEFT JOIN employee_professional pr ON e.employee_id = pr.employee_id WHERE (CONCAT(COALESCE(e.first_name,''),' ',COALESCE(e.last_name,'')) LIKE ? OR e.email LIKE ? OR e.employee_id LIKE ?) LIMIT 200";
@@ -103,7 +87,6 @@ async function resolveEmployeeIdsFromTypedName(typedName, departmentId) {
       }
     }
 
-    // Normalize items into {employee_id, department_id?}
     const normalized = (Array.isArray(items) ? items : [])
       .map((it) => {
         if (!it) return null;
@@ -119,12 +102,10 @@ async function resolveEmployeeIdsFromTypedName(typedName, departmentId) {
       })
       .filter(Boolean);
 
-    // Unique ids list
     const uniqueIds = Array.from(
       new Set(normalized.map((i) => String(i.employee_id).trim()))
     );
 
-    // If departmentId provided, ensure only those employees actually mapped to department are returned.
     if (departmentId && uniqueIds.length > 0) {
       try {
         const placeholders = uniqueIds.map(() => "?").join(",");
@@ -144,12 +125,11 @@ async function resolveEmployeeIdsFromTypedName(typedName, departmentId) {
         const did = String(departmentId).trim();
         const filtered = uniqueIds.filter((eid) => {
           const m = map[eid];
-          if (m == null || m === "") return false; // enforce strict membership
+          if (m == null || m === "") return false;
           return String(m).trim() === did;
         });
         return filtered;
       } catch (e) {
-        // fallback: filter normalized results by department info present in search results
         const did = String(departmentId).trim();
         const fallbackFiltered = normalized
           .filter(
@@ -161,7 +141,6 @@ async function resolveEmployeeIdsFromTypedName(typedName, departmentId) {
       }
     }
 
-    // no department constraint -> return unique IDs
     return uniqueIds;
   } catch (e) {
     console.warn(
@@ -172,9 +151,6 @@ async function resolveEmployeeIdsFromTypedName(typedName, departmentId) {
   }
 }
 
-/**
- * Build meta human-friendly (used in preview responses)
- */
 async function buildMetaFromReqQuery(query = {}) {
   const meta = {};
 
@@ -269,8 +245,6 @@ async function buildMetaFromReqQuery(query = {}) {
   return meta;
 }
 
-/* -------------------------- row status matching -------------------------- */
-
 function rowMatchesStatusToken(statusToken, row) {
   if (!statusToken) return true;
   const candidateFields = [
@@ -289,21 +263,14 @@ function rowMatchesStatusToken(statusToken, row) {
       try {
         const n = normalizeStatusForQuery(row[k]);
         if (n) candidates.add(n);
-      } catch (e) {
-        // ignore
-      }
+      } catch (e) {}
     }
   }
   const arr = Array.from(candidates);
   return statusMatches(statusToken, arr);
 }
 
-/* ------------------- Supervisor-driven tasks ------------------- */
 async function downloadTasksSupervisorReport(req, res) {
-  console.log(
-    "[reportTasksHandler] downloadTasksSupervisorReport called - query:",
-    req.query || {}
-  );
   try {
     const parsed = parseDates(req.query || {});
     let { startDate, endDate, status, format, fields } = parsed;
@@ -324,11 +291,9 @@ async function downloadTasksSupervisorReport(req, res) {
     if (typeof reportService.getTaskRows !== "function")
       return res.status(500).json({ message: "Server misconfiguration" });
 
-    // If explicit employeeId supplied AND departmentId supplied -> verify membership
     if (employeeId && departmentId) {
       const ok = await verifyEmployeeInDepartment(employeeId, departmentId);
       if (!ok) {
-        // Provide empty preview or 404 for export
         if (isPreviewRequest(req)) {
           return sendPreviewResponse(
             req,
@@ -344,7 +309,6 @@ async function downloadTasksSupervisorReport(req, res) {
       }
     }
 
-    // Fetch raw task rows (service-level filtering may not be strict)
     const rawTasks = await reportService.getTaskRows(
       startDate,
       endDate,
@@ -355,7 +319,6 @@ async function downloadTasksSupervisorReport(req, res) {
     );
     let rows = Array.isArray(rawTasks) ? rawTasks : [];
 
-    // If user typed an employee_name, resolve to IDs and restrict (this is the critical check)
     const typedEmployeeName =
       coerceToString(req.query.employee_name, null) ||
       coerceToString(req.query.employeeName, null) ||
@@ -365,7 +328,6 @@ async function downloadTasksSupervisorReport(req, res) {
         typedEmployeeName,
         departmentId
       );
-      // If no matches (or none in department when departmentId provided) -> No Data
       if (!resolvedIds || resolvedIds.length === 0) {
         if (isPreviewRequest(req)) {
           return sendPreviewResponse(
@@ -381,7 +343,6 @@ async function downloadTasksSupervisorReport(req, res) {
         }
       }
 
-      // Make sure the resolvedIds truly belong to the department if departmentId provided.
       if (departmentId) {
         try {
           const placeholders = resolvedIds.map(() => "?").join(",");
@@ -416,7 +377,6 @@ async function downloadTasksSupervisorReport(req, res) {
             "[reportTasksHandler] employee_professional lookup failed in supervisor filter:",
             e && e.message
           );
-          // conservative: treat as no matches to avoid cross-dept leakage
           if (isPreviewRequest(req)) {
             return sendPreviewResponse(
               req,
@@ -431,7 +391,6 @@ async function downloadTasksSupervisorReport(req, res) {
           }
         }
       } else {
-        // No department constraint — just filter to resolved ids
         rows = rows.filter((r) => {
           const eid =
             r && (r.employee_id ?? r.employeeId ?? r.emp_id ?? r.empId);
@@ -440,7 +399,6 @@ async function downloadTasksSupervisorReport(req, res) {
       }
     }
 
-    // Always enforce department scoping server-side if departmentId provided (if typedEmployeeName not used above, or remaining rows)
     if (departmentId && !typedEmployeeName) {
       const hasDeptIdField = rows.some(
         (r) =>
@@ -499,17 +457,14 @@ async function downloadTasksSupervisorReport(req, res) {
               "[reportTasksHandler] department mapping failed:",
               e && e.message
             );
-            // if mapping fails, be conservative: drop results (prevent cross-dept leakage)
             rows = [];
           }
         } else {
-          // no employees -> nothing to show
           rows = [];
         }
       }
     }
 
-    // final employeeId strict filter (if explicitly provided)
     if (employeeId) {
       rows = rows.filter((r) => {
         const eid = r && (r.employee_id ?? r.employeeId ?? r.emp_id ?? r.empId);
@@ -517,7 +472,6 @@ async function downloadTasksSupervisorReport(req, res) {
       });
     }
 
-    // Preview branch with status filter applied
     if (isPreviewRequest(req)) {
       const statusToken = normalizeStatusForQuery(status);
       const filteredPreview = rows.filter((t) =>
@@ -530,7 +484,6 @@ async function downloadTasksSupervisorReport(req, res) {
       return sendPreviewResponse(req, res, filteredPreview, msg);
     }
 
-    // Export / final filtering
     const statusTokenFinal = normalizeStatusForQuery(status);
     const filtered = rows.filter((t) =>
       rowMatchesStatusToken(statusTokenFinal, t)
@@ -601,12 +554,7 @@ async function downloadTasksSupervisorReport(req, res) {
   }
 }
 
-/* ------------------- Employee-driven weekly tasks ------------------- */
 async function downloadTasksEmployeeReport(req, res) {
-  console.log(
-    "[reportTasksHandler] downloadTasksEmployeeReport called - query:",
-    req.query || {}
-  );
   try {
     const parsed = parseDates(req.query || {});
     let { startDate, endDate, status: parsedStatus, format, fields } = parsed;
@@ -636,7 +584,6 @@ async function downloadTasksEmployeeReport(req, res) {
     if (typeof reportService.getWeeklyTaskRows !== "function")
       return res.status(500).json({ message: "Server misconfiguration" });
 
-    // If explicit employeeId supplied AND departmentId supplied -> verify membership
     if (employeeId && departmentId) {
       const ok = await verifyEmployeeInDepartment(employeeId, departmentId);
       if (!ok) {
@@ -678,7 +625,6 @@ async function downloadTasksEmployeeReport(req, res) {
 
     let rows = Array.isArray(rawWeekly) ? rawWeekly : [];
 
-    // If user typed an employee_name, resolve to IDs and restrict
     const typedEmployeeName =
       coerceToString(req.query.employee_name, null) ||
       coerceToString(req.query.employeeName, null) ||
@@ -702,7 +648,6 @@ async function downloadTasksEmployeeReport(req, res) {
             .json({ message: "No weekly task data for selected date range" });
       }
 
-      // enforce department when departmentId present
       if (departmentId) {
         try {
           const placeholders = resolvedIds.map(() => "?").join(",");
@@ -757,7 +702,6 @@ async function downloadTasksEmployeeReport(req, res) {
       }
     }
 
-    // Enforce department scoping server-side (same logic as supervisor) when typedEmployeeName not used
     if (departmentId && !typedEmployeeName) {
       const hasDeptIdField = rows.some(
         (r) =>
@@ -824,7 +768,6 @@ async function downloadTasksEmployeeReport(req, res) {
       }
     }
 
-    // EmployeeId explicit filter last
     if (employeeId) {
       rows = rows.filter((r) => {
         const eid = r && (r.employee_id ?? r.employeeId ?? r.emp_id ?? r.empId);
@@ -832,7 +775,6 @@ async function downloadTasksEmployeeReport(req, res) {
       });
     }
 
-    // Filter on emp_status
     const filtered = rows.filter((w) =>
       statusMatches(normalizedEmpStatus, [w && w.emp_status])
     );

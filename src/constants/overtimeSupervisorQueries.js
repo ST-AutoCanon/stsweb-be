@@ -1,5 +1,3 @@
-// queries/overtimeSupervisorQueries.js
-
 const UPSERT_OVERTIME_SUPERVISOR = `
   INSERT INTO overtime_details 
     (punch_id, work_date, employee_id, extra_hours, rate, project, supervisor, comments, status)

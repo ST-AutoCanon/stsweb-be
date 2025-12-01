@@ -1,4 +1,3 @@
-// constants/reimbursementQueries.js
 module.exports = {
   GET_ALL_REIMBURSEMENTS: `
   SELECT r.*,
@@ -17,17 +16,6 @@ module.exports = {
   ORDER BY r.created_at DESC
 `,
 
-  /*
-    GET_TEAM_REIMBURSEMENTS (safe with nullable excluded_employee_id and nullable date filters)
-
-    Parameter placeholder order (IMPORTANT):
-      1) department_id
-      2) excluded_employee_id  (the teamLeadId to exclude; may be NULL)
-      3) excluded_employee_id  (same value repeated for the conditional)
-      4) submittedFrom         (may be NULL)
-      5) submittedFrom         (same value, used for >=)
-      6) submittedFrom         (same value, used for DATE_ADD(..., INTERVAL 1 DAY))
-  */
   GET_TEAM_REIMBURSEMENTS: `
   SELECT r.*,
          CONCAT(e.first_name, ' ', e.last_name) AS employee_name,

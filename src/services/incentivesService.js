@@ -1,19 +1,24 @@
-
 const db = require("../config");
-const { 
-  INSERT_INCENTIVE, 
-  GET_INCENTIVES_BY_EMPLOYEE, 
-  GET_ALL_INCENTIVES 
+const {
+  INSERT_INCENTIVE,
+  GET_INCENTIVES_BY_EMPLOYEE,
+  GET_ALL_INCENTIVES,
 } = require("../constants/incentivesQueries");
 
-const insertIncentive = async (employeeId, incentiveType, ctcPercentage, salesAmount, applicableMonth) => {
+const insertIncentive = async (
+  employeeId,
+  incentiveType,
+  ctcPercentage,
+  salesAmount,
+  applicableMonth
+) => {
   try {
     const [result] = await db.query(INSERT_INCENTIVE, [
       employeeId,
       incentiveType,
       ctcPercentage || null,
       salesAmount || null,
-      applicableMonth
+      applicableMonth,
     ]);
     return result;
   } catch (error) {

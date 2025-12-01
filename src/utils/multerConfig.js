@@ -49,11 +49,9 @@ const storage = multer.diskStorage({
       if (type === "experience") {
         subfolder = path.join("exp", `exp_${idx}`);
       } else {
-        // additional_certs
         subfolder = path.join("edu", "additional", `cert_${idx}`);
       }
     } else {
-      // 2) Fallback to simple fields mapping
       subfolder = FIELD_FOLDERS[file.fieldname] || "misc";
     }
 

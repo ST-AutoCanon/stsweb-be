@@ -1,8 +1,5 @@
 const db = require("../config");
 
-/**
- * Fetch punch records for today and yesterday, enriched with employee details
- */
 const fetchTodayAndYesterdayData = async () => {
   const query = `
     SELECT
@@ -41,9 +38,7 @@ const fetchTodayAndYesterdayData = async () => {
   `;
 
   try {
-    console.log("Executing punch query");
     const [rows] = await db.execute(query);
-    console.log("Fetched punch records:", rows.length);
     return rows;
   } catch (error) {
     console.error("Error fetching punch data:", error.message);

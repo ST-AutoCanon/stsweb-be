@@ -1,14 +1,9 @@
-// src/services/reports.js
 const utils = require("./reportUtils");
 const filters = require("./reportFilters");
 const queries = require("../constants/reportQueries"); // your existing queries file
 
 const fetchRows = utils.fetchRows;
 
-/**
- * Utility: Pretty label generator and overrides for human readable PDF/CSV headings.
- * Use getFieldDisplayNames(componentName) to obtain mapping.
- */
 const LABEL_OVERRIDES = {
   replacement_task: "Replacement Task",
   H_F_day: "Half/Full Day",
@@ -205,9 +200,6 @@ function getFieldDisplayNames(component = "default") {
   return map;
 }
 
-/**
- * attachEmployeeNames(rows)
- */
 async function attachEmployeeNames(rows) {
   if (!Array.isArray(rows) || rows.length === 0) return;
   const needName = rows.some((r) => r.employee_id && !r.employee_name);
@@ -314,9 +306,6 @@ async function attachEmployeeNames(rows) {
   }
 }
 
-/**
- * attachDeptNames(rows)
- */
 async function attachDeptNames(rows) {
   if (!Array.isArray(rows) || rows.length === 0) return;
   const missing = rows.some(
@@ -362,11 +351,6 @@ async function attachDeptNames(rows) {
   }
 }
 
-/**
- * forceFilterByEmployeeProfessional(rows, departmentId)
- * - Chunk IN(...) queries to avoid packet/timeouts
- * - On transient DB error, return original rows (do not empty them)
- */
 async function forceFilterByEmployeeProfessional(rows, departmentId) {
   if (!Array.isArray(rows) || rows.length === 0) return [];
   if (departmentId === undefined || departmentId === null) return rows;
@@ -389,7 +373,6 @@ async function forceFilterByEmployeeProfessional(rows, departmentId) {
       const chunk = empIds.slice(i, i + batchSize);
       const placeholders = chunk.map(() => "?").join(",");
       const sql = `SELECT employee_id, department_id FROM employee_professional WHERE employee_id IN (${placeholders})`;
-      // await each chunk to avoid overloading DB with many simultaneous IN queries
       const part = await fetchRows(sql, chunk);
       if (Array.isArray(part)) profRows.push(...part);
     }
@@ -411,7 +394,6 @@ async function forceFilterByEmployeeProfessional(rows, departmentId) {
       if (!emp) return false;
       const mapped = empToDept[emp];
       if (mapped != null && String(mapped).trim() === deptStr) return true;
-      // Fallback: try department_name includes match (less strict)
       if (
         r.department_name &&
         String(r.department_name)
@@ -423,8 +405,6 @@ async function forceFilterByEmployeeProfessional(rows, departmentId) {
     });
     return filtered;
   } catch (e) {
-    // IMPORTANT: If DB lookup fails (ETIMEDOUT etc), do NOT return empty array.
-    // Return original rows so the UI preview doesn't disappear on transient DB faults.
     console.warn(
       "[reports] forceFilterByEmployeeProfessional failed (DB lookup); returning original rows. Error:",
       e && e.message
@@ -433,7 +413,6 @@ async function forceFilterByEmployeeProfessional(rows, departmentId) {
   }
 }
 
-/* --------------------------- Report functions --------------------------- */
 async function getLeaveRows(
   startDate,
   endDate,
@@ -442,15 +421,6 @@ async function getLeaveRows(
   employeeId = null,
   departmentId = null
 ) {
-  console.log("➡️ [getLeaveRows] Called with params:", {
-    startDate,
-    endDate,
-    status,
-    fields,
-    employeeId,
-    departmentId,
-  });
-
   const sql = queries.GET_LEAVE_REPORT;
   if (!sql) {
     console.error(
@@ -460,31 +430,22 @@ async function getLeaveRows(
   }
 
   const params = filters.buildDateStatusParams(startDate, endDate, status);
-  console.log("🧩 [getLeaveRows] SQL Params built:", params);
 
   let rows;
   try {
-    console.log("🚀 [getLeaveRows] Executing SQL...");
     rows = await fetchRows(sql, params);
-    console.log(
-      `✅ [getLeaveRows] SQL executed successfully. Rows fetched: ${
-        rows?.length || 0
-      }`
-    );
+
     rows = Array.isArray(rows) ? rows : [];
     if (rows.length > 0) {
-      console.log("🗂️ [getLeaveRows] Sample row:", rows[0]);
     }
   } catch (err) {
     console.error("❌ [getLeaveRows] SQL execution error:", err);
     throw err;
   }
 
-  console.log("🔗 [getLeaveRows] Attaching employee and department names...");
   await attachEmployeeNames(rows);
   await attachDeptNames(rows);
 
-  console.log("🧮 [getLeaveRows] Applying employee/department filters...");
   try {
     rows = await filters.applyEmployeeAndDepartmentFilters(
       rows,
@@ -492,17 +453,10 @@ async function getLeaveRows(
       departmentId,
       async (deptId) => {
         if (queries && queries.GET_DEPARTMENT_NAME_BY_ID) {
-          console.log(
-            "🔍 [getLeaveRows] Fetching department name for ID:",
-            deptId
-          );
           return await fetchRows(queries.GET_DEPARTMENT_NAME_BY_ID, [deptId]);
         }
         return [];
       }
-    );
-    console.log(
-      `✅ [getLeaveRows] Filters applied. Rows after emp/dept filter: ${rows.length}`
     );
   } catch (e) {
     console.warn(
@@ -513,10 +467,7 @@ async function getLeaveRows(
 
   if (departmentId) {
     const before = rows.length;
-    console.log(
-      "🏗️ [getLeaveRows] Applying strict department filter for dept ID:",
-      departmentId
-    );
+
     const strict = await forceFilterByEmployeeProfessional(rows, departmentId);
     if (Array.isArray(strict) && strict.length >= 0) {
       rows = strict;
@@ -530,9 +481,7 @@ async function getLeaveRows(
     const statusCandidate = filters.normalizeStatusForQuery(status);
     if (statusCandidate) {
       const before = rows.length;
-      console.log(
-        `⚙️ [getLeaveRows] Applying status filter: '${statusCandidate}'`
-      );
+
       rows = rows.filter((r) =>
         filters.statusMatches(statusCandidate, [r.status])
       );
@@ -569,14 +518,9 @@ async function getLeaveRows(
     "preserved_leave_days",
   ];
 
-  console.log("🧾 [getLeaveRows] Keeping only selected fields...");
   const filteredRows = filters.keepOnlyFields(rows, fields, defaultOrder);
 
-  console.log(
-    `✅ [getLeaveRows] Final rows count after field filtering: ${filteredRows.length}`
-  );
   if (filteredRows.length > 0) {
-    console.log("📄 [getLeaveRows] Sample final row:", filteredRows[0]);
   }
 
   return filteredRows;
@@ -615,7 +559,6 @@ async function getReimbursementRows(
   const params = [s, s, e, e];
   let statusSql = "";
   if (!st) {
-    // nothing
   } else if (st === "approved/paid") {
     statusSql =
       " AND LOWER(COALESCE(r.status, '')) = ? AND LOWER(COALESCE(r.payment_status, '')) = ? ";
@@ -1306,8 +1249,6 @@ async function getAssetRows(
   const s = startDate || null;
   const e = endDate || null;
 
-  // Fetch rows WITHOUT relying on DB-level status filtering (we will apply assigned_to.status server-side).
-  // Provide only date params; fetchRows pads params to match placeholders if query expects more params.
   const params = [s, s, e, e];
 
   let rows;
@@ -1319,12 +1260,7 @@ async function getAssetRows(
     throw err;
   }
 
-  // === Post-process each row:
-  // 1) Parse assigned_to JSON (if present) and extract first element's status (assignedStatus)
-  // 2) Set row.status to assignedStatus (so "status column" uses assigned_to.status). If assignedStatus missing fall back to original asset.status
-  // 3) For department / employee filters, try to expose employee_id from assigned_to[*].employeeId when available
   for (const r of rows) {
-    // Keep original asset lifecycle status under a separate key so we don't lose it (useful for frontend labels if needed)
     try {
       if (
         !Object.prototype.hasOwnProperty.call(r, "__asset_lifecycle_status") &&
@@ -1334,7 +1270,6 @@ async function getAssetRows(
       }
     } catch (e) {}
 
-    // Parse assigned_to and extract assignedStatus + employeeIdCandidate
     let assignedStatus = null;
     let assignedEmployeeId = null;
     try {
@@ -1342,12 +1277,10 @@ async function getAssetRows(
       if (raw) {
         let parsed = raw;
         if (typeof raw === "string") {
-          // sometimes DB returns HTML-encoded or escaped strings; try safe parse
           const trimmed = raw.trim();
           if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
             parsed = JSON.parse(trimmed);
           } else {
-            // not JSON array/object — leave as-is
             parsed = raw;
           }
         }
@@ -1359,24 +1292,19 @@ async function getAssetRows(
             (first && (first.employeeId || first.employee_id || first.empId)) ||
             null;
         } else if (parsed && typeof parsed === "object") {
-          // single object stored instead of array
           assignedStatus = parsed.status || parsed.state || null;
           assignedEmployeeId =
             parsed.employeeId || parsed.employee_id || parsed.empId || null;
         }
       }
     } catch (e) {
-      // JSON parse failed — ignore and fallback below
       assignedStatus = null;
       assignedEmployeeId = null;
     }
 
-    // Normalize assignedStatus fallback
     if (assignedStatus !== null && typeof assignedStatus !== "undefined") {
-      // keep as string trimmed
       assignedStatus = String(assignedStatus).trim();
     } else {
-      // if no assigned status found, preserve existing asset.status as status column fallback
       assignedStatus =
         r.status !== undefined &&
         r.status !== null &&
@@ -1385,10 +1313,8 @@ async function getAssetRows(
           : null;
     }
 
-    // Overwrite the "status" field so status column uses the assigned_to.status (or fallback to asset.status)
     r.status = assignedStatus !== null ? assignedStatus : null;
 
-    // Expose assigned_employee_id to help applyEmployeeAndDepartmentFilters which expects employee_id
     if (
       (!r.employee_id || String(r.employee_id).trim() === "") &&
       assignedEmployeeId
@@ -1397,7 +1323,6 @@ async function getAssetRows(
     }
   }
 
-  // Attach names and dept names if possible (these helpers are safe)
   try {
     await attachEmployeeNames(rows);
     await attachDeptNames(rows);
@@ -1408,16 +1333,13 @@ async function getAssetRows(
     );
   }
 
-  // Apply employee/department filters post-fetch (we already exposed a reasonable employee_id from assigned_to)
   try {
     if (
       (employeeId != null && String(employeeId).trim() !== "") ||
       (departmentId != null && String(departmentId).trim() !== "")
     ) {
-      // pass adapted rows to applyEmployeeAndDepartmentFilters
       const adaptedRows = rows.map((r) => {
         const copy = Object.assign({}, r);
-        // ensure employee_id is present for filters (already attempted above)
         if (
           !Object.prototype.hasOwnProperty.call(copy, "employee_id") &&
           copy.assigned_to
@@ -1443,9 +1365,7 @@ async function getAssetRows(
                   parsed.employeeId || parsed.employee_id || copy.employee_id;
               }
             }
-          } catch (e) {
-            // ignore parse errors
-          }
+          } catch (e) {}
         }
         return copy;
       });
@@ -1469,7 +1389,6 @@ async function getAssetRows(
     );
   }
 
-  // If departmentId provided, apply strict professional mapping as additional guard
   if (departmentId) {
     const before = rows.length;
     try {
@@ -1491,7 +1410,6 @@ async function getAssetRows(
     }
   }
 
-  // Apply status filter server-side using assigned_to.status (we already overwrote r.status to assignedStatus)
   try {
     const statusCandidate = filters.normalizeStatusForQuery(status);
     if (statusCandidate) {
@@ -1528,7 +1446,6 @@ async function getAssetRows(
   return filters.keepOnlyFields(rows, fields, defaultOrder);
 }
 
-/* get departments - robust attempts */
 async function getDepartments() {
   try {
     if (queries && queries.GET_DEPARTMENTS) {
@@ -1747,7 +1664,6 @@ async function forceFilterByEmployeeProfessional(rows, departmentId) {
     const sql = `SELECT employee_id, department_id FROM employee_professional WHERE employee_id IN (${placeholders})`;
     const profRows = await fetchRows(sql, empIds);
     if (!Array.isArray(profRows) || profRows.length === 0) {
-      // no mapping available; fallback to original rows to avoid accidental removal
       console.warn(
         "[reports] forceFilterByEmployeeProfessional: no mappings returned; skipping strict filter"
       );
@@ -1759,7 +1675,6 @@ async function forceFilterByEmployeeProfessional(rows, departmentId) {
         empToDept[String(p.employee_id).trim()] =
           p.department_id != null ? String(p.department_id).trim() : null;
     }
-    // If mapping covers none of the empIds, skip strict filtering
     if (Object.keys(empToDept).length === 0) {
       console.warn(
         "[reports] forceFilterByEmployeeProfessional: mapping empty after lookup; skipping strict filter"
@@ -1783,7 +1698,6 @@ async function forceFilterByEmployeeProfessional(rows, departmentId) {
       "[reports] forceFilterByEmployeeProfessional failed (will skip strict filter):",
       e && e.message
     );
-    // on any error, do not filter out rows — fall back to prior behavior
     return rows;
   }
 }
@@ -1874,7 +1788,6 @@ async function buildMetaFromReqQuery(query) {
   }
 }
 
-/* export public API */
 module.exports = {
   getLeaveRows,
   getReimbursementRows,

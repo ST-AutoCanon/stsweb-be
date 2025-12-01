@@ -1,5 +1,4 @@
 module.exports = {
-  /* forgot-password queries*/
   GET_EMPLOYEE_BY_EMAIL: `SELECT *
   FROM employees
   WHERE email = ?
@@ -23,7 +22,6 @@ module.exports = {
     WHERE email = ?;
   `,
 
-  /* add-department queries*/
   ADD_DEPARTMENT: "INSERT INTO departments (name, icon) VALUES (?, ?)",
   GET_DEPARTMENTS: "SELECT * FROM departments",
 

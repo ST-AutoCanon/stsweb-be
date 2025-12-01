@@ -1,4 +1,3 @@
-// src/handlers/reportVendorsHandler.js
 const reportService = require("../services/reportIndex");
 const {
   parseDates,
@@ -102,10 +101,6 @@ async function buildMetaFromReqQuery(query = {}) {
 }
 
 async function downloadVendorsReport(req, res) {
-  console.log(
-    "[ReportVendorsHandler] downloadVendorsReport called - query:",
-    req.query
-  );
   try {
     const parsed = parseDates(req.query || {});
     let { startDate, endDate, format, fields } = parsed;
@@ -121,7 +116,6 @@ async function downloadVendorsReport(req, res) {
     if (typeof reportService.getVendorRows !== "function")
       return res.status(500).json({ message: "Server misconfiguration" });
 
-    // fetch rows (service should accept fields but we defensively apply pickFields here)
     const rowsRaw = await reportService.getVendorRows(
       startDate,
       endDate,
@@ -147,7 +141,6 @@ async function downloadVendorsReport(req, res) {
         .status(404)
         .json({ message: "No vendor data for selected date range" });
 
-    // Apply pickFields (if available) so exports only include requested fields
     let rowsForExport = rows;
     if (
       fields &&

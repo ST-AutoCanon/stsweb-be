@@ -1,4 +1,3 @@
-// src/handlers/reportReimbursementsHandler.js
 const reportService = require("../services/reportIndex");
 const {
   coerceToString,
@@ -14,9 +13,6 @@ const {
 
 const db = require("../config");
 
-/**
- * dbExec - supports both promise-style and callback-style mysql clients.
- */
 async function dbExec(sql, params = []) {
   try {
     if (!Array.isArray(params)) params = [params];
@@ -132,7 +128,6 @@ async function lookupDeptForEmployee(employeeId) {
   return null;
 }
 
-/* find departments managed by managerEmpId (same approach as leaves handler) */
 async function findDepartmentsManagedBy(managerEmpId) {
   if (!managerEmpId) return [];
   const out = [];
@@ -300,10 +295,6 @@ async function buildMetaFromReqQuery(query = {}) {
 }
 
 async function downloadReimbursementsReport(req, res) {
-  console.log(
-    "[reportReimbursementsHandler] downloadReimbursementsReport called - query:",
-    req.query
-  );
   const startTs = Date.now();
   try {
     const parsed = parseDates(req.query || {});
@@ -312,7 +303,6 @@ async function downloadReimbursementsReport(req, res) {
     let employeeId = coerceToString(req.query.employee_id, null);
     let departmentId = coerceToString(req.query.department_id, null);
 
-    // derive department if needed from requester
     const requesterEmpId = findEmployeeIdInRequest(req);
 
     if (!departmentId && requesterEmpId) {
@@ -368,7 +358,6 @@ async function downloadReimbursementsReport(req, res) {
       return res.status(500).json({ message: "Server misconfiguration" });
     }
 
-    // If we have departmentId or employeeId explicitly, pass them through to service
     if (employeeId || departmentId) {
       const rawReimbursements = await reportService.getReimbursementRows(
         startDate,
@@ -380,7 +369,6 @@ async function downloadReimbursementsReport(req, res) {
       );
       let rows = Array.isArray(rawReimbursements) ? rawReimbursements : [];
 
-      // Enforce local scoping just to be safe:
       if (departmentId) {
         rows = rows.filter((r) => {
           const rid =
@@ -464,7 +452,6 @@ async function downloadReimbursementsReport(req, res) {
       } else return res.status(400).json({ message: "Invalid format" });
     }
 
-    // No explicit employee/department — consider manager scoping if managerEmpId present
     let rows = [];
     if (managerEmpId) {
       let managedDeptIds = [];
@@ -504,7 +491,6 @@ async function downloadReimbursementsReport(req, res) {
             map.set(String(p.reimbursement_id ?? p.id), p);
         rows = Array.from(map.values());
       } else {
-        // fallback: fetch all and filter by supervisor mapping
         try {
           const all = await reportService.getReimbursementRows(
             startDate,
@@ -544,7 +530,6 @@ async function downloadReimbursementsReport(req, res) {
         }
       }
     } else {
-      // no scoping - full fetch
       const rawReimbursements = await reportService.getReimbursementRows(
         startDate,
         endDate,
@@ -556,8 +541,6 @@ async function downloadReimbursementsReport(req, res) {
       rows = Array.isArray(rawReimbursements) ? rawReimbursements : [];
     }
 
-    // As a final defensive filter: if the request included department_id or employee_id (even empty strings),
-    // apply scoping locally to ensure previews/downloads cannot leak other departments.
     const explicitDept = coerceToString(
       req.query && (req.query.department_id ?? req.query.departmentId),
       null
@@ -580,7 +563,6 @@ async function downloadReimbursementsReport(req, res) {
       });
     }
 
-    // Preview handling
     if (isPreviewRequest(req)) {
       const msg =
         rows.length === 0
@@ -589,7 +571,6 @@ async function downloadReimbursementsReport(req, res) {
       return sendPreviewResponse(req, res, rows, msg);
     }
 
-    // Now filter by status and format as before
     const statusCandidate = normalizeStatusForQuery(status);
     const filtered = rows.filter((r) =>
       statusMatches(statusCandidate, [

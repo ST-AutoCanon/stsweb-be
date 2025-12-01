@@ -1,8 +1,3 @@
-// queries/overtimeQueries.js (add to existing file)
-// Assuming 'punches' table: punch_id, employee_id, work_date, hours_worked (decimal), apportioned_hours? (if pre-apportioned)
-// Join with employee_projects on employee_id for project_names (GROUP_CONCAT), supervisor_name
-// Adjust joins/columns to match your exact schema (e.g., if projects is separate table)
-
 const FETCH_PUNCHES_BY_DATE_RANGE = `
   SELECT 
     p.punch_id,
@@ -51,7 +46,6 @@ const UPSERT_OVERTIME = `
     status = VALUES(status),
     updated_at = CURRENT_TIMESTAMP
 `;
-// Previous UPDATE_OVERTIME remains
 const UPDATE_OVERTIME = `
   UPDATE overtime_details 
   SET 
@@ -64,7 +58,8 @@ const UPDATE_OVERTIME = `
   WHERE punch_id = ?
 `;
 module.exports = {
-  UPDATE_OVERTIME, // From previous
+  UPDATE_OVERTIME,
   FETCH_PUNCHES_BY_DATE_RANGE,
-  FETCH_OVERTIME_DETAILS_BY_PUNCHES,UPSERT_OVERTIME,
+  FETCH_OVERTIME_DETAILS_BY_PUNCHES,
+  UPSERT_OVERTIME,
 };

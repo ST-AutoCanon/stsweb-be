@@ -1,4 +1,3 @@
-// handlers/reimbursementHandler.js
 const reimbursementService = require("../services/reimbursementService");
 const multer = require("multer");
 const path = require("path");
@@ -9,7 +8,6 @@ const db = require("../config");
 const queries = require("../constants/reimbursementQueries");
 const XLSX = require("xlsx");
 
-// forbidden extensions
 const forbiddenExts = new Set([
   ".xlsx",
   ".xls",
@@ -24,11 +22,9 @@ const forbiddenExts = new Set([
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // Derive date parts
     const isoDate = req.body.date || new Date().toISOString().slice(0, 10);
     const [year, month] = isoDate.split("-");
 
-    // Build the destination path
     const dest = path.join(
       __dirname,
       "..",
@@ -40,7 +36,6 @@ const storage = multer.diskStorage({
       String(req.user?.employeeId || req.body.employeeId || "unknown")
     );
 
-    // Ensure folder exists
     fs.mkdirSync(dest, { recursive: true });
     cb(null, dest);
   },
@@ -52,7 +47,6 @@ const storage = multer.diskStorage({
   },
 });
 
-// multer fileFilter
 function fileFilter(req, file, cb) {
   const ext = path.extname(file.originalname).toLowerCase();
   if (forbiddenExts.has(ext)) {
@@ -67,14 +61,12 @@ function fileFilter(req, file, cb) {
   cb(null, true);
 }
 
-// multer instance
 const upload = multer({
   storage,
   fileFilter,
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
 });
 
-// fallback validation
 function validateAttachments(files) {
   for (const file of files) {
     const ext = path.extname(file.originalname).toLowerCase();
@@ -85,7 +77,6 @@ function validateAttachments(files) {
   return null;
 }
 
-// Utility: safe unlink sync
 function safeUnlinkSync(fp) {
   try {
     if (fs.existsSync(fp)) fs.unlinkSync(fp);
@@ -94,21 +85,17 @@ function safeUnlinkSync(fp) {
   }
 }
 
-// ── CONTROLLER METHODS ────────────────────────────────────────────────────────
-
 exports.generateReimbursementPDF = async (req, res) => {
   try {
     const { claimId } = req.params;
     if (!claimId) return res.status(400).json({ error: "claimId required" });
 
-    // Fetch claim details
     const [claimRows] = await db.query(queries.GET_CLAIM_DETAILS, [claimId]);
     const claim = Array.isArray(claimRows) ? claimRows[0] : claimRows;
     if (!claim || !claim.employee_id) {
       return res.status(404).json({ error: "Claim not found" });
     }
 
-    // Fetch employee
     const [employeeRows] = await db.query(queries.GET_EMPLOYEE_DETAILS, [
       claim.employee_id,
     ]);
@@ -119,7 +106,6 @@ exports.generateReimbursementPDF = async (req, res) => {
       return res.status(404).json({ error: "Employee details not found" });
     }
 
-    // Fetch attachments
     const [attachmentsRows] = await db.query(queries.GET_ATTACHMENTS, [
       claimId,
     ]);
@@ -127,7 +113,6 @@ exports.generateReimbursementPDF = async (req, res) => {
       ? attachmentsRows
       : attachmentsRows || [];
 
-    // Keep only attachments with file_path
     const attachmentsWithFiles = attachments.filter(
       (att) => att && att.file_path
     );
@@ -139,24 +124,20 @@ exports.generateReimbursementPDF = async (req, res) => {
       );
     }
 
-    // Warn if files missing on disk
     attachmentsWithFiles.forEach((att) => {
       if (!fs.existsSync(att.file_path)) {
         console.warn(`File not found on disk: ${att.file_path}`);
       }
     });
 
-    // Generate DOCX using only valid attachments
     const docxPath = await generateDocx(claim, employee, attachmentsWithFiles);
 
-    // Convert to PDF
     const pdfPath = await convertDocxToPdf(
       docxPath,
       claim,
       attachmentsWithFiles
     );
 
-    // Create a safe file name
     const fileNameBase = (employee.name || `claim_${claimId}`).replace(
       /\s+/g,
       "_"
@@ -165,7 +146,6 @@ exports.generateReimbursementPDF = async (req, res) => {
 
     res.download(pdfPath, fileName, (err) => {
       if (err) console.error("Download error:", err);
-      // cleanup temp files if they exist
       safeUnlinkSync(docxPath);
       safeUnlinkSync(pdfPath);
     });
@@ -195,7 +175,6 @@ exports.getReimbursementsByEmployee = async (req, res) => {
   }
 };
 
-// reimbursementHandler.js (controller)
 exports.updatePaymentStatus = async (req, res) => {
   try {
     const { id } = req.params;
@@ -203,7 +182,6 @@ exports.updatePaymentStatus = async (req, res) => {
 
     if (!id) return res.status(400).json({ error: "id required" });
 
-    // allow exactly these three statuses now:
     if (
       !["pending", "paid", "rejected"].includes(
         String(payment_status).toLowerCase()
@@ -216,7 +194,6 @@ exports.updatePaymentStatus = async (req, res) => {
       return res.status(403).json({ error: "Not authorized." });
     }
 
-    // only approved claims may be paid or rejected
     const [rows] = await db.query(
       "SELECT status FROM reimbursement WHERE id = ?",
       [id]
@@ -232,7 +209,6 @@ exports.updatePaymentStatus = async (req, res) => {
       });
     }
 
-    // set paid_date only when status === "paid"
     const paid_date =
       String(payment_status).toLowerCase() === "paid" ? new Date() : null;
     const updated = await reimbursementService.updatePaymentStatus(
@@ -267,34 +243,26 @@ exports.getAllReimbursements = async (req, res) => {
   }
 };
 
-/**
- * GET /reimbursements/export?submittedFrom=…&submittedTo=…
- */
 exports.exportReimbursements = async (req, res) => {
   try {
     let { submittedFrom, submittedTo } = req.query;
     submittedFrom = submittedFrom !== "null" ? submittedFrom : null;
     submittedTo = submittedTo !== "null" ? submittedTo : null;
 
-    // reuse service to fetch grouped rows (array of { employee_id, claims })
     const rows = await reimbursementService.getAllReimbursements(
       submittedFrom,
       submittedFrom,
       submittedTo
     );
 
-    // flatten into one big array of claims:
     const flat = rows.reduce((acc, r) => acc.concat(r.claims || []), []);
 
-    // convert to sheet
     const ws = XLSX.utils.json_to_sheet(flat);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Reimbursements");
 
-    // write to buffer
     const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
 
-    // set a filename
     const fname = `Reimbursements_${submittedFrom || "all"}-to-${
       submittedTo || "all"
     }.xlsx`;
@@ -314,7 +282,6 @@ exports.exportReimbursements = async (req, res) => {
 
 exports.createReimbursement = async (req, res) => {
   try {
-    // Fallback validation
     if (req.files && req.files.length) {
       const errMsg = validateAttachments(req.files);
       if (errMsg) {
@@ -363,9 +330,7 @@ exports.createReimbursement = async (req, res) => {
       reimbursementData
     );
 
-    // Auto-approve if Admin
     if (role === "Admin") {
-      // approver_id: use the admin's employeeId if present else 'Admin'
       const approverId = req.user?.employeeId || "Admin";
       await reimbursementService.updateReimbursementStatus(
         newReimbursement.id,
@@ -383,7 +348,6 @@ exports.createReimbursement = async (req, res) => {
     });
   } catch (error) {
     console.error("Error creating reimbursement:", error);
-    // If files were uploaded, attempt cleanup on error
     if (req.files && req.files.length) {
       req.files.forEach((f) => safeUnlinkSync(f.path));
     }
@@ -393,10 +357,8 @@ exports.createReimbursement = async (req, res) => {
   }
 };
 
-// Note: in your routes, use upload.array("attachments", 5) before this handler
 exports.updateReimbursement = async (req, res) => {
   try {
-    // Fallback validation
     if (req.files && req.files.length) {
       const errMsg = validateAttachments(req.files);
       if (errMsg) {
@@ -452,7 +414,6 @@ exports.updateReimbursement = async (req, res) => {
     res.json({ message: "Reimbursement updated", data: updatedReimbursement });
   } catch (error) {
     console.error("Error updating reimbursement:", error);
-    // cleanup uploaded files on error
     if (req.files && req.files.length) {
       req.files.forEach((f) => safeUnlinkSync(f.path));
     }
@@ -469,16 +430,13 @@ exports.updateReimbursementStatus = async (req, res) => {
       return res.status(400).json({ error: "Invalid status." });
     }
 
-    // get approver details (service returns single object or null)
     const approverDetails = await reimbursementService.getApproverDetails(
       approver_id
     );
 
-    // normalize possible shapes
     let approver_name = null;
     let approver_designation = null;
     if (approverDetails) {
-      // If the service returns an array, take first element
       const row = Array.isArray(approverDetails)
         ? approverDetails[0]
         : approverDetails;
@@ -602,7 +560,6 @@ exports.getAttachmentsByReimbursementId = async (req, res) => {
 
 exports.getTeamReimbursements = async (req, res) => {
   try {
-    // expect /team/:teamLeadId/reimbursements
     const { teamLeadId } = req.params;
     const { departmentId } = req.query;
     let { submittedFrom, submittedTo } = req.query;
@@ -618,7 +575,6 @@ exports.getTeamReimbursements = async (req, res) => {
       submittedFrom && submittedFrom !== "null" ? submittedFrom : null;
     const end = submittedTo && submittedTo !== "null" ? submittedTo : null;
 
-    // correct order: (departmentId, submittedFrom, submittedTo, teamLeadId)
     const teamReimbursements = await reimbursementService.getTeamReimbursements(
       departmentId,
       start,
@@ -642,5 +598,4 @@ exports.getAllProjects = async (req, res) => {
   }
 };
 
-// Export multer upload for use in your routes
 exports.upload = upload;

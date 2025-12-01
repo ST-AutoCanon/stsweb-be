@@ -1,4 +1,3 @@
-
 const INSERT_NEW_TASK_MESSAGE = `
   INSERT INTO task_messages (task_id, message_data)
   VALUES (?, ?)

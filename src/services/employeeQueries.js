@@ -35,7 +35,6 @@ class EmployeeQueries {
       throw new Error("Invalid recipient role.");
     }
 
-    // Create the thread
     const [result] = await db.execute(queries.CREATE_THREAD, [
       sender_id,
       recipient_id,
@@ -44,7 +43,6 @@ class EmployeeQueries {
     ]);
     const threadId = result.insertId;
 
-    // Insert the initial message and capture the message id
     const [messageResult] = await db.execute(queries.ADD_MESSAGE, [
       threadId,
       sender_id,
@@ -54,7 +52,6 @@ class EmployeeQueries {
     ]);
     const messageId = messageResult.insertId;
 
-    // Only mark the message as unread for the intended recipient.
     await EmployeeQueries.markMessageUnreadForRecipients(messageId, [
       recipient_id,
     ]);
@@ -71,17 +68,13 @@ class EmployeeQueries {
     let latestMessageValue = "";
 
     if (message && message.trim().length > 0) {
-      // If there's a text message, use it
       latestMessageValue = message;
     } else if (attachment_url) {
-      // Otherwise, if there's an attachment but no text, set a placeholder
       latestMessageValue = "Attachment";
     } else {
-      // No text, no attachment (edge case) - could leave blank or set a default
       latestMessageValue = "";
     }
 
-    // Update the threads table
     await db.execute(queries.UPDATE_LATEST_MESSAGE, [
       latestMessageValue,
       thread_id,
@@ -96,7 +89,6 @@ class EmployeeQueries {
     recipient_id,
     attachment_url = null
   ) {
-    // Insert the message record
     const [result] = await db.execute(queries.ADD_MESSAGE, [
       thread_id,
       sender_id,
@@ -106,14 +98,12 @@ class EmployeeQueries {
     ]);
     const messageId = result.insertId;
 
-    // Update latest_message in threads.
     await EmployeeQueries.updateThreadLatestMessage(
       thread_id,
       message,
       attachment_url
     );
 
-    // Only mark as unread for the intended recipient.
     await EmployeeQueries.markMessageUnreadForRecipients(messageId, [
       recipient_id,
     ]);

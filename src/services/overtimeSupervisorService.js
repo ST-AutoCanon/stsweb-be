@@ -1,6 +1,7 @@
-// services/overtimeSupervisorService.js
 const pool = require("../config");
-const { UPSERT_OVERTIME_SUPERVISOR } = require("../constants/overtimeSupervisorQueries");
+const {
+  UPSERT_OVERTIME_SUPERVISOR,
+} = require("../constants/overtimeSupervisorQueries");
 
 const upsertOvertimeSupervisor = async (records, approvedById) => {
   const connection = await pool.getConnection();
