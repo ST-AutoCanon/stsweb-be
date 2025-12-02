@@ -45,8 +45,8 @@ module.exports = {
     p.company_gst AS gst,
     p.service_location AS service, 
     p.project_name AS project, 
-    p.start_date AS startDate, 
-    p.end_date AS endDate, 
+    DATE_FORMAT(p.start_date,'%Y-%m-%d') AS startDate, 
+    DATE_FORMAT(p.end_date,'%Y-%m-%d') AS endDate, 
     p.project_status AS status, 
     p.project_poc_name AS clientPOC,
     p.project_poc_contact AS clientNumber, 
@@ -68,11 +68,12 @@ module.exports = {
       p.company_gst AS gst,
       p.service_location AS service, 
       p.project_name AS project,
-      p.start_date AS startDate, 
-      p.end_date AS endDate, 
+      DATE_FORMAT(p.start_date,'%Y-%m-%d') AS startDate, 
+      DATE_FORMAT(p.end_date,'%Y-%m-%d') AS endDate, 
       p.project_status AS status, 
       p.project_poc_name AS clientPOC,
-      p.project_poc_contact AS clientNumber, 
+      p.project_poc_contact AS clientNumber,
+      p.state, 
       s.sts_owner AS stsPOC, 
       (SELECT COUNT(m.id) 
      FROM milestones m 
@@ -86,6 +87,8 @@ module.exports = {
   GET_PROJECT_BY_ID: `
   SELECT 
     p.*,
+    DATE_FORMAT(p.start_date,'%Y-%m-%d') AS start_date, 
+      DATE_FORMAT(p.end_date,'%Y-%m-%d') AS end_date,
     (SELECT MAX(s.sts_owner_id) FROM sts_owners s WHERE s.project_id = p.id) AS sts_owner_id,
     (SELECT MAX(s.sts_owner) FROM sts_owners s WHERE s.project_id = p.id) AS sts_owner,
     (SELECT MAX(s.sts_contact) FROM sts_owners s WHERE s.project_id = p.id) AS sts_contact,
