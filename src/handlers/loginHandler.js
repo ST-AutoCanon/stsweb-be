@@ -50,8 +50,9 @@ class LoginHandler {
       const employeeCountByDepartment =
         await LoginService.getEmployeeCountByDepartment();
 
-      req.session.lastActive = Date.now();
+      req.session.userId = user.employee_id;
       req.session.userRole = user.role;
+      req.session.lastActive = Date.now();
 
       req.session.save((err) => {
         if (err) {
@@ -189,9 +190,7 @@ class LoginHandler {
 
   static async getEmployeePayrollData(req, res) {
     try {
-      const { employeeId } = req.params;
-
-      const payrollData = await LoginService.getEmployeePayrollData(employeeId);
+      const payrollData = await LoginService.getEmployeePayrollData();
 
       if (!payrollData) {
         return res

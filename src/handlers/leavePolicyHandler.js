@@ -62,7 +62,11 @@ class LeavePolicyHandler {
         );
     } catch (err) {
       console.error("getAllPolicies:", err);
-      return internalError(res, "getAllPolicies");
+      return res
+        .status(500)
+        .json(
+          ErrorHandler.generateErrorResponse(500, "Internal server error.")
+        );
     }
   }
 

@@ -6,6 +6,7 @@ require("dotenv").config();
 const path = require("path");
 const session = require("express-session");
 const { Server } = require("socket.io");
+
 const planRoutes = require("./routes/planRoute");
 const supervisorEmployeesRoutes = require("./routes/supervisorEmployeesRoutes");
 const supervisorRoutes = require("./routes/supervisorRoutes");
@@ -20,7 +21,6 @@ const overtimeSupervisorRoutes = require("./routes/overtimeSupervisorRoutes");
 
 const EmployeeQueries = require("./services/employeeQueries");
 const chatService = require("./services/chatService");
-const apiKeyMiddleware = require("./middleware/apiKeyMiddleware");
 const idleTimeout = require("./middleware/idleTimeout");
 
 const holidayRoutes = require("./routes/holidayRoutes");
@@ -53,7 +53,6 @@ const salarylastmonthtotal = require("./routes/adminPayrollRoutes");
 const reimbursementRoutes = require("./routes/reimbursementRoute");
 const adminSalaryStatementRoutes = require("./routes/adminSalaryStatementRoute");
 const assetsRoutes = require("./routes/assetsRoutes");
-const validateApiKey = require("./middleware/apiKeyMiddleware");
 const adminAttendanceRoutes = require("./routes/adminAttendancetrackerRoute");
 const adminAttendancetrackerRoute = require("./routes/adminAttendancetrackerRoute");
 const face_admin_page = require("./routes/face_adminpageRoutes");
@@ -82,10 +81,11 @@ const employeeProjectsRoute = require("./routes/employeeProjectsRoute");
 const lossofPayCalculationRoutes = require("./routes/lossofPayCalculationRoutes");
 const incentivesRoutes = require("./routes/incentivesRoutes");
 const salaryRoutes2 = require("./routes/salaryCalculationPeriodRoutes");
-const salaryDetailsRoutes = require("./routes/salaryDetailsRoutes"); // Adjust path if needed
+const salaryDetailsRoutes = require("./routes/salaryDetailsRoutes");
 const employeeBankReportRoutes = require("./routes/employeebankreportroute");
 const salaryStatementRouter = require("./routes/salaryRoutes");
 const salaryDetailsRouter = require("./routes/salaryDetailsRouter");
+
 const app = express();
 const server = http.createServer(app);
 
@@ -131,6 +131,22 @@ app.use((req, res, next) => {
   next();
 });
 
+const sessionMiddleware = session({
+  secret: process.env.SESSION_SECRET || "change_this_in_prod",
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === "production",
+    httpOnly: true,
+    sameSite: "lax",
+    maxAge: 24 * 60 * 60 * 1000,
+  },
+});
+app.use(sessionMiddleware);
+
+const apiKeyMiddleware = require("./middleware/apiKeyMiddleware");
+app.use(apiKeyMiddleware);
+
 app.use("/api/weekly_task_supervisor", weeklyTaskSupervisorRoutes);
 app.use("/api/week_tasks", weekTaskRoutes);
 app.use("/api/tasks", taskRoutes);
@@ -142,6 +158,7 @@ app.use("/api", configRoutes);
 app.use("/api/task-emp-emp", taskEmployeesRoutes);
 app.use("/api/employee-tasks", employeeTaskRoutes);
 app.use("/api", salaryRoutes2);
+
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 app.use("/api/salary-statement", salaryStatementRouter);
 app.use("/api/salary-details", salaryDetailsRouter);
@@ -254,22 +271,6 @@ cron.schedule("0 20 * * 1-6", async () => {
   }
 });
 
-app.use(apiKeyMiddleware);
-
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET,
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      secure: false,
-      httpOnly: true,
-      maxAge: 24 * 60 * 60 * 1000,
-      sameSite: "lax",
-    },
-  })
-);
-
 app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
 app.use("/assets", express.static(path.join(__dirname, "assets")));
 app.use("/api/leave-policies", leavePolicy);
@@ -359,26 +360,41 @@ app.use("/api/salary-details", salaryDetailsRoutes);
 app.use("/api/compensation", employeeBankReportRoutes);
 
 const io = new Server(server, {
-  cors: { origin: process.env.FRONTEND_URL || "*", credentials: true },
+  cors: {
+    origin: (origin, callback) => {
+      if (
+        !origin ||
+        allowedOrigins.includes(origin) ||
+        origin === process.env.FRONTEND_URL
+      ) {
+        callback(null, true);
+      } else {
+        callback(new Error("CORS not allowed by server"), false);
+      }
+    },
+    credentials: true,
+  },
   path: "/api/socket.io",
 });
 app.set("io", io);
 
 io.use((socket, next) => {
+  sessionMiddleware(socket.request, {}, (err) => {
+    if (err) return next(err);
+    return next();
+  });
+});
+
+io.use((socket, next) => {
+  const session = socket.request.session;
+  const userIdFromSession =
+    session && session.userId ? String(session.userId) : null;
   const queryUser = socket.handshake.query?.userId || null;
   const authUser = socket.handshake.auth?.userId || null;
   const headerUser = socket.handshake.headers?.["x-employee-id"] || null;
-  const userId = queryUser || authUser || headerUser || null;
 
-  if (!userId) {
-    console.warn(
-      "[socket] no userId in handshake; allowing connection but functionality may be limited"
-    );
-    socket.userId = null;
-    return next();
-  }
-
-  socket.userId = String(userId);
+  socket.userId =
+    userIdFromSession || queryUser || authUser || headerUser || null;
   return next();
 });
 
@@ -585,7 +601,7 @@ io.on("connection", (socket) => {
   });
 });
 
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
