@@ -1,7 +1,6 @@
 const express = require("express");
 const http = require("http");
 const bodyParser = require("body-parser");
-const cors = require("cors");
 require("dotenv").config();
 const path = require("path");
 const session = require("express-session");
@@ -20,6 +19,7 @@ const report = require("./routes/reportRoutes");
 const overtimeSupervisorRoutes = require("./routes/overtimeSupervisorRoutes");
 
 const EmployeeQueries = require("./services/employeeQueries");
+const chatRoutes = require("./routes/chatRoutes");
 const chatService = require("./services/chatService");
 const idleTimeout = require("./middleware/idleTimeout");
 
@@ -61,7 +61,7 @@ const employeeBirthdayRoutes = require("./routes/employeeBirthday");
 
 const meetingRoutes = require("./routes/meetingRoutes");
 const notificationsRouter = require("./routes/notifications");
-
+const assetsRoutesforreturn = require("./routes/assetsRoutes");
 const vendorRoutes = require("./routes/vendorRoutes");
 const configRoutes = require("./routes/configRoutes");
 const oldEmployeeRoutes = require("./routes/oldEmployeeDetailsRoute");
@@ -106,8 +106,12 @@ const allowedOrigins = [
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
+  if (
+    !origin ||
+    allowedOrigins.includes(origin) ||
+    origin === process.env.FRONTEND_URL
+  ) {
+    res.setHeader("Access-Control-Allow-Origin", origin || "*");
     res.setHeader("Vary", "Origin");
   }
   res.setHeader("Access-Control-Allow-Credentials", "true");
@@ -164,11 +168,109 @@ app.use("/api/salary-statement", salaryStatementRouter);
 app.use("/api/salary-details", salaryDetailsRouter);
 app.use("/api/salary-details", salaryRoutes);
 
-const assetsRoutesforreturn = require("./routes/assetsRoutes");
-const chatRoutes = require("./routes/chatRoutes");
+app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
+app.use("/assets", express.static(path.join(__dirname, "assets")));
+app.use("/api/leave-policies", leavePolicy);
+app.use(idleTimeout);
+app.use("/", holidayRoutes);
+app.use("/", loginRoutes);
+app.use("/", leaveRoutes);
+app.use("/", projects);
+app.use("/", invoices);
+app.use("/", employeeRoutes);
+app.use("/", meetingRoutes);
+app.use("/api", notificationsRouter);
+app.use("/", employeeQueries);
+app.use("/", resetPasswordRoutes);
+app.use("/", forgotPasswordRoutes);
+app.use("/", addDepartmentRoutes);
+app.use("/", reimbursementRoutes);
+app.use("/", chatRoutes);
+app.use("/attendance", attendanceRoutes);
+app.use("/", dashboardReimbursementRoutes);
+app.use("/", workDayRoutes);
+app.use("/", empSessionRoutes);
+app.use("/api", workHourSummaryRoutes);
+app.use("/", empLeaveQueryDashboard);
+app.use("/salary", salaryRoutes);
+app.use("/api", payrollRoutes);
+app.use("/api", bankDetailsRoutes);
+app.use("/api/report", report);
+app.use("/", workDayRoutes);
+app.use("/api", adminSalaryStatementRoutes);
+app.use("/", salarylastmonthtotal);
+app.use("/", admindashboardReimbursementRoutes);
+app.use("/api", regFaceRoutes);
+app.use("/api/face", faceRoutes);
+app.use("/", faceDataRoutes);
+app.use(checkFaceRoute);
+
+app.get("/", (req, res) => res.send("Employee Face Recognition API"));
+
+app.use("/assets", assetsRoutes);
+app.use("/api/assets", assetsRoutes);
+app.use("/api", assetsRoutesforreturn);
+app.use("/api/attendance", adminAttendanceRoutes);
+app.use("/admin/attendance", adminAttendanceRoutes);
+app.use("/admin-attendance", adminAttendanceRoutes);
+app.use("/face-punch", face_admin_page);
+app.use("/api/employeelogin", employeeloginRoutes);
+app.use("/api", empExcelRoutes);
+app.use("/api/employee", employeeBirthdayRoutes);
+app.use("/", vendorRoutes);
+app.use("/", oldEmployeeRoutes);
+app.use("/", oldEmployeeDetailsRoutes);
+app.use("/api", letterRoutes);
+app.use(
+  "/letterheadfiles",
+  express.static(path.join(__dirname, "letterheadfiles"))
+);
+app.use("/api", letterheadRoutes);
+app.use("/api", letterheadTemplateRoutes);
+app.use("/api/templates", letterheadTemplateRoutes);
+app.use("/api", employeeProjectsRoute);
+app.use("/api/lop", lossofPayCalculationRoutes);
+app.use("/api/incentives", incentivesRoutes);
+app.use("/api/overtime", overtimeRoutes);
+app.use("/api/overtime-summary", overtimeSummaryRoutes);
+app.use("/api/compensation", overtimeSupervisorRoutes);
+app.use("/api/compensations", compensationRoutes);
+app.use("/api/compensation", assignCompensationRoutes);
+app.use("/api", employeeRoutesforsalarybreakup);
+app.use("/api/salary-details", salaryDetailsRoutes);
+app.use("/api/compensation", employeeBankReportRoutes);
+
 const webpush = require("web-push");
 const cron = require("node-cron");
 const policyNotificationService = require("./services/policyNotificationService");
+
+const subscriptions = [];
+webpush.setVapidDetails(
+  "mailto:vaibhavichinchure@gmail.com",
+  process.env.VAPID_PUBLIC_KEY,
+  process.env.VAPID_PRIVATE_KEY
+);
+
+app.get("/vapidPublicKey", (req, res) => {
+  if (!process.env.VAPID_PUBLIC_KEY)
+    return res.status(500).json({ error: "VAPID_PUBLIC_KEY not set in env" });
+  res.json({ publicKey: process.env.VAPID_PUBLIC_KEY });
+});
+
+app.post("/subscribe", (req, res) => {
+  const sub = req.body;
+  if (!sub || !sub.endpoint)
+    return res.status(400).send("Invalid subscription");
+  if (!subscriptions.find((s) => s.endpoint === sub.endpoint))
+    subscriptions.push(sub);
+  res.status(201).json({ success: true });
+});
+
+app.post("/check-subscription", (req, res) => {
+  const { endpoint } = req.body;
+  const exists = subscriptions.some((s) => s.endpoint === endpoint);
+  res.json({ exists });
+});
 
 cron.schedule(
   "30 17 * * *",
@@ -196,169 +298,6 @@ cron.schedule(
   { timezone: "Asia/Kolkata" }
 );
 
-const { scheduleJob } = require("./jobs/profileMissingNotifier");
-(async function initProfileNotifier() {
-  if (process.env.ENABLE_PROFILE_NOTIFIER !== "true") {
-    return;
-  }
-
-  const db = require("./config");
-  const maxAttempts = 6;
-  let attempt = 0;
-  while (attempt < maxAttempts) {
-    try {
-      attempt++;
-      await db.execute("SELECT 1");
-      scheduleJob();
-      return;
-    } catch (err) {
-      console.warn(
-        `[startup] profileMissingNotifier DB ping failed (attempt ${attempt}/${maxAttempts}) — retrying in 5s`,
-        err && err.message ? err.message : err
-      );
-      await new Promise((r) => setTimeout(r, 5000));
-    }
-  }
-  console.error(
-    "[startup] profileMissingNotifier: DB did not become ready — job not scheduled"
-  );
-})();
-
-const subscriptions = [];
-webpush.setVapidDetails(
-  "mailto:vaibhavichinchure@gmail.com",
-  process.env.VAPID_PUBLIC_KEY,
-  process.env.VAPID_PRIVATE_KEY
-);
-
-app.get("/vapidPublicKey", (req, res) => {
-  if (!process.env.VAPID_PUBLIC_KEY) {
-    return res.status(500).json({ error: "VAPID_PUBLIC_KEY not set in env" });
-  }
-  res.json({ publicKey: process.env.VAPID_PUBLIC_KEY });
-});
-
-app.post("/subscribe", (req, res) => {
-  const sub = req.body;
-  if (!sub || !sub.endpoint) {
-    return res.status(400).send("Invalid subscription");
-  }
-  if (!subscriptions.find((s) => s.endpoint === sub.endpoint)) {
-    subscriptions.push(sub);
-  }
-  res.status(201).json({ success: true });
-});
-
-app.post("/check-subscription", (req, res) => {
-  const { endpoint } = req.body;
-  const exists = subscriptions.some((s) => s.endpoint === endpoint);
-  res.json({ exists });
-});
-
-cron.schedule("0 20 * * 1-6", async () => {
-  const payload = JSON.stringify({
-    title: "Friendly Reminder",
-    body: "🕒 After today’s work, please log off 💻from STS Web.",
-    icon: "/logo192.png",
-    url: "/",
-  });
-  for (const sub of subscriptions) {
-    try {
-      await webpush.sendNotification(sub, payload);
-    } catch (err) {
-      console.error("Push failed for", sub.endpoint, ":", err);
-    }
-  }
-});
-
-app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
-app.use("/assets", express.static(path.join(__dirname, "assets")));
-app.use("/api/leave-policies", leavePolicy);
-
-app.use(idleTimeout);
-
-app.use("/", holidayRoutes);
-app.use("/", loginRoutes);
-app.use("/", leaveRoutes);
-
-app.use("/", projects);
-app.use("/", invoices);
-app.use("/", employeeRoutes);
-app.use("/", meetingRoutes);
-app.use("/api", notificationsRouter);
-app.use("/", employeeQueries);
-app.use("/", resetPasswordRoutes);
-app.use("/", forgotPasswordRoutes);
-app.use("/", addDepartmentRoutes);
-app.use("/", reimbursementRoutes);
-app.use("/", chatRoutes);
-app.use("/attendance", attendanceRoutes);
-app.use("/", dashboardReimbursementRoutes);
-app.use("/", workDayRoutes);
-app.use("/", empSessionRoutes);
-app.use("/api", workHourSummaryRoutes);
-app.use("/", empLeaveQueryDashboard);
-app.use("/salary", salaryRoutes);
-app.use("/api", payrollRoutes);
-app.use("/api", bankDetailsRoutes);
-app.use("/api/report", report);
-
-app.use("/", workDayRoutes);
-app.use("/api", adminSalaryStatementRoutes);
-app.use("/", salarylastmonthtotal);
-app.use("/", admindashboardReimbursementRoutes);
-app.use("/api", regFaceRoutes);
-app.use("/api/face", faceRoutes);
-app.use("/", faceDataRoutes);
-app.use(checkFaceRoute);
-
-app.get("/", (req, res) => {
-  res.send("Employee Face Recognition API");
-});
-
-app.use("/assets", assetsRoutes);
-app.use("/api/assets", assetsRoutes);
-app.use("/api", assetsRoutesforreturn);
-
-app.use("/api/attendance", adminAttendanceRoutes);
-app.use("/admin/attendance", adminAttendanceRoutes);
-app.use("/admin-attendance", adminAttendanceRoutes);
-app.use("/face-punch", face_admin_page);
-app.use("/api/employeelogin", employeeloginRoutes);
-app.use("/api", empExcelRoutes);
-app.use("/api/employee", employeeBirthdayRoutes);
-
-app.use("/", vendorRoutes);
-
-app.use("/", oldEmployeeRoutes);
-app.use("/", oldEmployeeDetailsRoutes);
-
-app.use("/api", letterRoutes);
-app.use(
-  "/letterheadfiles",
-  express.static(path.join(__dirname, "letterheadfiles"))
-);
-app.use("/api", letterheadRoutes);
-app.use("/api", letterheadTemplateRoutes);
-app.get("/", (req, res) => {
-  res.send("LetterHead API is running");
-});
-app.use("/api/templates", letterheadTemplateRoutes);
-
-app.use("/api", employeeProjectsRoute);
-app.use("/api/lop", lossofPayCalculationRoutes);
-
-app.use("/api/incentives", incentivesRoutes);
-
-app.use("/api/overtime", overtimeRoutes);
-app.use("/api/overtime-summary", overtimeSummaryRoutes);
-app.use("/api/compensation", overtimeSupervisorRoutes);
-app.use("/api/compensations", compensationRoutes);
-app.use("/api/compensation", assignCompensationRoutes);
-app.use("/api", employeeRoutesforsalarybreakup);
-app.use("/api/salary-details", salaryDetailsRoutes);
-app.use("/api/compensation", employeeBankReportRoutes);
-
 const io = new Server(server, {
   cors: {
     origin: (origin, callback) => {
@@ -374,28 +313,40 @@ const io = new Server(server, {
     },
     credentials: true,
   },
-  path: "/api/socket.io",
 });
 app.set("io", io);
 
 io.use((socket, next) => {
-  sessionMiddleware(socket.request, {}, (err) => {
+  sessionMiddleware(socket.request, socket.request.res || {}, (err) => {
     if (err) return next(err);
     return next();
   });
 });
 
 io.use((socket, next) => {
-  const session = socket.request.session;
-  const userIdFromSession =
-    session && session.userId ? String(session.userId) : null;
-  const queryUser = socket.handshake.query?.userId || null;
-  const authUser = socket.handshake.auth?.userId || null;
-  const headerUser = socket.handshake.headers?.["x-employee-id"] || null;
+  try {
+    const session = socket.request.session;
+    const userIdFromSession =
+      session && session.userId ? String(session.userId) : null;
+    const queryUser = socket.handshake.query?.userId || null;
+    const authUser = socket.handshake.auth?.userId || null;
+    const headerUser = socket.handshake.headers?.["x-employee-id"] || null;
 
-  socket.userId =
-    userIdFromSession || queryUser || authUser || headerUser || null;
-  return next();
+    socket.userId =
+      userIdFromSession || queryUser || authUser || headerUser || null;
+
+    const apiKeyFromClient =
+      socket.handshake.auth?.apiKey ||
+      socket.handshake.headers?.["x-api-key"] ||
+      null;
+    if (apiKeyFromClient && apiKeyFromClient !== process.env.X_API_KEY) {
+      return next(new Error("Invalid API key"));
+    }
+
+    return next();
+  } catch (err) {
+    return next(err);
+  }
 });
 
 io.on("connection", (socket) => {
@@ -408,40 +359,37 @@ io.on("connection", (socket) => {
     chatService
       .getUserRooms(socket.userId)
       .then((rooms) => {
-        console.log(
-          `[socket:${socket.id}] joining ${rooms.length} rooms for user ${socket.userId}`
-        );
         rooms.forEach((r) => socket.join(String(r.id)));
+        console.log(`[socket:${socket.id}] joined ${rooms.length} chat rooms`);
       })
       .catch((err) => console.error("[socket] getUserRooms error:", err));
 
     EmployeeQueries.getThreadsByEmployee(socket.userId)
       .then((threads) => {
-        console.log(
-          `[socket:${socket.id}] joining ${threads.length} query threads for user ${socket.userId}`
-        );
         threads.forEach((t) => socket.join(`query_${String(t.id)}`));
+        console.log(
+          `[socket:${socket.id}] joined ${threads.length} query threads`
+        );
       })
       .catch((err) =>
         console.error("[socket] getThreadsByEmployee error:", err)
       );
   } else {
     console.log(
-      `[socket:${socket.id}] connected without userId — will require payload senderId for message saves.`
+      `[socket:${socket.id}] connected without userId — will require sender id in payload`
     );
   }
 
   socket.on("joinThread", (threadId) => {
     try {
-      console.log(`[socket:${socket.id}] joinThread ${threadId}`);
       socket.join(`query_${String(threadId)}`);
+      console.log(`[socket:${socket.id}] joined query_${threadId}`);
     } catch (e) {
       console.error(`[socket:${socket.id}] joinThread error`, e);
     }
   });
 
   socket.on("sendQueryMessage", async (payload, callback) => {
-    console.log(`[socket:${socket.id}] sendQueryMessage payload:`, payload);
     try {
       if (!payload || !payload.thread_id) {
         const errMsg =
@@ -468,10 +416,6 @@ io.on("connection", (socket) => {
         payload.recipient_id,
         null,
         payload.attachmentBase64
-      );
-
-      console.log(
-        `[socket:${socket.id}] sendQueryMessage inserted id=${messageId}`
       );
 
       const newMsg = {
@@ -504,11 +448,6 @@ io.on("connection", (socket) => {
   });
 
   socket.on("send_message", async (payload = {}, ack) => {
-    console.log(
-      `[socket:${socket.id}] send_message payload:`,
-      payload && { ...payload, location: payload?.location ? "present" : null }
-    );
-
     try {
       const { roomId, content, type, fileUrl, location } = payload;
       const payloadSenderId = payload.senderId ?? payload.sender_id ?? null;
@@ -524,7 +463,6 @@ io.on("connection", (socket) => {
       if (!effectiveSenderId) {
         const errMsg =
           "Missing sender id in send_message (socket not authed and payload has no senderId)";
-        console.warn(`[socket:${socket.id}] ${errMsg}`);
         if (typeof ack === "function") ack({ success: false, error: errMsg });
         socket.emit("error", errMsg);
         return;
@@ -543,10 +481,6 @@ io.on("connection", (socket) => {
         lat,
         lng,
         address
-      );
-
-      console.log(
-        `[socket:${socket.id}] saved chat message id=${saved.id} room=${roomId} sender=${effectiveSenderId}`
       );
 
       const emitted = {
@@ -601,9 +535,9 @@ io.on("connection", (socket) => {
   });
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT;
 server.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  console.log(`Server + Socket.IO listening on port ${PORT}`);
 });
 
-module.exports = { app, server };
+module.exports = { app, server, io };
