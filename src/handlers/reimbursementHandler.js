@@ -354,7 +354,6 @@ exports.createReimbursement = async (req, res) => {
               .map((s) => s.trim())
               .filter(Boolean);
         } catch (e) {
-          // fallback to comma-separated
           invoices = req.body.invoices
             .split(",")
             .map((s) => s.trim())
