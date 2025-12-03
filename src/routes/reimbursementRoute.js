@@ -4,7 +4,6 @@ const reimbursementHandler = require("../handlers/reimbursementHandler");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
-const { createReimbursement } = require("../services/reimbursementService");
 
 const forbiddenExts = new Set([
   ".xlsx",
@@ -53,12 +52,13 @@ const storage = multer.diskStorage({
     );
     if (!fs.existsSync(basePath)) {
       fs.mkdirSync(basePath, { recursive: true });
+      console.log(`Directory created: ${basePath}`);
     }
     cb(null, basePath);
   },
   filename: (req, file, cb) => {
     const now = new Date();
-    const date = now.toISOString().split("T")[0];
+    const date = now.toISOString().split("T")[0]; // YYYY-MM-DD
     const { employeeId } = req.body;
     const uploadDir = path.join(
       __dirname,
@@ -90,7 +90,10 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB limit
 });
 
+router.get("/reimbursement/employees", reimbursementHandler.getEmployees);
+
 router.get("/reimbursements", reimbursementHandler.getAllReimbursements);
+
 router.get(
   "/reimbursement/:employeeId",
   reimbursementHandler.getReimbursementsByEmployee
@@ -118,11 +121,8 @@ router.put(
   reimbursementHandler.updateReimbursement
 );
 
-router.put(
-  "/reimbursement/status/:id",
-  reimbursementHandler.updateReimbursementStatus
-);
 router.delete("/reimbursement/:id", reimbursementHandler.deleteReimbursement);
+
 router.get(
   "/team/:teamLeadId/reimbursements",
   reimbursementHandler.getTeamReimbursements
@@ -158,7 +158,8 @@ router.get("/reimbursement/:year/:month/:employeeId/:filename", (req, res) => {
 
   if (
     [year, month, employeeId, filename].some(
-      (param) => param.includes("..") || param.includes("/")
+      (param) =>
+        param.includes("..") || param.includes("/") || param.includes("\\")
     )
   ) {
     return res.status(400).json({ message: "Invalid filename" });
@@ -186,7 +187,7 @@ router.get("/reimbursement/:year/:month/:employeeId/:filename", (req, res) => {
       }[path.extname(filename).toLowerCase()] || "application/octet-stream";
 
     res.setHeader("Content-Type", mimeType);
-    res.setHeader("Content-Disposition", `inline; filename=${filename}`);
+    res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
 
     fs.createReadStream(filePath).pipe(res);
   } else {

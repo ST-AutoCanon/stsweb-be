@@ -21,6 +21,56 @@ const normalizeRow = (r) => ({
     : "",
 });
 
+const parseInvoices = (val) => {
+  if (!val && val !== 0) return [];
+  if (Array.isArray(val))
+    return val.map((v) => String(v).trim()).filter(Boolean);
+  try {
+    const s = typeof val === "string" ? val : JSON.stringify(val);
+    const parsed = JSON.parse(s);
+    if (Array.isArray(parsed))
+      return parsed.map((v) => String(v).trim()).filter(Boolean);
+    if (typeof parsed === "string") {
+      return parsed
+        .split(",")
+        .map((v) => String(v).trim())
+        .filter(Boolean);
+    }
+    return [];
+  } catch (e) {
+    try {
+      if (typeof val === "string" && val.includes(",")) {
+        return val
+          .split(",")
+          .map((v) => String(v).trim())
+          .filter(Boolean);
+      }
+    } catch (_) {}
+    return [];
+  }
+};
+
+const parseParticipants = (val) => {
+  if (!val && val !== 0) return [];
+  if (Array.isArray(val)) return val;
+  try {
+    const s = typeof val === "string" ? val : JSON.stringify(val);
+    const parsed = JSON.parse(s);
+    if (Array.isArray(parsed)) return parsed;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    try {
+      if (typeof val === "string" && val.includes(",")) {
+        return val
+          .split(",")
+          .map((v) => v.trim())
+          .filter(Boolean);
+      }
+    } catch (_) {}
+    return [];
+  }
+};
+
 const mapAttachmentsToReimbursements = (
   reimbursements,
   attachments,
@@ -86,8 +136,12 @@ exports.getReimbursementsByEmployee = async (
 
     const reimbursements = rawRows.map((r) => {
       const n = normalizeRow(r);
+      const participants = parseParticipants(r.participants);
+      const invoices = parseInvoices(r.invoices);
       return {
         ...n,
+        participants,
+        invoices,
         from_date: toLocalDateString(r.from_date),
         to_date: toLocalDateString(r.to_date),
         date: toLocalDateString(r.date),
@@ -129,8 +183,12 @@ exports.getAllReimbursements = async (
 
     const reimbursements = rawRows.map((r) => {
       const n = normalizeRow(r);
+      const participants = parseParticipants(r.participants);
+      const invoices = parseInvoices(r.invoices);
       return {
         ...n,
+        participants,
+        invoices,
         from_date: toLocalDateString(r.from_date),
         to_date: toLocalDateString(r.to_date),
         date: toLocalDateString(r.date),
@@ -163,6 +221,60 @@ exports.getAllReimbursements = async (
   }
 };
 
+exports.getEmployees = async (q = null, departmentId = null, limit = 200) => {
+  try {
+    let sql =
+      queries.GET_EMPLOYEES ||
+      `
+      SELECT e.employee_id,
+             CONCAT(e.first_name, ' ', e.last_name) AS name,
+             ep.position,
+             d.name as department_name
+      FROM employees e
+      LEFT JOIN employee_professional ep ON e.employee_id = ep.employee_id
+      LEFT JOIN departments d ON ep.department_id = d.id
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (
+      departmentId !== undefined &&
+      departmentId !== null &&
+      String(departmentId).trim() !== ""
+    ) {
+      sql += " AND ep.department_id = ?";
+      params.push(departmentId);
+    }
+
+    if (q && String(q).trim() !== "") {
+      const like = `%${String(q).trim()}%`;
+      sql += ` AND (
+        e.employee_id LIKE ?
+        OR e.first_name LIKE ?
+        OR e.last_name LIKE ?
+        OR CONCAT(e.first_name, ' ', e.last_name) LIKE ?
+      )`;
+      params.push(like, like, like, like);
+    }
+
+    const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 2000); // clamp
+    sql += " ORDER BY e.first_name ASC LIMIT ?";
+    params.push(safeLimit);
+
+    const [rows] = await db.query(sql, params);
+    const list = (rows || []).map((r) => ({
+      employee_id: r.employee_id,
+      name: r.name || `${r.first_name || ""} ${r.last_name || ""}`.trim(),
+      position: r.position || null,
+      department_name: r.department_name || null,
+    }));
+    return list;
+  } catch (err) {
+    console.error("Error in getEmployees:", err);
+    throw err;
+  }
+};
+
 exports.createReimbursement = async (reimbursementData) => {
   try {
     if (!reimbursementData || !reimbursementData.employeeId) {
@@ -179,6 +291,34 @@ exports.createReimbursement = async (reimbursementData) => {
       const pid = parseInt(reimbursementData.department_id, 10);
       department_id = isNaN(pid) ? null : pid;
     }
+
+    let participantsJSON = null;
+    if (
+      reimbursementData.participants &&
+      Array.isArray(reimbursementData.participants) &&
+      reimbursementData.participants.length
+    ) {
+      participantsJSON = JSON.stringify(reimbursementData.participants);
+    } else if (
+      typeof reimbursementData.participants === "string" &&
+      reimbursementData.participants.trim()
+    ) {
+      try {
+        const parsed = JSON.parse(reimbursementData.participants);
+        if (Array.isArray(parsed)) participantsJSON = JSON.stringify(parsed);
+      } catch (e) {
+        const arr = reimbursementData.participants
+          .split(",")
+          .map((v) => v.trim())
+          .filter(Boolean);
+        if (arr.length) participantsJSON = JSON.stringify(arr);
+      }
+    }
+
+    let invoicesJSON = null;
+    const invoicesArr = parseInvoices(reimbursementData.invoices);
+    if (invoicesArr && invoicesArr.length)
+      invoicesJSON = JSON.stringify(invoicesArr);
 
     const reimbursementArray = [
       reimbursementData.employeeId,
@@ -211,6 +351,8 @@ exports.createReimbursement = async (reimbursementData) => {
       reimbursementData.stationary || null,
       reimbursementData.service_provider || null,
       reimbursementData.project || null,
+      participantsJSON,
+      invoicesJSON,
     ];
 
     const [existingClaims] = await db.query(queries.CHECK_EXISTING_CLAIM, [
@@ -234,6 +376,20 @@ exports.createReimbursement = async (reimbursementData) => {
       throw err;
     }
 
+    if (invoicesArr && invoicesArr.length) {
+      for (const inv of invoicesArr) {
+        const [rows] = await db.query(queries.CHECK_INVOICE_DUPLICATE, [inv]);
+        if (rows && rows.length) {
+          const row = rows[0];
+          const err = new Error(
+            `Invoice/Bill/Transaction "${inv}" is already used in reimbursement id ${row.id} (status: ${row.status}).`
+          );
+          err.statusCode = 400;
+          throw err;
+        }
+      }
+    }
+
     const [result] = await db.query(
       queries.CREATE_REIMBURSEMENT,
       reimbursementArray
@@ -244,7 +400,7 @@ exports.createReimbursement = async (reimbursementData) => {
       await saveAttachmentsBulk(reimbursementId, reimbursementData.attachments);
     }
 
-    return { id: reimbursementId, ...reimbursementData };
+    return { id: reimbursementId, ...reimbursementData, invoices: invoicesArr };
   } catch (err) {
     console.error("Error in createReimbursement:", err);
     throw err;
@@ -285,13 +441,53 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
       stationary,
       service_provider,
       project,
+      participants,
       attachments,
+      invoices,
     } = updateData;
 
     let processedDepartmentId = null;
     if (department_id !== undefined && department_id !== null) {
       const pid = parseInt(department_id, 10);
       processedDepartmentId = isNaN(pid) ? null : pid;
+    }
+
+    let participantsJSON = null;
+    if (participants && Array.isArray(participants) && participants.length) {
+      participantsJSON = JSON.stringify(participants);
+    } else if (typeof participants === "string" && participants.trim()) {
+      try {
+        const parsed = JSON.parse(participants);
+        if (Array.isArray(parsed)) participantsJSON = JSON.stringify(parsed);
+      } catch (e) {
+        const arr = participants
+          .split(",")
+          .map((v) => v.trim())
+          .filter(Boolean);
+        if (arr.length) participantsJSON = JSON.stringify(arr);
+      }
+    }
+
+    const invoicesArr = parseInvoices(invoices);
+    let invoicesJSON = null;
+    if (invoicesArr && invoicesArr.length)
+      invoicesJSON = JSON.stringify(invoicesArr);
+
+    if (invoicesArr && invoicesArr.length) {
+      for (const inv of invoicesArr) {
+        const [rows] = await db.query(queries.CHECK_INVOICE_DUPLICATE_EXCLUDE, [
+          inv,
+          reimbursementId,
+        ]);
+        if (rows && rows.length) {
+          const row = rows[0];
+          const err = new Error(
+            `Invoice/Bill/Transaction "${inv}" is already used in reimbursement id ${row.id} (status: ${row.status}).`
+          );
+          err.statusCode = 400;
+          throw err;
+        }
+      }
     }
 
     const params = [
@@ -315,6 +511,8 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
       stationary || null,
       service_provider || null,
       project || null,
+      participantsJSON,
+      invoicesJSON,
       reimbursementId,
     ];
 
@@ -354,6 +552,8 @@ exports.getTeamReimbursements = async (
       submittedFrom && submittedFrom !== "null" ? submittedFrom : null;
     const params = [dept, excludedId, excludedId, from, from, from];
 
+    console.log("[Service:getTeamReimbursements] SQL params:", params);
+
     const [reimbursementsRaw] = await db.query(
       queries.GET_TEAM_REIMBURSEMENTS,
       params
@@ -363,8 +563,12 @@ exports.getTeamReimbursements = async (
 
     const normalized = reimbursementsRaw.map((r) => {
       const n = normalizeRow(r);
+      const participants = parseParticipants(r.participants);
+      const invoices = parseInvoices(r.invoices);
       return {
         ...n,
+        participants,
+        invoices,
         from_date: toLocalDateString(r.from_date),
         to_date: toLocalDateString(r.to_date),
         date: toLocalDateString(r.date),
