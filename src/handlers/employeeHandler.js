@@ -459,6 +459,8 @@ exports.updateFullEmployee = async (req, res) => {
       }
     }
 
+    await employeeService.editFullEmployee(data);
+
     return res
       .status(200)
       .json(ErrorHandler.generateSuccessResponse(200, "Employee updated."));

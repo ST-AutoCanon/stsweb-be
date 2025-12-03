@@ -16,6 +16,18 @@ module.exports = {
   ORDER BY r.created_at DESC
 `,
 
+  GET_EMPLOYEES: `
+  SELECT e.employee_id,
+         CONCAT(e.first_name, ' ', e.last_name) AS name,
+         ep.position,
+         d.name as department_name
+  FROM employees e
+  LEFT JOIN employee_professional ep ON e.employee_id = ep.employee_id
+  LEFT JOIN departments d ON ep.department_id = d.id
+  WHERE 1=1
+  -- optional filters appended dynamically in service
+`,
+
   GET_TEAM_REIMBURSEMENTS: `
   SELECT r.*,
          CONCAT(e.first_name, ' ', e.last_name) AS employee_name,
@@ -51,10 +63,10 @@ module.exports = {
 
   CREATE_REIMBURSEMENT: `
       INSERT INTO reimbursement (
-          employee_id, department_id, claim_type, transport_type,  from_date, to_date, date, 
-          travel_from, travel_to, meals_objective, purpose,  purchasing_item, accommodation_fees, no_of_days, transport_amount, da,  total_amount, 
-          meal_type, stationary, service_provider, project
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0), ?, ?, ?, ?, ?, ?, ?)
+          employee_id, department_id, claim_type, transport_type, from_date, to_date, date,
+          travel_from, travel_to, meals_objective, purpose, purchasing_item, accommodation_fees, no_of_days, transport_amount, da, total_amount,
+          meal_type, stationary, service_provider, project, participants, invoices
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 0), ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
 
   CHECK_EXISTING_REIMBURSEMENT_SINGLE_DATE: `
@@ -87,11 +99,26 @@ module.exports = {
     )
 `,
 
+  CHECK_INVOICE_DUPLICATE: `
+    SELECT id, employee_id, status
+    FROM reimbursement
+    WHERE JSON_SEARCH(invoices, 'one', ?) IS NOT NULL
+      AND LOWER(TRIM(IFNULL(status, ''))) <> 'rejected'
+  `,
+
+  CHECK_INVOICE_DUPLICATE_EXCLUDE: `
+    SELECT id, employee_id, status
+    FROM reimbursement
+    WHERE JSON_SEARCH(invoices, 'one', ?) IS NOT NULL
+      AND id <> ?
+      AND LOWER(TRIM(IFNULL(status, ''))) <> 'rejected'
+  `,
+
   UPDATE_REIMBURSEMENT: `
       UPDATE reimbursement 
       SET department_id=?, claim_type=?, transport_type=?, from_date=?, to_date=?, date=?, 
           travel_from=?, travel_to=?,   meals_objective=?, purpose=?,  purchasing_item=?, accommodation_fees=?, no_of_days=?, transport_amount=?, da=?, total_amount=?, 
-          meal_type=?, stationary=?, service_provider=?, project=?
+          meal_type=?, stationary=?, service_provider=?, project=?, participants=?, invoices=?
       WHERE id=?
   `,
 
@@ -144,5 +171,6 @@ module.exports = {
   `,
 
   GET_ALL_PROJECTS: `SELECT project_name FROM add_project;`,
+
   DELETE_ATTACHMENTS_BY_REIMBURSEMENT_ID: `DELETE FROM reimbursement_attachments WHERE reimbursement_id = ?`,
 };
