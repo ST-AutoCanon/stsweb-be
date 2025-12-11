@@ -1,4 +1,5 @@
 
+
 const checkIfTableExists = (tableName) => `
   SELECT COUNT(*) AS count FROM information_schema.tables 
   WHERE table_schema = DATABASE() AND table_name = '${tableName}';
@@ -47,7 +48,7 @@ const createTableQuery = (tableName) => {
   `;
 };
 
-const deleteExistingData = (tableName) => `DELETE FROM \`${tableName}\`;`;
+// Removed deleteExistingData - no longer needed
 
 const insertSalaryData = (tableName, rows) => {
   if (rows.length === 0) return { query: '', values: [] };
@@ -55,7 +56,13 @@ const insertSalaryData = (tableName, rows) => {
   const columnsStr = SALARY_COLUMNS.map(col => `\`${col}\``).join(', ');
   const placeholders = SALARY_COLUMNS.map(() => '?').join(', ');
   const valueSets = Array(rows.length).fill(`(${placeholders})`).join(', ');
-  const query = `INSERT INTO \`${tableName}\` (${columnsStr}) VALUES ${valueSets}`;
+  
+  // UPSERT: Update all columns except employee_id (unique key) on duplicate
+  const updateClause = SALARY_COLUMNS.slice(1)  // Skip employee_id
+    .map(col => `\`${col}\` = VALUES(\`${col}\`)`)
+    .join(', ');
+  
+  const query = `INSERT INTO \`${tableName}\` (${columnsStr}) VALUES ${valueSets} ON DUPLICATE KEY UPDATE ${updateClause}`;
 
   const values = rows.flatMap(row => SALARY_COLUMNS.map(col => row[col] ?? null));
 
@@ -71,7 +78,6 @@ const getApprovedIdsQuery = (tableName) => `
 module.exports = {
   checkIfTableExists,
   createTableQuery,
-  deleteExistingData,
   insertSalaryData,
   SALARY_COLUMNS,
   MONETARY_COLUMNS,
