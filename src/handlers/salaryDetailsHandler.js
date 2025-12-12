@@ -1,5 +1,5 @@
 
-const { saveSalaryDetails } = require("../services/salaryDetailsService");
+const { saveSalaryDetails, getMonthlySalaryData } = require("../services/salaryDetailsService");
 const { getApprovedEmployeeIds } = require("../services/salaryDetailsService");
 
 const saveSalaryDetailsHandler = async (req, res) => {
@@ -15,15 +15,31 @@ const saveSalaryDetailsHandler = async (req, res) => {
       payslip_generation: 'disabled'
     }));
 
-    const result = await saveSalaryDetails(approvedData, month, year);
+    const result = await saveSalaryDetails(approvedData, month, year);  // Now uses month/year
     return res.status(200).json({
       success: true,
       tableName: result.tableName,
-      rowsInserted: result.rowsInserted
+      rowsAffected: result.rowsAffected  // Better feedback: inserts + updates
     });
   } catch (e) {
     console.error(e);
     return res.status(500).json({ success: false, error: "Failed to save" });
+  }
+};
+
+// New: Handler for /get-monthly
+const getMonthlySalaryDataHandler = async (req, res) => {
+  try {
+    const { month, year } = req.query;
+    if (!month || !year) {
+      return res.status(400).json({ success: false, error: "Month and year required" });
+    }
+
+    const data = await getMonthlySalaryData(month, year);
+    return res.status(200).json({ success: true, data });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ success: false, error: "Failed to fetch monthly data" });
   }
 };
 
@@ -37,4 +53,4 @@ const getApprovedIdsHandler = async (req, res) => {
   }
 };
 
-module.exports = { saveSalaryDetailsHandler, getApprovedIdsHandler };
+module.exports = { saveSalaryDetailsHandler, getApprovedIdsHandler, getMonthlySalaryDataHandler };

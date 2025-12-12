@@ -1,9 +1,9 @@
+
 const db = require("../config");
 const {
   checkIfTableExists,
   createTableQuery,
-  deleteExistingData,
-  insertSalaryData,
+  insertSalaryData,  // Updated to UPSERT
   getApprovedIdsQuery,
 } = require("../constants/salaryDetailsQueries");
 const moment = require("moment");
@@ -19,6 +19,15 @@ const getApprovedEmployeeIds = async () => {
 
   const [rows] = await db.query(getApprovedIdsQuery(tableName));
   return rows.map((r) => r.employee_id);
+};
+
+// New: Fetch all rows for a specific month/year
+const getMonthlySalaryData = async (month, year) => {
+  const tableName = `salary_sts_${month.toLowerCase()}_${year}`;
+  if (!(await tableExists(tableName))) return [];
+
+  const [rows] = await db.query(`SELECT * FROM \`${tableName}\``);
+  return rows;
 };
 
 const createTableIfNotExists = async (tableName) => {
@@ -74,47 +83,47 @@ const generateTableName = () => {
   return `salary_sts_${month}_${year}`;
 };
 
-const deleteExistingSalaryData = async (tableName) => {
-  try {
-    if (await tableExists(tableName)) {
-      await db.query(deleteExistingData(tableName));
-    } else {
-    }
-  } catch (error) {
-    console.error("Error deleting data:", error);
-    throw error;
+// Updated: Accept month/year, use for tableName (override current date)
+const saveSalaryDetails = async (salaryData, month, year) => {
+  let tableName;
+  if (month && year) {
+    tableName = `salary_sts_${month.toLowerCase()}_${year}`;
+  } else {
+    tableName = generateTableName();
   }
-};
-
-const insertSalaryRecords = async (tableName, rows) => {
-  try {
-    if (rows.length === 0) {
-      console.warn("No rows to insert.");
-      return;
-    }
-
-    const { query, values } = insertSalaryData(tableName, rows);
-    if (query) {
-      await db.query(query, values);
-    }
-  } catch (error) {
-    console.error("Error inserting data:", error);
-    throw error;
-  }
-};
-
-const saveSalaryDetails = async (salaryData) => {
-  const tableName = generateTableName();
 
   if (!(await tableExists(tableName))) {
     await createTableIfNotExists(tableName);
   }
 
   await ensureColumns(tableName);
-  await deleteExistingSalaryData(tableName);
-  await insertSalaryRecords(tableName, salaryData);
+  
+  // REMOVED: await deleteExistingSalaryData(tableName);  // No more wiping!
 
-  return { success: true, tableName, rowsInserted: salaryData.length };
+  const affectedRows = await insertSalaryRecords(tableName, salaryData);
+
+  return { success: true, tableName, rowsAffected: affectedRows };
+};
+
+// Updated: Capture affectedRows from query and return it
+const insertSalaryRecords = async (tableName, rows) => {
+  try {
+    if (rows.length === 0) {
+      console.warn("No rows to insert.");
+      return 0;
+    }
+
+    const { query, values } = insertSalaryData(tableName, rows);
+    if (query) {
+      const [result] = await db.query(query, values);  // result.affectedRows = inserts + updates
+      console.log(`Affected rows: ${result.affectedRows}`);  // For logging
+      return result.affectedRows || 0;
+    }
+    return 0;
+  } catch (error) {
+    console.error("Error inserting data:", error);
+    throw error;
+  }
 };
 
 module.exports = {
@@ -122,8 +131,8 @@ module.exports = {
   generateTableName,
   tableExists,
   createTableIfNotExists,
-  deleteExistingSalaryData,
   insertSalaryRecords,
   ensureColumns,
   getApprovedEmployeeIds,
+  getMonthlySalaryData,  // New
 };
