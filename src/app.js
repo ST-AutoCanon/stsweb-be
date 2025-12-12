@@ -85,6 +85,7 @@ const salaryDetailsRoutes = require("./routes/salaryDetailsRoutes");
 const employeeBankReportRoutes = require("./routes/employeebankreportroute");
 const salaryStatementRouter = require("./routes/salaryRoutes");
 const salaryDetailsRouter = require("./routes/salaryDetailsRouter");
+const subordinateRoutes = require("./routes/subordinateRoutes");
 
 const app = express();
 const server = http.createServer(app);
@@ -167,7 +168,7 @@ app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 app.use("/api/salary-statement", salaryStatementRouter);
 app.use("/api/salary-details", salaryDetailsRouter);
 app.use("/api/salary-details", salaryRoutes);
-
+app.use("/api/subordinate", subordinateRoutes);
 app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
 app.use("/assets", express.static(path.join(__dirname, "assets")));
 app.use("/api/leave-policies", leavePolicy);
