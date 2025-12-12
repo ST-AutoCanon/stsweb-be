@@ -1,8 +1,7 @@
 
+const { getFullHierarchyService } = require("../services/supervisorEmployeesService");
 
-const { getEmployeesBySupervisorService } = require("../services/supervisorEmployeesService");
-
-const getEmployeesBySupervisorHandler = async (req, res) => {
+const getFullHierarchyHandler = async (req, res) => {
     try {
         const supervisorId = req.headers["x-employee-id"];
 
@@ -10,12 +9,12 @@ const getEmployeesBySupervisorHandler = async (req, res) => {
             return res.status(400).json({ error: "Supervisor ID is required in headers" });
         }
 
-        const employees = await getEmployeesBySupervisorService(supervisorId);
-        res.json({ supervisorId, employees });
-    } catch (error) {
-        console.error("Handler error:", error);
+        const hierarchy = await getFullHierarchyService(supervisorId);
+        res.json({ supervisorId, hierarchy });
+    } catch (err) {
+        console.error("Handler error:", err);
         res.status(500).json({ error: "Internal Server Error" });
     }
 };
 
-module.exports = { getEmployeesBySupervisorHandler };
+module.exports = { getFullHierarchyHandler };
