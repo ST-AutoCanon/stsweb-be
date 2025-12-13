@@ -804,6 +804,8 @@ exports.getPositions = async (role, department_id) => {
     dept,
     role,
     dept,
+    role,
+    dept,
   ]);
   return rows.map((r) => r.name);
 };
