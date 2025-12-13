@@ -53,6 +53,121 @@ router.get("/:month/:year", async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+router.post("/save", async (req, res) => {
+  const { salaryData, month, year } = req.body;
+  const tableName = `salary_sts_${month}_${year}`;
+
+  try {
+    // 1️⃣ Ensure table exists (DO NOT DROP / TRUNCATE)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS \`${tableName}\` (
+        employee_id VARCHAR(50) PRIMARY KEY,
+        full_name VARCHAR(100),
+        annual_ctc DECIMAL(10,2),
+        basic_salary DECIMAL(10,2),
+        hra DECIMAL(10,2),
+        lta DECIMAL(10,2),
+        other_allowances DECIMAL(10,2),
+        incentives DECIMAL(10,2),
+        overtime DECIMAL(10,2),
+        statutory_bonus DECIMAL(10,2),
+        bonus DECIMAL(10,2),
+        advance_recovery DECIMAL(10,2),
+        employee_pf DECIMAL(10,2),
+        employer_pf DECIMAL(10,2),
+        esic DECIMAL(10,2),
+        tds DECIMAL(10,2),
+        gratuity DECIMAL(10,2),
+        professional_tax DECIMAL(10,2),
+        insurance DECIMAL(10,2),
+        lop_days INT,
+        lop_deduction DECIMAL(10,2),
+        gross_salary DECIMAL(10,2),
+        net_salary DECIMAL(10,2),
+        payslip_generated INT DEFAULT 0,
+        status VARCHAR(20),
+        payslip_generation VARCHAR(20)
+      )
+    `);
+
+    // 2️⃣ INSERT or UPDATE (NO DELETE)
+    for (const emp of salaryData) {
+      await pool.query(
+        `
+        INSERT INTO \`${tableName}\` (
+          employee_id, full_name, annual_ctc, basic_salary, hra, lta,
+          other_allowances, incentives, overtime, statutory_bonus, bonus,
+          advance_recovery, employee_pf, employer_pf, esic, tds, gratuity,
+          professional_tax, insurance, lop_days, lop_deduction,
+          gross_salary, net_salary, payslip_generated, status, payslip_generation
+        )
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON DUPLICATE KEY UPDATE
+          full_name = VALUES(full_name),
+          annual_ctc = VALUES(annual_ctc),
+          basic_salary = VALUES(basic_salary),
+          hra = VALUES(hra),
+          lta = VALUES(lta),
+          other_allowances = VALUES(other_allowances),
+          incentives = VALUES(incentives),
+          overtime = VALUES(overtime),
+          statutory_bonus = VALUES(statutory_bonus),
+          bonus = VALUES(bonus),
+          advance_recovery = VALUES(advance_recovery),
+          employee_pf = VALUES(employee_pf),
+          employer_pf = VALUES(employer_pf),
+          esic = VALUES(esic),
+          tds = VALUES(tds),
+          gratuity = VALUES(gratuity),
+          professional_tax = VALUES(professional_tax),
+          insurance = VALUES(insurance),
+          lop_days = VALUES(lop_days),
+          lop_deduction = VALUES(lop_deduction),
+          gross_salary = VALUES(gross_salary),
+          net_salary = VALUES(net_salary),
+          status = VALUES(status),
+          payslip_generation = VALUES(payslip_generation)
+        `,
+        [
+          emp.employee_id,
+          emp.full_name,
+          emp.annual_ctc,
+          emp.basic_salary,
+          emp.hra,
+          emp.lta,
+          emp.other_allowances,
+          emp.incentives,
+          emp.overtime,
+          emp.statutory_bonus,
+          emp.bonus,
+          emp.advance_recovery,
+          emp.employee_pf,
+          emp.employer_pf,
+          emp.esic,
+          emp.tds,
+          emp.gratuity,
+          emp.professional_tax,
+          emp.insurance,
+          emp.lop_days,
+          emp.lop_deduction,
+          emp.gross_salary,
+          emp.net_salary,
+          emp.payslip_generated,
+          emp.status,
+          emp.payslip_generation
+        ]
+      );
+    }
+
+    res.json({
+      success: true,
+      tableName
+    });
+  } catch (error) {
+    console.error("❌ Salary save error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 router.post("/update-payslip/:month/:year/:employeeId", async (req, res) => {
   const { month, year, employeeId } = req.params;
