@@ -634,6 +634,10 @@ LEFT JOIN (
     (? = 'Manager'
        AND pd.department_id = ?      
        AND p.\`rank\` IN (2, 3))
+       OR
+    (? = 'HR'
+       AND pd.department_id = ?      
+       AND p.\`rank\` IN (2, 3))
     OR
     (? = 'Supervisor'
        AND pd.department_id = ?      
