@@ -1,34 +1,54 @@
-const sgMail = require("@sendgrid/mail");
+const nodemailer = require("nodemailer");
 const { v4: uuidv4 } = require("uuid");
 
 const MAX_RETRIES = 2;
 const RETRY_BASE_MS = 500;
 
-if (!process.env.SENDGRID_API_KEY) {
-  console.warn("[mailer] WARNING: SENDGRID_API_KEY is not set.");
-} else {
-  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+if (!process.env.SMTP_HOST) {
+  console.warn("[mailer] WARNING: SMTP_HOST is not set.");
+}
+if (!process.env.SMTP_USER) {
+  console.warn("[mailer] WARNING: SMTP_USER is not set.");
+}
+if (!process.env.SMTP_PASS) {
+  console.warn("[mailer] WARNING: SMTP_PASS is not set.");
 }
 
 function sleep(ms) {
   return new Promise((res) => setTimeout(res, ms));
 }
 
-async function sendWithRetries(msg, retries = MAX_RETRIES) {
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: Number(process.env.SMTP_PORT) || 587,
+  secure: false, // use STARTTLS
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+  tls: {
+    rejectUnauthorized: false, // set to true in production if certs are valid
+  },
+});
+
+async function sendWithRetries(mailOptions, retries = MAX_RETRIES) {
   let attempt = 0;
   let lastErr = null;
+
   while (attempt <= retries) {
     try {
       attempt++;
-      await sgMail.send(msg);
-      return;
+      const info = await transporter.sendMail(mailOptions);
+      return info;
     } catch (err) {
       lastErr = err;
       const isTransient =
-        err.code === "ECONNRESET" ||
-        err.code === "ECONNREFUSED" ||
-        (err.response && err.response.status >= 500);
+        err &&
+        (err.code === "ECONNRESET" ||
+          err.code === "ECONNREFUSED" ||
+          (err.response && err.response.status >= 500));
       if (!isTransient || attempt > retries) break;
+
       const wait = RETRY_BASE_MS * Math.pow(2, attempt - 1);
       console.warn(
         `[mailer] transient mail error (attempt ${attempt}). retrying in ${wait}ms`,
@@ -37,26 +57,28 @@ async function sendWithRetries(msg, retries = MAX_RETRIES) {
       await sleep(wait);
     }
   }
+
   throw lastErr;
 }
 
 async function sendResetEmail(employeeEmail, employeeName) {
-  if (!process.env.SENDGRID_API_KEY) {
-    throw new Error("SENDGRID_API_KEY not configured");
+  if (!process.env.SMTP_HOST) {
+    throw new Error("SMTP_HOST not configured");
   }
-  if (!process.env.SENDGRID_SENDER_EMAIL) {
-    throw new Error("SENDGRID_SENDER_EMAIL not configured");
+  if (!process.env.SMTP_USER) {
+    throw new Error("SMTP_USER not configured");
+  }
+  if (!process.env.SMTP_PASS) {
+    throw new Error("SMTP_PASS not configured");
   }
 
   const resetToken = uuidv4();
   const resetLink = `${process.env.FRONTEND_URL}/ResetPassword?token=${resetToken}`;
   const tokenExpiry = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000); // 3 days
 
-  const msg = {
-    to: employeeEmail,
-    from: process.env.SENDGRID_SENDER_EMAIL,
-    subject: "Welcome to SUKALPA TECH SOLUTIONS – Set Up Your Account",
-    text: `Dear ${employeeName},
+  const subject = "Welcome to SUKALPA TECH SOLUTIONS – Set Up Your Account";
+
+  const text = `Dear ${employeeName},
 
 Welcome to SUKALPA TECH SOLUTIONS! We're excited to have you join our team and look forward to achieving great things together.
 
@@ -73,9 +95,9 @@ Thank you, and once again, welcome to the team!
 Warm regards,
 SUKALPA TECH SOLUTIONS
 https://sukalpatechsolutions.com
-info@sukalpatech.com`,
+info@sukalpatech.com`;
 
-    html: `
+  const html = `
     <p>Dear ${employeeName},</p>
     <p>Welcome to <strong>SUKALPA TECH SOLUTIONS</strong>! We're excited to have you join our team and look forward to achieving great things together.</p>
 
@@ -93,10 +115,17 @@ info@sukalpatech.com`,
     <p>Warm regards,</p>
     <p><strong>SUKALPA TECH SOLUTIONS</strong></p>
     <p><a href="https://sukalpatechsolutions.com">https://sukalpatechsolutions.com</a> | <a href="mailto:info@sukalpatech.com">info@sukalpatech.com</a></p>
-    `,
+    `;
+
+  const mailOptions = {
+    from: `"SUKALPA TECH SOLUTIONS" <${process.env.SMTP_USER}>`,
+    to: employeeEmail,
+    subject,
+    text,
+    html,
   };
 
-  await sendWithRetries(msg);
+  await sendWithRetries(mailOptions);
 
   return { resetToken, tokenExpiry, resetLink };
 }
