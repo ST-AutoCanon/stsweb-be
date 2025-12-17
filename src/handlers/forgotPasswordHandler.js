@@ -1,12 +1,67 @@
 const crypto = require("crypto");
-const sgMail = require("@sendgrid/mail");
+const nodemailer = require("nodemailer");
 const {
   saveResetToken,
   getEmployeeByEmail,
 } = require("../services/forgotPasswordService");
 const ErrorHandler = require("../utils/errorHandler");
 
-sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+if (!process.env.SMTP_HOST)
+  console.warn("[mailer] WARNING: SMTP_HOST is not set.");
+if (!process.env.SMTP_USER)
+  console.warn("[mailer] WARNING: SMTP_USER is not set.");
+if (!process.env.SMTP_PASS)
+  console.warn("[mailer] WARNING: SMTP_PASS is not set.");
+
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: Number(process.env.SMTP_PORT) || 587,
+  secure: false,
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+  tls: {
+    rejectUnauthorized: false,
+  },
+});
+
+const MAX_RETRIES = 2;
+const RETRY_BASE_MS = 500;
+
+function sleep(ms) {
+  return new Promise((res) => setTimeout(res, ms));
+}
+
+async function sendWithRetries(mailOptions, retries = MAX_RETRIES) {
+  let attempt = 0;
+  let lastErr = null;
+
+  while (attempt <= retries) {
+    try {
+      attempt++;
+      const info = await transporter.sendMail(mailOptions);
+      return info;
+    } catch (err) {
+      lastErr = err;
+      const isTransient =
+        err &&
+        (err.code === "ECONNRESET" ||
+          err.code === "ECONNREFUSED" ||
+          (err.response && err.response.status >= 500));
+      if (!isTransient || attempt > retries) break;
+
+      const wait = RETRY_BASE_MS * Math.pow(2, attempt - 1);
+      console.warn(
+        `[mailer] transient mail error (attempt ${attempt}). retrying in ${wait}ms`,
+        err && err.message ? err.message : err
+      );
+      await sleep(wait);
+    }
+  }
+
+  throw lastErr;
+}
 
 exports.forgotPassword = async (req, res) => {
   try {
@@ -27,14 +82,15 @@ exports.forgotPassword = async (req, res) => {
       "User";
 
     const resetToken = crypto.randomBytes(32).toString("hex");
-    const tokenExpiry = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000); // 3 days
+    const tokenExpiry = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
 
     await saveResetToken(email, resetToken, tokenExpiry);
 
     const resetLink = `${process.env.FRONTEND_URL}/ResetPassword?token=${resetToken}`;
-    const emailContent = {
+
+    const mailOptions = {
       to: email,
-      from: process.env.SENDGRID_SENDER_EMAIL,
+      from: `"SUKALPA TECH SOLUTIONS" <${process.env.SMTP_USER}>`,
       subject: "Reset Your Password",
       text: `Hi ${userName},
 
@@ -68,9 +124,12 @@ info@sukalpatech.com`,
     };
 
     try {
-      await sgMail.send(emailContent);
-    } catch (sgErr) {
-      console.error("SendGrid send failed:", sgErr.response?.body || sgErr);
+      await sendWithRetries(mailOptions);
+    } catch (mailErr) {
+      console.error(
+        "SMTP send failed:",
+        mailErr && (mailErr.response || mailErr)
+      );
       throw ErrorHandler.generateErrorResponse(
         502,
         "Failed to send reset email. Please try again later."
@@ -84,7 +143,7 @@ info@sukalpatech.com`,
   } catch (err) {
     console.error("Forgot password error:", err);
 
-    if (err.statusCode) {
+    if (err && err.statusCode) {
       return res.status(err.statusCode).json(err);
     }
 
