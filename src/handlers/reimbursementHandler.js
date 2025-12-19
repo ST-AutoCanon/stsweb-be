@@ -8,7 +8,6 @@ const db = require("../config");
 const queries = require("../constants/reimbursementQueries");
 const XLSX = require("xlsx");
 
-// forbidden extensions
 const forbiddenExts = new Set([
   ".xlsx",
   ".xls",
@@ -23,11 +22,9 @@ const forbiddenExts = new Set([
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // Derive date parts
     const isoDate = req.body.date || new Date().toISOString().slice(0, 10);
     const [year, month] = isoDate.split("-");
 
-    // Build the destination path
     const dest = path.join(
       __dirname,
       "..",
@@ -39,7 +36,6 @@ const storage = multer.diskStorage({
       String(req.user?.employeeId || req.body.employeeId || "unknown")
     );
 
-    // Ensure folder exists
     fs.mkdirSync(dest, { recursive: true });
     cb(null, dest);
   },
@@ -51,7 +47,6 @@ const storage = multer.diskStorage({
   },
 });
 
-// multer fileFilter
 function fileFilter(req, file, cb) {
   const ext = path.extname(file.originalname).toLowerCase();
   if (forbiddenExts.has(ext)) {
@@ -66,14 +61,12 @@ function fileFilter(req, file, cb) {
   cb(null, true);
 }
 
-// multer instance
 const upload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  limits: { fileSize: 10 * 1024 * 1024 },
 });
 
-// fallback validation
 function validateAttachments(files) {
   for (const file of files) {
     const ext = path.extname(file.originalname).toLowerCase();
@@ -84,7 +77,6 @@ function validateAttachments(files) {
   return null;
 }
 
-// Utility: safe unlink sync
 function safeUnlinkSync(fp) {
   try {
     if (fs.existsSync(fp)) fs.unlinkSync(fp);
@@ -93,21 +85,17 @@ function safeUnlinkSync(fp) {
   }
 }
 
-// ── CONTROLLER METHODS ────────────────────────────────────────────────────────
-
 exports.generateReimbursementPDF = async (req, res) => {
   try {
     const { claimId } = req.params;
     if (!claimId) return res.status(400).json({ error: "claimId required" });
 
-    // Fetch claim details
     const [claimRows] = await db.query(queries.GET_CLAIM_DETAILS, [claimId]);
     const claim = Array.isArray(claimRows) ? claimRows[0] : claimRows;
     if (!claim || !claim.employee_id) {
       return res.status(404).json({ error: "Claim not found" });
     }
 
-    // Fetch employee
     const [employeeRows] = await db.query(queries.GET_EMPLOYEE_DETAILS, [
       claim.employee_id,
     ]);
@@ -118,7 +106,6 @@ exports.generateReimbursementPDF = async (req, res) => {
       return res.status(404).json({ error: "Employee details not found" });
     }
 
-    // Fetch attachments
     const [attachmentsRows] = await db.query(queries.GET_ATTACHMENTS, [
       claimId,
     ]);
@@ -126,7 +113,6 @@ exports.generateReimbursementPDF = async (req, res) => {
       ? attachmentsRows
       : attachmentsRows || [];
 
-    // Keep only attachments with file_path
     const attachmentsWithFiles = attachments.filter(
       (att) => att && att.file_path
     );
@@ -138,24 +124,20 @@ exports.generateReimbursementPDF = async (req, res) => {
       );
     }
 
-    // Warn if files missing on disk
     attachmentsWithFiles.forEach((att) => {
       if (!fs.existsSync(att.file_path)) {
         console.warn(`File not found on disk: ${att.file_path}`);
       }
     });
 
-    // Generate DOCX using only valid attachments
     const docxPath = await generateDocx(claim, employee, attachmentsWithFiles);
 
-    // Convert to PDF
     const pdfPath = await convertDocxToPdf(
       docxPath,
       claim,
       attachmentsWithFiles
     );
 
-    // Create a safe file name
     const fileNameBase = (employee.name || `claim_${claimId}`).replace(
       /\s+/g,
       "_"
@@ -164,7 +146,6 @@ exports.generateReimbursementPDF = async (req, res) => {
 
     res.download(pdfPath, fileName, (err) => {
       if (err) console.error("Download error:", err);
-      // cleanup temp files if they exist
       safeUnlinkSync(docxPath);
       safeUnlinkSync(pdfPath);
     });
@@ -194,7 +175,6 @@ exports.getReimbursementsByEmployee = async (req, res) => {
   }
 };
 
-// reimbursementHandler.js (controller)
 exports.updatePaymentStatus = async (req, res) => {
   try {
     const { id } = req.params;
@@ -202,7 +182,6 @@ exports.updatePaymentStatus = async (req, res) => {
 
     if (!id) return res.status(400).json({ error: "id required" });
 
-    // allow exactly these three statuses now:
     if (
       !["pending", "paid", "rejected"].includes(
         String(payment_status).toLowerCase()
@@ -215,7 +194,6 @@ exports.updatePaymentStatus = async (req, res) => {
       return res.status(403).json({ error: "Not authorized." });
     }
 
-    // only approved claims may be paid or rejected
     const [rows] = await db.query(
       "SELECT status FROM reimbursement WHERE id = ?",
       [id]
@@ -231,7 +209,6 @@ exports.updatePaymentStatus = async (req, res) => {
       });
     }
 
-    // set paid_date only when status === "paid"
     const paid_date =
       String(payment_status).toLowerCase() === "paid" ? new Date() : null;
     const updated = await reimbursementService.updatePaymentStatus(
@@ -266,34 +243,26 @@ exports.getAllReimbursements = async (req, res) => {
   }
 };
 
-/**
- * GET /reimbursements/export?submittedFrom=…&submittedTo=…
- */
 exports.exportReimbursements = async (req, res) => {
   try {
     let { submittedFrom, submittedTo } = req.query;
     submittedFrom = submittedFrom !== "null" ? submittedFrom : null;
     submittedTo = submittedTo !== "null" ? submittedTo : null;
 
-    // reuse service to fetch grouped rows (array of { employee_id, claims })
     const rows = await reimbursementService.getAllReimbursements(
       submittedFrom,
       submittedFrom,
       submittedTo
     );
 
-    // flatten into one big array of claims:
     const flat = rows.reduce((acc, r) => acc.concat(r.claims || []), []);
 
-    // convert to sheet
     const ws = XLSX.utils.json_to_sheet(flat);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Reimbursements");
 
-    // write to buffer
     const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
 
-    // set a filename
     const fname = `Reimbursements_${submittedFrom || "all"}-to-${
       submittedTo || "all"
     }.xlsx`;
@@ -311,9 +280,103 @@ exports.exportReimbursements = async (req, res) => {
   }
 };
 
+function safeParseJSON(val, fallback = null) {
+  if (val === undefined || val === null) return fallback;
+  if (typeof val === "object") return val;
+  try {
+    return JSON.parse(val);
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function buildLinesFromRequest({
+  claim_type,
+  linesInput,
+  claim_rows_input,
+  transport_type,
+}) {
+  if (Array.isArray(linesInput) && linesInput.length) {
+    return linesInput.map((l, idx) => {
+      const payload = l.payload || { ...(l || {}) };
+      const total =
+        l.total_amount !== undefined && l.total_amount !== null
+          ? Number(l.total_amount)
+          : computeRowTotal(payload, transport_type);
+      return {
+        line_type: l.line_type || claim_type || null,
+        payload,
+        total_amount: Number(
+          (total || 0).toFixed ? total.toFixed(2) : parseFloat(total) || 0
+        ),
+      };
+    });
+  }
+
+  if (claim_rows_input && typeof claim_rows_input === "object") {
+    const rowsForType = Array.isArray(claim_rows_input[claim_type])
+      ? claim_rows_input[claim_type]
+      : [];
+    return rowsForType.map((r) => {
+      const payload = { ...(r || {}) };
+      const total =
+        r && r.total_amount !== undefined && r.total_amount !== null
+          ? Number(r.total_amount)
+          : computeRowTotal(payload, transport_type);
+      return {
+        line_type: claim_type || null,
+        payload,
+        total_amount: Number(
+          (total || 0).toFixed ? total.toFixed(2) : parseFloat(total) || 0
+        ),
+      };
+    });
+  }
+
+  return [];
+}
+
+function computeRowTotal(payload = {}, transport_type) {
+  const t =
+    payload &&
+    payload.total_amount !== undefined &&
+    payload.total_amount !== null
+      ? parseFloat(payload.total_amount) || 0
+      : 0;
+
+  if (transport_type === "Outstation") {
+    const ta = parseFloat(payload.transport_amount) || 0;
+    const af = parseFloat(payload.accommodation_fees) || 0;
+    const da = parseFloat(payload.da) || 0;
+    const sum = ta + af + da;
+    return Number.isFinite(sum) ? sum : t;
+  }
+
+  if (t > 0) return t;
+  const ta = parseFloat(payload.transport_amount) || 0;
+  return ta;
+}
+
+function buildAttachmentsFromFiles(reqFiles = [], attachmentsMeta = {}) {
+  if (!Array.isArray(reqFiles) || reqFiles.length === 0) return [];
+  return reqFiles.map((f) => {
+    const fileName = f.filename || f.originalname;
+    const lineIndex =
+      attachmentsMeta && attachmentsMeta[fileName] !== undefined
+        ? attachmentsMeta[fileName]
+        : attachmentsMeta && attachmentsMeta[f.originalname] !== undefined
+        ? attachmentsMeta[f.originalname]
+        : undefined;
+    return {
+      file_name: fileName,
+      file_path: f.path,
+      line_index: typeof lineIndex === "number" ? Number(lineIndex) : undefined,
+    };
+  });
+}
+
 exports.createReimbursement = async (req, res) => {
   try {
-    // Fallback validation
     if (req.files && req.files.length) {
       const errMsg = validateAttachments(req.files);
       if (errMsg) {
@@ -325,86 +388,86 @@ exports.createReimbursement = async (req, res) => {
     const employeeId = req.user?.employeeId || req.body.employeeId;
     const role = req.user?.role || req.body.role;
     if (!employeeId || employeeId === "undefined") {
+      if (req.files && req.files.length)
+        req.files.forEach((f) => safeUnlinkSync(f.path));
       return res.status(400).json({ error: "Employee ID missing." });
     }
 
     let participants = [];
     if (req.body.participants) {
-      try {
-        participants =
-          typeof req.body.participants === "string"
-            ? JSON.parse(req.body.participants)
-            : req.body.participants;
-        if (!Array.isArray(participants)) participants = [];
-      } catch (e) {
-        participants = [];
-      }
+      participants = safeParseJSON(req.body.participants, []);
+      if (!Array.isArray(participants)) participants = [];
     }
 
     let invoices = [];
     if (req.body.invoices) {
-      if (typeof req.body.invoices === "string") {
-        try {
-          const parsed = JSON.parse(req.body.invoices);
-          if (Array.isArray(parsed))
-            invoices = parsed.map((i) => String(i).trim()).filter(Boolean);
-          else if (typeof parsed === "string")
-            invoices = parsed
-              .split(",")
-              .map((s) => s.trim())
-              .filter(Boolean);
-        } catch (e) {
-          invoices = req.body.invoices
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean);
-        }
-      } else if (Array.isArray(req.body.invoices)) {
+      invoices = safeParseJSON(req.body.invoices, []);
+      if (!Array.isArray(invoices) && typeof req.body.invoices === "string") {
         invoices = req.body.invoices
-          .map((i) => String(i).trim())
+          .split(",")
+          .map((s) => s.trim())
           .filter(Boolean);
       }
+      if (!Array.isArray(invoices)) invoices = [];
     }
+
+    let attachmentsMeta = {};
+    if (req.body.attachmentsMeta) {
+      attachmentsMeta = safeParseJSON(req.body.attachmentsMeta, {});
+      if (!attachmentsMeta || typeof attachmentsMeta !== "object")
+        attachmentsMeta = {};
+    }
+
+    const linesInput = safeParseJSON(req.body.lines, null);
+    const claim_rows_input = safeParseJSON(req.body.claim_rows, null);
+    const claim_type = req.body.claim_type || null;
+    const transport_type = req.body.transport_type || null;
+
+    const lines = buildLinesFromRequest({
+      claim_type,
+      linesInput,
+      claim_rows_input,
+      transport_type,
+    });
+
+    const attachmentsFromFiles = buildAttachmentsFromFiles(
+      req.files || [],
+      attachmentsMeta
+    );
+
+    let attachmentsFromBody = [];
+    if (req.body.attachments && typeof req.body.attachments !== "undefined") {
+      const parsed = safeParseJSON(req.body.attachments, null);
+      if (Array.isArray(parsed)) {
+        attachmentsFromBody = parsed.map((a) => ({
+          file_name: a.file_name || a.filename || a.name,
+          file_path: a.file_path || a.path || null,
+          line_index:
+            a.line_index !== undefined ? Number(a.line_index) : undefined,
+        }));
+      }
+    }
+
+    const attachments = [...attachmentsFromFiles, ...attachmentsFromBody];
 
     const reimbursementData = {
       employeeId,
       department_id: role === "Admin" ? null : req.body.department_id,
-      claim_type: req.body.claim_type,
-      transport_type: req.body.transport_type,
-      transport_amount: req.body.transport_amount,
-      da: req.body.da,
-      from_date: req.body.fromDate,
-      to_date: req.body.toDate,
-      date: req.body.date,
-      travel_from: req.body.travel_from,
-      travel_to: req.body.travel_to,
-      purpose: req.body.purpose,
-      meals_objective: req.body.meals_objective,
-      purchasing_item: req.body.purchasing_item,
-      accommodation_fees: req.body.accommodation_fees,
-      no_of_days: req.body.no_of_days,
-      total_amount: req.body.total_amount,
-      meal_type: req.body.meal_type,
-      stationary: req.body.stationary,
-      service_provider: req.body.service_provider,
-      project: req.body.project,
-      participants: participants, // array
-      attachments: req.files
-        ? req.files.map((file) => ({
-            file_name: file.filename,
-            file_path: file.path,
-          }))
-        : [],
-      invoices, // array of invoice numbers (strings)
+      claim_type: claim_type,
+      transport_type: transport_type,
+      project: req.body.project || null,
+      participants: participants,
+      comments: req.body.comments || req.body.purpose || null,
+      lines,
+      attachments,
+      invoices,
     };
 
     const newReimbursement = await reimbursementService.createReimbursement(
       reimbursementData
     );
 
-    // Auto-approve if Admin
     if (role === "Admin") {
-      // approver_id: use the admin's employeeId if present else 'Admin'
       const approverId = req.user?.employeeId || "Admin";
       await reimbursementService.updateReimbursementStatus(
         newReimbursement.id,
@@ -422,7 +485,6 @@ exports.createReimbursement = async (req, res) => {
     });
   } catch (error) {
     console.error("Error creating reimbursement:", error);
-    // If files were uploaded, attempt cleanup on error
     if (req.files && req.files.length) {
       req.files.forEach((f) => safeUnlinkSync(f.path));
     }
@@ -432,10 +494,8 @@ exports.createReimbursement = async (req, res) => {
   }
 };
 
-// Note: in your routes, use upload.array("attachments", 5) before this handler
 exports.updateReimbursement = async (req, res) => {
   try {
-    // Fallback validation
     if (req.files && req.files.length) {
       const errMsg = validateAttachments(req.files);
       if (errMsg) {
@@ -450,45 +510,62 @@ exports.updateReimbursement = async (req, res) => {
 
     const role = req.user?.role || req.body.role;
 
-    // parse participants if present
     let participants = [];
     if (req.body.participants) {
-      try {
-        participants =
-          typeof req.body.participants === "string"
-            ? JSON.parse(req.body.participants)
-            : req.body.participants;
-        if (!Array.isArray(participants)) participants = [];
-      } catch (e) {
-        participants = [];
+      participants = safeParseJSON(req.body.participants, []);
+      if (!Array.isArray(participants)) participants = [];
+    }
+
+    let invoices = [];
+    if (req.body.invoices) {
+      invoices = safeParseJSON(req.body.invoices, []);
+      if (!Array.isArray(invoices) && typeof req.body.invoices === "string") {
+        invoices = req.body.invoices
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
+      if (!Array.isArray(invoices)) invoices = [];
+    }
+
+    let attachmentsMeta = {};
+    if (req.body.attachmentsMeta) {
+      attachmentsMeta = safeParseJSON(req.body.attachmentsMeta, {});
+      if (!attachmentsMeta || typeof attachmentsMeta !== "object")
+        attachmentsMeta = {};
+    }
+
+    const linesInput = safeParseJSON(req.body.lines, null);
+    const claim_rows_input = safeParseJSON(req.body.claim_rows, null);
+    const claim_type = req.body.claim_type || null;
+    const transport_type = req.body.transport_type || null;
+
+    const lines = buildLinesFromRequest({
+      claim_type,
+      linesInput,
+      claim_rows_input,
+      transport_type,
+    });
+
+    const attachmentsFromFiles = buildAttachmentsFromFiles(
+      req.files || [],
+      attachmentsMeta
+    );
+
+    let attachmentsFromBody = [];
+    if (req.body.attachments && typeof req.body.attachments !== "undefined") {
+      const parsed = safeParseJSON(req.body.attachments, null);
+      if (Array.isArray(parsed)) {
+        attachmentsFromBody = parsed.map((a) => ({
+          file_name: a.file_name || a.filename || a.name,
+          file_path: a.file_path || a.path || null,
+          line_index:
+            a.line_index !== undefined ? Number(a.line_index) : undefined,
+        }));
       }
     }
 
-    // parse invoices (similar parsing as create)
-    let invoices = [];
-    if (req.body.invoices) {
-      if (typeof req.body.invoices === "string") {
-        try {
-          const parsed = JSON.parse(req.body.invoices);
-          if (Array.isArray(parsed))
-            invoices = parsed.map((i) => String(i).trim()).filter(Boolean);
-          else if (typeof parsed === "string")
-            invoices = parsed
-              .split(",")
-              .map((s) => s.trim())
-              .filter(Boolean);
-        } catch (e) {
-          invoices = req.body.invoices
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean);
-        }
-      } else if (Array.isArray(req.body.invoices)) {
-        invoices = req.body.invoices
-          .map((i) => String(i).trim())
-          .filter(Boolean);
-      }
-    }
+    const attachments = [...attachmentsFromFiles, ...attachmentsFromBody];
 
     const updateData = {
       employeeId: req.body.employeeId,
@@ -498,43 +575,27 @@ exports.updateReimbursement = async (req, res) => {
           : req.body.department_id !== undefined
           ? parseInt(req.body.department_id, 10)
           : null,
-      claim_type: req.body.claim_type,
-      comments: req.body.comments !== "undefined" ? req.body.comments : "",
-      fromDate: req.body.fromDate || null,
-      toDate: req.body.toDate || null,
-      date: req.body.date || null,
-      travel_from: req.body.travel_from || null,
-      travel_to: req.body.travel_to || null,
-      meals_objective: req.body.meals_objective || null,
-      purpose: req.body.purpose || null,
-      da: parseFloat(req.body.da) || 0,
-      transport_amount: parseFloat(req.body.transport_amount) || 0,
-      purchasing_item: req.body.purchasing_item || null,
-      accommodation_fees: parseFloat(req.body.accommodation_fees) || 0,
-      no_of_days: parseInt(req.body.no_of_days, 10) || 0,
-      total_amount: parseFloat(req.body.total_amount) || 0,
-      meal_type: req.body.meal_type || null,
-      stationary: req.body.stationary || null,
-      service_provider: req.body.service_provider || null,
+      claim_type: claim_type,
+      transport_type: transport_type || null,
       project: req.body.project || null,
-      participants: participants, // array
-      attachments: req.files
-        ? req.files.map((file) => ({
-            file_name: file.filename,
-            file_path: file.path,
-          }))
-        : [],
-      invoices, // array
+      comments:
+        req.body.comments !== "undefined"
+          ? req.body.comments
+          : req.body.purpose || "",
+      participants,
+      lines,
+      attachments,
+      invoices,
     };
 
     const updatedReimbursement = await reimbursementService.updateReimbursement(
       id,
       updateData
     );
+
     res.json({ message: "Reimbursement updated", data: updatedReimbursement });
   } catch (error) {
     console.error("Error updating reimbursement:", error);
-    // cleanup uploaded files on error
     if (req.files && req.files.length) {
       req.files.forEach((f) => safeUnlinkSync(f.path));
     }
@@ -551,16 +612,13 @@ exports.updateReimbursementStatus = async (req, res) => {
       return res.status(400).json({ error: "Invalid status." });
     }
 
-    // get approver details (service returns single object or null)
     const approverDetails = await reimbursementService.getApproverDetails(
       approver_id
     );
 
-    // normalize possible shapes
     let approver_name = null;
     let approver_designation = null;
     if (approverDetails) {
-      // If the service returns an array, take first element
       const row = Array.isArray(approverDetails)
         ? approverDetails[0]
         : approverDetails;
@@ -686,14 +744,12 @@ exports.getEmployees = async (req, res) => {
   try {
     const { q, departmentId, limit } = req.query;
 
-    // If you want to restrict access, add auth checks here (req.user etc.)
     const employees = await reimbursementService.getEmployees(
       q || null,
       departmentId || null,
       limit || 200
     );
 
-    // Return as an array (frontend expects array)
     res.status(200).json(employees);
   } catch (err) {
     console.error("Error fetching employees:", err);
@@ -702,7 +758,6 @@ exports.getEmployees = async (req, res) => {
 };
 exports.getTeamReimbursements = async (req, res) => {
   try {
-    // expect /team/:teamLeadId/reimbursements
     const { teamLeadId } = req.params;
     const { departmentId } = req.query;
     let { submittedFrom, submittedTo } = req.query;
@@ -718,7 +773,6 @@ exports.getTeamReimbursements = async (req, res) => {
       submittedFrom && submittedFrom !== "null" ? submittedFrom : null;
     const end = submittedTo && submittedTo !== "null" ? submittedTo : null;
 
-    // correct order: (departmentId, submittedFrom, submittedTo, teamLeadId)
     const teamReimbursements = await reimbursementService.getTeamReimbursements(
       departmentId,
       start,
@@ -742,5 +796,4 @@ exports.getAllProjects = async (req, res) => {
   }
 };
 
-// Export multer upload for use in your routes
 exports.upload = upload;

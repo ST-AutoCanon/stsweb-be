@@ -33,7 +33,13 @@ function fileFilter(req, file, cb) {
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const { employeeId } = req.body;
+    const employeeId =
+      (req.body && req.body.employeeId) ||
+      req.query?.employeeId ||
+      req.headers["x-employee-id"] ||
+      req.headers["x-employeeid"] ||
+      req.headers["employeeid"] ||
+      null;
     if (!employeeId) {
       return cb(new Error("Employee ID is required"), null);
     }
@@ -58,7 +64,7 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const now = new Date();
-    const date = now.toISOString().split("T")[0]; // YYYY-MM-DD
+    const date = now.toISOString().split("T")[0];
     const { employeeId } = req.body;
     const uploadDir = path.join(
       __dirname,
@@ -87,7 +93,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB limit
+  limits: { fileSize: 10 * 1024 * 1024 },
 });
 
 router.get("/reimbursement/employees", reimbursementHandler.getEmployees);
