@@ -130,6 +130,46 @@ exports.generateReimbursementPDF = async (req, res) => {
       }
     });
 
+    const [linesRows] = await db.query(queries.GET_LINES_BY_REIMBURSEMENT_IDS, [
+      [claimId],
+    ]);
+
+    const lines = (linesRows || [])
+      .sort((a, b) => (a.line_index || 0) - (b.line_index || 0))
+      .map((l) => {
+        const payload =
+          typeof l.meta === "string" ? JSON.parse(l.meta) : l.meta || {};
+        return {
+          ...l,
+          payload,
+        };
+      });
+
+    const firstPayload = lines[0]?.payload || {};
+    const display_date =
+      firstPayload.date ||
+      firstPayload.from_date ||
+      firstPayload.to_date ||
+      claim.date ||
+      null;
+
+    const invoiceSet = new Set();
+    lines.forEach((l) => {
+      (l.payload?.invoices || []).forEach(
+        (i) => i && invoiceSet.add(String(i).trim())
+      );
+    });
+
+    const total_amount = lines.reduce(
+      (sum, l) => sum + (Number(l.total_amount) || 0),
+      0
+    );
+
+    claim.lines = lines;
+    claim.display_date = display_date;
+    claim.total_amount = total_amount.toFixed(2);
+    claim.invoices = Array.from(invoiceSet);
+
     const docxPath = await generateDocx(claim, employee, attachmentsWithFiles);
 
     const pdfPath = await convertDocxToPdf(
@@ -535,6 +575,46 @@ exports.updateReimbursement = async (req, res) => {
         attachmentsMeta = {};
     }
 
+    // --- parse attachments provided in `attachments` body (full objects)
+    let attachmentsFromBody = [];
+    if (req.body.attachments && typeof req.body.attachments !== "undefined") {
+      const parsed = safeParseJSON(req.body.attachments, null);
+      if (Array.isArray(parsed)) {
+        attachmentsFromBody = parsed
+          .map((a) => ({
+            file_name: a.file_name || a.filename || a.name,
+            file_path: a.file_path || a.path || null,
+            line_index:
+              a.line_index !== undefined ? Number(a.line_index) : undefined,
+          }))
+          .filter((a) => a.file_name);
+      }
+    }
+
+    // Support legacy/aux field `existingAttachments` — client may send array of filenames or objects
+    let attachmentsFromExisting = [];
+    if (req.body.existingAttachments) {
+      const parsedExisting = safeParseJSON(req.body.existingAttachments, null);
+      if (Array.isArray(parsedExisting)) {
+        attachmentsFromExisting = parsedExisting
+          .map((entry) => {
+            if (typeof entry === "string") {
+              return { file_name: entry, file_path: null };
+            }
+            return {
+              file_name:
+                entry.file_name || entry.filename || entry.name || null,
+              file_path: entry.file_path || entry.path || null,
+              line_index:
+                entry.line_index !== undefined
+                  ? Number(entry.line_index)
+                  : undefined,
+            };
+          })
+          .filter((a) => a.file_name);
+      }
+    }
+
     const linesInput = safeParseJSON(req.body.lines, null);
     const claim_rows_input = safeParseJSON(req.body.claim_rows, null);
     const claim_type = req.body.claim_type || null;
@@ -547,25 +627,18 @@ exports.updateReimbursement = async (req, res) => {
       transport_type,
     });
 
+    // Map req.files to attachment objects (file_name, file_path, line_index if provided via attachmentsMeta)
     const attachmentsFromFiles = buildAttachmentsFromFiles(
       req.files || [],
       attachmentsMeta
     );
 
-    let attachmentsFromBody = [];
-    if (req.body.attachments && typeof req.body.attachments !== "undefined") {
-      const parsed = safeParseJSON(req.body.attachments, null);
-      if (Array.isArray(parsed)) {
-        attachmentsFromBody = parsed.map((a) => ({
-          file_name: a.file_name || a.filename || a.name,
-          file_path: a.file_path || a.path || null,
-          line_index:
-            a.line_index !== undefined ? Number(a.line_index) : undefined,
-        }));
-      }
-    }
-
-    const attachments = [...attachmentsFromFiles, ...attachmentsFromBody];
+    // Combine uploaded files, explicit attachments, and existing attachments
+    const attachments = [
+      ...attachmentsFromFiles,
+      ...attachmentsFromBody,
+      ...attachmentsFromExisting,
+    ];
 
     const updateData = {
       employeeId: req.body.employeeId,
