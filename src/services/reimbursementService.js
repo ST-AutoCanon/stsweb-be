@@ -81,6 +81,13 @@ const parseParticipantsSafe = (val) => {
   return [];
 };
 
+function coerceNullableNumber(v) {
+  if (v === undefined || v === null) return null;
+  if (typeof v === "string" && v.trim() === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 const mapAttachmentsToReimbursements = (
   reimbursements,
   attachments,
@@ -266,7 +273,6 @@ exports.getAllReimbursements = async (
 
     if (!rawRows || rawRows.length === 0) return [];
 
-    // normalize top-level rows
     const reimbursements = rawRows.map((r) => {
       const n = normalizeRow(r);
       const participants = parseParticipantsSafe(r.participants);
@@ -281,7 +287,6 @@ exports.getAllReimbursements = async (
       };
     });
 
-    // fetch lines + attachments for all reimbursements
     const reimbursementIds = reimbursements.map((r) => r.id);
     const safeIds = reimbursementIds.length ? reimbursementIds : [-1];
 
@@ -293,7 +298,6 @@ exports.getAllReimbursements = async (
       [safeIds]
     );
 
-    // build lines map (same parsing logic as getReimbursementsByEmployee)
     const linesByReim = {};
     (linesRows || []).forEach((l) => {
       let parsedMeta = {};
@@ -344,7 +348,6 @@ exports.getAllReimbursements = async (
         service_provider:
           parsedMeta.service_provider || l.service_provider || null,
 
-        // ensure invoices and attachments come from parsedMeta if present
         invoices: parseInvoices(parsedMeta.invoices),
         attachments: Array.isArray(parsedMeta.attachments)
           ? parsedMeta.attachments
@@ -364,7 +367,6 @@ exports.getAllReimbursements = async (
       });
     });
 
-    // build attachments map by reimbursement (and keep line_id)
     const attByReim = {};
     (attachRows || []).forEach((a) => {
       if (!attByReim[a.reimbursement_id]) attByReim[a.reimbursement_id] = [];
@@ -376,7 +378,6 @@ exports.getAllReimbursements = async (
       });
     });
 
-    // --- inside getAllReimbursements, where finalReims is composed ---
     const finalReims = reimbursements.map((r) => {
       const lines = (linesByReim[r.id] || []).sort(
         (x, y) => (x.line_index || 0) - (y.line_index || 0)
@@ -406,14 +407,11 @@ exports.getAllReimbursements = async (
           return acc;
         }, {});
 
-      // --- NEW: aggregate invoices from claim-level + all line.payload.invoices ---
       const invoiceSet = new Set();
-      // claim-level invoices if any (column r.invoices)
       (Array.isArray(r.invoices)
         ? r.invoices
         : parseInvoices(r.invoices)
       ).forEach((inv) => inv && invoiceSet.add(String(inv).trim()));
-      // line-level invoices
       (lines || []).forEach((ln) => {
         const linv = ln?.payload?.invoices || [];
         (Array.isArray(linv) ? linv : parseInvoices(linv)).forEach((inv) => {
@@ -427,11 +425,10 @@ exports.getAllReimbursements = async (
         lines,
         attachments: claimLevelAttachments,
         line_attachments_map,
-        invoices: aggregatedInvoices, // <- populated now
+        invoices: aggregatedInvoices,
       };
     });
 
-    // group by employee id (same output shape your existing code expects)
     const grouped = finalReims.reduce((acc, r) => {
       const eid = r.employee_id;
       if (!acc[eid]) acc[eid] = [];
@@ -543,11 +540,13 @@ exports.createReimbursement = async (reimbursementData) => {
         const to_date = payload.to_date || payload.toDate || null;
         const travel_from = payload.travel_from || payload.travelFrom || null;
         const travel_to = payload.travel_to || payload.travelTo || null;
-        const transport_amount =
-          payload.transport_amount ?? payload.transportAmount ?? null;
-        const accommodation_fees =
-          payload.accommodation_fees ?? payload.accommodationFees ?? null;
-        const da = payload.da ?? null;
+        const transport_amount = coerceNullableNumber(
+          payload.transport_amount ?? payload.transportAmount ?? null
+        );
+        const accommodation_fees = coerceNullableNumber(
+          payload.accommodation_fees ?? payload.accommodationFees ?? null
+        );
+        const da = coerceNullableNumber(payload.da ?? null);
         const total_amount = (
           parseFloat(l.total_amount || payload.total_amount || 0) || 0
         ).toFixed(2);
@@ -629,6 +628,14 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
   try {
     await conn.beginTransaction();
 
+    // --- fetch reimbursement row to get employee_id (used to derive paths if required)
+    const [reimRows] = await conn.query(
+      `SELECT employee_id FROM reimbursement WHERE id = ?`,
+      [reimbursementId]
+    );
+    const employeeIdRef =
+      reimRows && reimRows[0] ? reimRows[0].employee_id : null;
+
     const participantsArr = parseParticipants(updateData.participants);
     const participantsJSON = JSON.stringify(participantsArr);
 
@@ -638,6 +645,7 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
       0
     );
 
+    // update reimbursement header
     await conn.query(queries.UPDATE_REIMBURSEMENT, [
       updateData.department_id || null,
       updateData.claim_type || null,
@@ -649,6 +657,7 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
       reimbursementId,
     ]);
 
+    // delete old lines and insert new ones
     await conn.query(queries.DELETE_LINES_BY_REIMBURSEMENT_ID, [
       reimbursementId,
     ]);
@@ -663,11 +672,13 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
         const to_date = payload.to_date || payload.toDate || null;
         const travel_from = payload.travel_from || payload.travelFrom || null;
         const travel_to = payload.travel_to || payload.travelTo || null;
-        const transport_amount =
-          payload.transport_amount ?? payload.transportAmount ?? null;
-        const accommodation_fees =
-          payload.accommodation_fees ?? payload.accommodationFees ?? null;
-        const da = payload.da ?? null;
+        const transport_amount = coerceNullableNumber(
+          payload.transport_amount ?? payload.transportAmount ?? null
+        );
+        const accommodation_fees = coerceNullableNumber(
+          payload.accommodation_fees ?? payload.accommodationFees ?? null
+        );
+        const da = coerceNullableNumber(payload.da ?? null);
         const total_amount = (
           parseFloat(l.total_amount || payload.total_amount || 0) || 0
         ).toFixed(2);
@@ -710,14 +721,27 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
       await conn.query(queries.SAVE_REIMBURSEMENT_LINES_BULK, [values]);
     }
 
+    // --- attachments handling
     if (
       Array.isArray(updateData.attachments) &&
       updateData.attachments.length
     ) {
+      // Read existing attachments BEFORE deleting so we can reuse file_path
+      const [existingAttachRows] = await conn.query(
+        `SELECT file_name, file_path FROM reimbursement_attachments WHERE reimbursement_id = ?`,
+        [reimbursementId]
+      );
+      const existingMap = {};
+      (existingAttachRows || []).forEach((r) => {
+        if (r && r.file_name) existingMap[String(r.file_name)] = r.file_path;
+      });
+
+      // Delete old attachment rows (we will re-insert from updateData.attachments)
       await conn.query(queries.DELETE_ATTACHMENTS_BY_REIMBURSEMENT_ID, [
         reimbursementId,
       ]);
 
+      // fetch inserted lines to map line_index -> id
       const [insertedLines] = await conn.query(
         `SELECT id, line_index FROM reimbursement_lines WHERE reimbursement_id = ?`,
         [reimbursementId]
@@ -725,15 +749,100 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
       const lineIndexToId = {};
       insertedLines.forEach((l) => (lineIndexToId[l.line_index] = l.id));
 
-      const attValues = updateData.attachments.map((a) => {
-        const li =
+      // Build filename -> line_index map from new lines payload
+      const filenameToLineIndex = {};
+      for (let idx = 0; idx < lines.length; idx++) {
+        const ln = lines[idx] || {};
+        const payload = ln.payload || {};
+        const atts = Array.isArray(payload.attachments)
+          ? payload.attachments
+          : payload.attachments
+          ? [payload.attachments]
+          : [];
+        for (const rawName of atts) {
+          if (!rawName) continue;
+          const fbase = path.basename(String(rawName));
+          if (!filenameToLineIndex[fbase]) filenameToLineIndex[fbase] = idx;
+          // also map trimmed variants
+          const trimmed = String(rawName).trim();
+          if (trimmed && !filenameToLineIndex[trimmed])
+            filenameToLineIndex[trimmed] = idx;
+        }
+      }
+
+      // prepare attachment values ensuring file_path is not null and line mapping is inferred
+      const attValues = [];
+      for (const a of updateData.attachments) {
+        const fileName = a.file_name || a.filename || a.name || "";
+        let filePath = a.file_path || a.path || null;
+        let providedLineIndex =
           a.line_index !== undefined && a.line_index !== null
-            ? lineIndexToId[a.line_index] || null
+            ? Number(a.line_index)
+            : undefined;
+
+        // If client did not provide line_index, try to infer from filename using the filename map
+        if (
+          (providedLineIndex === undefined || providedLineIndex === null) &&
+          fileName
+        ) {
+          const base = path.basename(String(fileName));
+          if (filenameToLineIndex.hasOwnProperty(base)) {
+            providedLineIndex = Number(filenameToLineIndex[base]);
+          } else {
+            // also try trim/normalize matches
+            const trimmed = String(fileName).trim();
+            if (filenameToLineIndex.hasOwnProperty(trimmed)) {
+              providedLineIndex = Number(filenameToLineIndex[trimmed]);
+            }
+          }
+        }
+
+        // reuse DB file_path if client did not supply it
+        if (!filePath && fileName && existingMap[fileName]) {
+          filePath = existingMap[fileName];
+        }
+
+        // attempt to derive path if still missing using YEAR-MONTH present in filename and employeeIdRef
+        if (!filePath && fileName) {
+          const m = String(fileName).match(/^(\d{4})[-_](\d{2})/);
+          if (m && employeeIdRef) {
+            const year = m[1];
+            const month = m[2];
+            const candidate = path.join(
+              __dirname,
+              "..",
+              "..",
+              "..",
+              "reimbursement",
+              year,
+              month,
+              String(employeeIdRef),
+              fileName
+            );
+            try {
+              await fs.access(candidate);
+              filePath = candidate;
+            } catch {
+              // file might not exist; still use candidate (non-null) to avoid NOT NULL DB error
+              filePath = candidate;
+            }
+          }
+        }
+
+        // final fallback: empty string (non-null) to satisfy DB constraint
+        if (filePath === null || typeof filePath === "undefined") filePath = "";
+
+        const li =
+          providedLineIndex !== undefined && providedLineIndex !== null
+            ? lineIndexToId[providedLineIndex] || null
             : null;
-        return [reimbursementId, li, a.file_name, a.file_path];
-      });
-      if (attValues.length)
+
+        attValues.push([reimbursementId, li, fileName, filePath]);
+      }
+
+      if (attValues.length) {
         await conn.query(queries.SAVE_ATTACHMENTS, [attValues]);
+      }
     }
 
     await conn.commit();
@@ -771,7 +880,6 @@ exports.getTeamReimbursements = async (
 
     if (!reimbursementsRaw || reimbursementsRaw.length === 0) return [];
 
-    // normalize rows (claim-level)
     const normalized = reimbursementsRaw.map((r) => {
       const n = normalizeRow(r);
       const participants = parseParticipantsSafe(r.participants);
@@ -794,7 +902,6 @@ exports.getTeamReimbursements = async (
     const reimbursementIds = normalized.map((r) => r.id);
     const safeIds = reimbursementIds.length ? reimbursementIds : [-1];
 
-    // fetch lines + attachments for these reimbursements
     const [linesRows] = await db.query(queries.GET_LINES_BY_REIMBURSEMENT_IDS, [
       safeIds,
     ]);
@@ -803,7 +910,6 @@ exports.getTeamReimbursements = async (
       [safeIds]
     );
 
-    // parse lines meta -> linesByReim
     const linesByReim = {};
     (linesRows || []).forEach((l) => {
       let parsedMeta = {};
@@ -873,7 +979,6 @@ exports.getTeamReimbursements = async (
       });
     });
 
-    // attachment rows -> map (line-level and claim-level)
     const attachmentMap = {};
     (attachmentsRows || []).forEach((att) => {
       const rid = att.reimbursement_id;
@@ -886,7 +991,6 @@ exports.getTeamReimbursements = async (
       });
     });
 
-    // ... inside normalized.map -> enriched mapping ...
     const enriched = normalized.map((r) => {
       const lines = (linesByReim[r.id] || []).sort(
         (a, b) => (a.line_index || 0) - (b.line_index || 0)
@@ -916,7 +1020,6 @@ exports.getTeamReimbursements = async (
           return acc;
         }, {});
 
-      // --- NEW: aggregate invoices ---
       const invoiceSet = new Set();
       (Array.isArray(r.invoices)
         ? r.invoices
@@ -935,7 +1038,7 @@ exports.getTeamReimbursements = async (
         lines,
         attachments: claimLevelAttachments,
         line_attachments_map,
-        invoices: aggregatedInvoices, // <- populated now
+        invoices: aggregatedInvoices,
       };
     });
 

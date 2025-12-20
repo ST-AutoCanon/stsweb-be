@@ -60,6 +60,18 @@ exports.generateDocx = async (claim, employee) => {
     }),
   ];
 
+  if (Array.isArray(claim.invoices) && claim.invoices.length) {
+    employeeDetailsGrid.push(
+      new Paragraph({
+        children: [
+          new TextRun({ text: "Invoice Numbers: ", bold: true }),
+          new TextRun({ text: claim.invoices.join(", ") }),
+        ],
+        spacing: { after: 200 },
+      })
+    );
+  }
+
   const reimbursementTableRows = [
     new TableRow({
       children: [
@@ -153,14 +165,9 @@ exports.generateDocx = async (claim, employee) => {
     );
   };
 
-  let formattedDate = "-";
-  if (claim.from_date && claim.to_date) {
-    formattedDate = `${new Date(
-      claim.from_date
-    ).toLocaleDateString()} - ${new Date(claim.to_date).toLocaleDateString()}`;
-  } else if (claim.date) {
-    formattedDate = new Date(claim.date).toLocaleDateString();
-  }
+  let formattedDate = claim.display_date
+    ? new Date(claim.display_date).toLocaleDateString()
+    : "-";
 
   const getClaimDetails = (claim) => {
     let claimDetails = [];
@@ -182,13 +189,13 @@ exports.generateDocx = async (claim, employee) => {
       case "Telecommunication":
         claimDetails.push({
           description: claim.service_provider || "Unknown Provider",
-          value: claim.total_amount || "0",
+          value: claim.aggregated_total || "0",
         });
         break;
       case "Meals":
         claimDetails.push({
           description: claim.meal_type || "Meal",
-          value: claim.total_amount || "0",
+          value: claim.aggregated_total || "0",
         });
         break;
       case "Stationary":
@@ -199,20 +206,20 @@ exports.generateDocx = async (claim, employee) => {
           },
           {
             description: claim.purchasing_item || "Item",
-            value: claim.total_amount || "0",
+            value: claim.aggregated_total || "0",
           }
         );
         break;
       case "Miscellaneous":
         claimDetails.push({
           description: claim.purpose || "Miscellaneous",
-          value: claim.total_amount || "0",
+          value: claim.aggregated_total || "0",
         });
         break;
       default:
         claimDetails.push({
           description: claim.purpose || "Unknown",
-          value: claim.total_amount || "0",
+          value: claim.aggregated_total || "0",
         });
         break;
     }
@@ -220,9 +227,15 @@ exports.generateDocx = async (claim, employee) => {
     return claimDetails;
   };
 
-  const claimDetails = getClaimDetails(claim);
-  claimDetails.forEach(({ description, value }) => {
-    addClaimRow(formattedDate, description, "1", value, value);
+  (claim.lines || []).forEach((line) => {
+    const p = line.payload || {};
+    addClaimRow(
+      formattedDate,
+      p.purpose || p.description || "-",
+      "1",
+      line.total_amount,
+      line.total_amount
+    );
   });
 
   while (reimbursementTableRows.length < 15) {
@@ -245,7 +258,7 @@ exports.generateDocx = async (claim, employee) => {
           children: [
             new Paragraph({
               children: [
-                new TextRun({ text: `₹${claim.total_amount}`, bold: true }),
+                new TextRun({ text: `₹${claim.aggregated_total}`, bold: true }),
               ],
             }),
           ],
@@ -260,7 +273,7 @@ exports.generateDocx = async (claim, employee) => {
     margins: { top: 0, bottom: 0, left: 0, right: 0 },
   });
 
-  const amountWords = numberToWords.toWords(claim.total_amount);
+  const amountWords = numberToWords.toWords(claim.aggregated_total);
   const formattedAmountWords =
     amountWords.charAt(0).toUpperCase() + amountWords.slice(1) + " only.";
 
