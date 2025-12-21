@@ -1,3 +1,4 @@
+// services/reimbursementService.js
 const db = require("../config");
 const queries = require("../constants/reimbursementQueries");
 const path = require("path");
@@ -88,6 +89,98 @@ function coerceNullableNumber(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * Build a best-effort URL/path for attachment display.
+ * This is used by the UI code to fetch attachments via the server route.
+ */
+const buildAttachmentUrl = (filePath, fileName, employeeIdHint = null) => {
+  try {
+    const fname = String(fileName || "").trim();
+    if (filePath) {
+      const p = String(filePath).replace(/\\/g, "/");
+      const m = p.match(/\/reimbursement\/(\d{4})\/(\d{2})\/([^/]+)\/([^/]+)$/);
+      if (m) {
+        const year = m[1],
+          month = m[2],
+          emp = m[3],
+          file = m[4];
+        return `/reimbursement/${encodeURIComponent(year)}/${encodeURIComponent(
+          month
+        )}/${encodeURIComponent(emp)}/${encodeURIComponent(file)}`;
+      }
+    }
+
+    if (fname) {
+      const m2 = fname.match(/^(\d{4})[-_](\d{2})/);
+      if (m2 && employeeIdHint) {
+        return `/reimbursement/${encodeURIComponent(
+          m2[1]
+        )}/${encodeURIComponent(m2[2])}/${encodeURIComponent(
+          employeeIdHint
+        )}/${encodeURIComponent(fname)}`;
+      }
+    }
+
+    if (employeeIdHint) {
+      return `/reimbursement/${encodeURIComponent(
+        employeeIdHint
+      )}/${encodeURIComponent(fname)}`;
+    }
+
+    return `/reimbursement/${encodeURIComponent(fname)}`;
+  } catch (e) {
+    return fileName
+      ? `/reimbursement/${encodeURIComponent(String(fileName))}`
+      : null;
+  }
+};
+
+/**
+ * Helper: map multer req.files -> normalized attachment objects used by service/DB insertion.
+ * - disk filename (file.filename or basename(file.path)) is used as file_name (what will get stored).
+ * - originalname is used to resolve attachmentsMeta keys (client-side names).
+ * - attachmentsMeta is expected to be an object mapping clientFileName -> lineIndex.
+ *
+ * Returned objects:
+ *   { file_name: <disk filename>, file_path: <absolute path or null>, line_index: <number|undefined> }
+ */
+const buildAttachmentsFromFiles = (files = [], attachmentsMeta = {}) => {
+  if (!Array.isArray(files) || files.length === 0) return [];
+
+  return files.map((file) => {
+    const diskName =
+      file.filename ||
+      (file.path ? path.basename(file.path) : null) ||
+      file.originalname ||
+      "";
+    const originalName = file.originalname || diskName || "";
+
+    let lineIndex;
+    if (
+      attachmentsMeta &&
+      Object.prototype.hasOwnProperty.call(attachmentsMeta, originalName)
+    ) {
+      lineIndex = attachmentsMeta[originalName];
+    } else if (
+      attachmentsMeta &&
+      Object.prototype.hasOwnProperty.call(attachmentsMeta, diskName)
+    ) {
+      lineIndex = attachmentsMeta[diskName];
+    } else {
+      lineIndex = undefined;
+    }
+
+    return {
+      file_name: String(diskName || originalName || "").trim(),
+      file_path: file.path || null,
+      line_index:
+        typeof lineIndex !== "undefined" && lineIndex !== null
+          ? Number(lineIndex)
+          : undefined,
+    };
+  });
+};
+
 const mapAttachmentsToReimbursements = (
   reimbursements,
   attachments,
@@ -122,15 +215,61 @@ const saveAttachmentsBulk = async (reimbursementId, files = []) => {
   await db.query(queries.SAVE_ATTACHMENTS, [attachmentValues]);
 };
 
-exports.processUploadedFiles = async (files, reimbursementId) => {
-  if (!files || !files.length) return;
+/**
+ * Process uploaded files and persist attachment records (used by some flows).
+ * - Accepts multer files array and optional attachmentsMeta mapping (clientName -> lineIndex).
+ * - Saves DB rows and returns normalized objects inserted (file_name, file_path, line_index).
+ */
+exports.processUploadedFiles = async (
+  files,
+  reimbursementId,
+  attachmentsMeta = {}
+) => {
+  if (!files || !files.length) return [];
   try {
-    const toSave = files.map((file) => {
-      const filename = file.originalname || path.basename(file.path);
-      const filePath = file.path;
-      return { file_name: filename, file_path: filePath };
+    // Build normalized attachment objects from multer files
+    const normalized = files.map((file) => {
+      const diskName =
+        file.filename ||
+        (file.path ? path.basename(file.path) : "") ||
+        file.originalname ||
+        "";
+      const originalName = file.originalname || diskName;
+      let lineIndex;
+      if (
+        attachmentsMeta &&
+        Object.prototype.hasOwnProperty.call(attachmentsMeta, originalName)
+      ) {
+        lineIndex = attachmentsMeta[originalName];
+      } else if (
+        attachmentsMeta &&
+        Object.prototype.hasOwnProperty.call(attachmentsMeta, diskName)
+      ) {
+        lineIndex = attachmentsMeta[diskName];
+      } else {
+        lineIndex = undefined;
+      }
+
+      return {
+        file_name: String(diskName || originalName || "").trim(),
+        file_path: file.path || null,
+        line_index:
+          typeof lineIndex !== "undefined" && lineIndex !== null
+            ? Number(lineIndex)
+            : undefined,
+      };
     });
-    await saveAttachmentsBulk(reimbursementId, toSave);
+
+    // persist to DB
+    const toSave = normalized.map((n) => ({
+      file_name: n.file_name,
+      file_path: n.file_path,
+    }));
+    if (toSave.length) {
+      await saveAttachmentsBulk(reimbursementId, toSave);
+    }
+
+    return normalized;
   } catch (err) {
     console.error("Error in processUploadedFiles:", err);
     throw err;
@@ -233,11 +372,12 @@ exports.getReimbursementsByEmployee = async (
   const attByReim = {};
   attachRows.forEach((a) => {
     if (!attByReim[a.reimbursement_id]) attByReim[a.reimbursement_id] = [];
+    const url = buildAttachmentUrl(a.file_path, a.file_name, employeeId);
     attByReim[a.reimbursement_id].push({
       id: a.id,
       line_id: a.line_id,
       file_name: a.file_name,
-      url: `/reimbursement/${""}`,
+      url: url,
       file_path: a.file_path,
     });
   });
@@ -370,11 +510,17 @@ exports.getAllReimbursements = async (
     const attByReim = {};
     (attachRows || []).forEach((a) => {
       if (!attByReim[a.reimbursement_id]) attByReim[a.reimbursement_id] = [];
+      const url = buildAttachmentUrl(
+        a.file_path,
+        a.file_name,
+        a.employee_id || null
+      );
       attByReim[a.reimbursement_id].push({
         id: a.id,
         line_id: a.line_id,
         file_name: a.file_name,
         file_path: a.file_path,
+        url,
       });
     });
 
@@ -390,7 +536,7 @@ exports.getAllReimbursements = async (
           id: a.id,
           file_name: a.file_name,
           file_path: a.file_path,
-          url: `/reimbursement/${""}`,
+          url: buildAttachmentUrl(a.file_path, a.file_name, r.employee_id),
         }));
 
       const line_attachments_map = attList
@@ -402,7 +548,7 @@ exports.getAllReimbursements = async (
             line_id: a.line_id,
             file_name: a.file_name,
             file_path: a.file_path,
-            url: `/reimbursement/${""}`,
+            url: buildAttachmentUrl(a.file_path, a.file_name, r.employee_id),
           });
           return acc;
         }, {});
@@ -589,6 +735,7 @@ exports.createReimbursement = async (reimbursementData) => {
       await conn.query(queries.SAVE_REIMBURSEMENT_LINES_BULK, [values]);
     }
 
+    // --- attachments: reimbursementData.attachments expected to be normalized objects
     if (
       Array.isArray(reimbursementData.attachments) &&
       reimbursementData.attachments.length
@@ -602,11 +749,19 @@ exports.createReimbursement = async (reimbursementData) => {
 
       const attachmentsInput = reimbursementData.attachments;
       const attValues = attachmentsInput.map((a) => {
+        // normalize source fields (accept either file_name, filename, originalname)
+        const fileName =
+          a.file_name ||
+          a.filename ||
+          a.originalname ||
+          (a.path ? path.basename(String(a.path)) : "") ||
+          (a.file_path ? path.basename(String(a.file_path)) : "");
+        const filePath = a.file_path || a.path || null;
         const li =
           a.line_index !== undefined && a.line_index !== null
-            ? lineIndexToId[a.line_index] || null
+            ? lineIndexToId[Number(a.line_index)] || null
             : null;
-        return [reimbursementId, li, a.file_name, a.file_path];
+        return [reimbursementId, li, String(fileName || "").trim(), filePath];
       });
       if (attValues.length)
         await conn.query(queries.SAVE_ATTACHMENTS, [attValues]);
@@ -628,7 +783,6 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
   try {
     await conn.beginTransaction();
 
-    // --- fetch reimbursement row to get employee_id (used to derive paths if required)
     const [reimRows] = await conn.query(
       `SELECT employee_id FROM reimbursement WHERE id = ?`,
       [reimbursementId]
@@ -645,7 +799,6 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
       0
     );
 
-    // update reimbursement header
     await conn.query(queries.UPDATE_REIMBURSEMENT, [
       updateData.department_id || null,
       updateData.claim_type || null,
@@ -657,7 +810,6 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
       reimbursementId,
     ]);
 
-    // delete old lines and insert new ones
     await conn.query(queries.DELETE_LINES_BY_REIMBURSEMENT_ID, [
       reimbursementId,
     ]);
@@ -721,7 +873,7 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
       await conn.query(queries.SAVE_REIMBURSEMENT_LINES_BULK, [values]);
     }
 
-    // --- attachments handling
+    // --- attachments handling (update)
     if (
       Array.isArray(updateData.attachments) &&
       updateData.attachments.length
@@ -763,7 +915,6 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
           if (!rawName) continue;
           const fbase = path.basename(String(rawName));
           if (!filenameToLineIndex[fbase]) filenameToLineIndex[fbase] = idx;
-          // also map trimmed variants
           const trimmed = String(rawName).trim();
           if (trimmed && !filenameToLineIndex[trimmed])
             filenameToLineIndex[trimmed] = idx;
@@ -773,7 +924,13 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
       // prepare attachment values ensuring file_path is not null and line mapping is inferred
       const attValues = [];
       for (const a of updateData.attachments) {
-        const fileName = a.file_name || a.filename || a.name || "";
+        // accept flexible shapes: { file_name, filename, originalname, file_path, path, line_index }
+        const fileName =
+          a.file_name ||
+          a.filename ||
+          a.originalname ||
+          (a.path ? path.basename(String(a.path)) : "") ||
+          (a.file_path ? path.basename(String(a.file_path)) : "");
         let filePath = a.file_path || a.path || null;
         let providedLineIndex =
           a.line_index !== undefined && a.line_index !== null
@@ -789,7 +946,6 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
           if (filenameToLineIndex.hasOwnProperty(base)) {
             providedLineIndex = Number(filenameToLineIndex[base]);
           } else {
-            // also try trim/normalize matches
             const trimmed = String(fileName).trim();
             if (filenameToLineIndex.hasOwnProperty(trimmed)) {
               providedLineIndex = Number(filenameToLineIndex[trimmed]);
@@ -837,7 +993,12 @@ exports.updateReimbursement = async (reimbursementId, updateData) => {
             ? lineIndexToId[providedLineIndex] || null
             : null;
 
-        attValues.push([reimbursementId, li, fileName, filePath]);
+        attValues.push([
+          reimbursementId,
+          li,
+          String(fileName || "").trim(),
+          filePath,
+        ]);
       }
 
       if (attValues.length) {
@@ -983,11 +1144,15 @@ exports.getTeamReimbursements = async (
     (attachmentsRows || []).forEach((att) => {
       const rid = att.reimbursement_id;
       if (!attachmentMap[rid]) attachmentMap[rid] = [];
+      const empHint = reimbursementEmployeeMap
+        ? reimbursementEmployeeMap[rid]
+        : null;
       attachmentMap[rid].push({
         id: att.id,
         line_id: att.line_id,
         file_name: att.file_name,
         file_path: att.file_path,
+        url: buildAttachmentUrl(att.file_path, att.file_name, empHint),
       });
     });
 
@@ -1003,7 +1168,9 @@ exports.getTeamReimbursements = async (
           id: a.id,
           file_name: a.file_name,
           file_path: a.file_path,
-          url: `/reimbursement/${""}`,
+          url:
+            a.url ||
+            buildAttachmentUrl(a.file_path, a.file_name, r.employee_id),
         }));
 
       const line_attachments_map = attList
@@ -1015,8 +1182,11 @@ exports.getTeamReimbursements = async (
             line_id: a.line_id,
             file_name: a.file_name,
             file_path: a.file_path,
-            url: `/reimbursement/${""}`,
+            url:
+              a.url ||
+              buildAttachmentUrl(a.file_path, a.file_name, r.employee_id),
           });
+
           return acc;
         }, {});
 

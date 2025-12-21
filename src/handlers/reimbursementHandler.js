@@ -22,28 +22,90 @@ const forbiddenExts = new Set([
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const isoDate = req.body.date || new Date().toISOString().slice(0, 10);
-    const [year, month] = isoDate.split("-");
+    const employeeId =
+      (req.body && req.body.employeeId) ||
+      req.query?.employeeId ||
+      req.headers["x-employee-id"] ||
+      req.headers["x-employeeid"] ||
+      req.headers["employeeid"] ||
+      (req.user && req.user.employeeId) ||
+      null;
 
-    const dest = path.join(
-      __dirname,
-      "..",
-      "..",
-      "..",
-      "reimbursement",
-      year,
-      month,
-      String(req.user?.employeeId || req.body.employeeId || "unknown")
-    );
+    if (!employeeId) {
+      return cb(new Error("Employee ID is required"), null);
+    }
 
-    fs.mkdirSync(dest, { recursive: true });
-    cb(null, dest);
+    try {
+      const now = new Date();
+      const year = `${now.getFullYear()}`;
+      const month = String(now.getMonth() + 1).padStart(2, "0");
+
+      const basePath = path.join(
+        __dirname,
+        "..",
+        "..",
+        "..",
+        "reimbursement",
+        year,
+        month,
+        String(employeeId)
+      );
+
+      if (!fs.existsSync(basePath)) {
+        fs.mkdirSync(basePath, { recursive: true });
+        console.log(`Directory created: ${basePath}`);
+      }
+
+      cb(null, basePath);
+    } catch (err) {
+      cb(err, null);
+    }
   },
 
   filename: (req, file, cb) => {
-    const datePrefix = new Date().toISOString().slice(0, 10);
-    const filename = `${datePrefix}-${Date.now()}-${file.originalname}`;
-    cb(null, filename);
+    try {
+      const now = new Date();
+      const date = now.toISOString().split("T")[0];
+
+      const employeeId =
+        (req.body && req.body.employeeId) ||
+        req.query?.employeeId ||
+        req.headers["x-employee-id"] ||
+        req.headers["x-employeeid"] ||
+        req.headers["employeeid"] ||
+        (req.user && req.user.employeeId) ||
+        null;
+
+      const uploadDir = path.join(
+        __dirname,
+        "..",
+        "..",
+        "..",
+        "reimbursement",
+        `${now.getFullYear()}`,
+        `${String(now.getMonth() + 1).padStart(2, "0")}`,
+        `${employeeId || "unknown"}`
+      );
+
+      const ext = path.extname(file.originalname) || "";
+      let counter = 1;
+      let filename = `${date}_01${ext}`;
+
+      if (!fs.existsSync(uploadDir)) {
+        try {
+          fs.mkdirSync(uploadDir, { recursive: true });
+        } catch (e) {}
+      }
+
+      while (fs.existsSync(path.join(uploadDir, filename))) {
+        counter++;
+        filename = `${date}_${String(counter).padStart(2, "0")}${ext}`;
+      }
+
+      cb(null, filename);
+    } catch (err) {
+      cb(err);
+    }
   },
 });
 
