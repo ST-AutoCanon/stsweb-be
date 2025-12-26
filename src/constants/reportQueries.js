@@ -34,32 +34,35 @@ SELECT
   r.id AS reimbursement_id,
   r.id AS id,
   r.employee_id,
-  CONCAT(COALESCE(e.first_name, ''), ' ', COALESCE(e.last_name, '')) AS employee_name,
-  r.department_id,
+
+  CONCAT(
+    COALESCE(e.first_name, ''),
+    ' ',
+    COALESCE(e.last_name, '')
+  ) AS employee_name,
+
+  pr.department_id,
   COALESCE(d.name, '') AS department_name,
 
   r.claim_type,
-  r.transport_type,
-  DATE_FORMAT(r.from_date, '%Y-%m-%d') AS from_date,
-  DATE_FORMAT(r.to_date, '%Y-%m-%d') AS to_date,
-  DATE_FORMAT(r.date, '%Y-%m-%d') AS date,
-  r.travel_from,
-  r.travel_to,
-  r.purpose,
-  r.purchasing_item,
-  r.accommodation_fees,
-  r.no_of_days,
-  r.total_amount,
-  r.meal_type,
-  r.service_provider,
-  r.da,
-  r.transport_amount,
-  r.stationary,
-  r.project,
-  r.meals_objective,
-
   r.status AS approval_status,
-  COALESCE(NULLIF(r.payment_status, ''), NULLIF(r.status, '')) AS payment_status,
+
+  /* ========= LINE AGGREGATES (SAFE) ========= */
+  la.purpose,
+  la.travel_from,
+  la.travel_to,
+  la.from_date,
+  la.to_date,
+  la.meal_type,
+  la.meals_objective,
+  la.transport_amount,
+  la.accommodation_fees,
+  la.da,
+  la.line_total_amount,
+
+  COALESCE(r.aggregated_total, la.line_total_amount) AS aggregated_total,
+
+  LOWER(COALESCE(NULLIF(r.payment_status, ''), r.status)) AS payment_status,
   r.payment_status AS raw_payment_status,
 
   r.approver_id,
@@ -71,13 +74,69 @@ SELECT
   DATE_FORMAT(r.approved_date, '%Y-%m-%d') AS approved_date,
   DATE_FORMAT(r.paid_date, '%Y-%m-%d') AS paid_date,
   DATE_FORMAT(r.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
+
 FROM reimbursement r
-LEFT JOIN employees e ON r.employee_id = e.employee_id
-LEFT JOIN employee_professional pr ON e.employee_id = pr.employee_id
-LEFT JOIN departments d ON pr.department_id = d.id
-WHERE ( ? IS NULL OR (COALESCE(r.approved_date, r.created_at) >= ? ) )
-  AND ( ? IS NULL OR (COALESCE(r.approved_date, r.created_at) < DATE_ADD(?, INTERVAL 1 DAY) ) )
-  AND ( ? IS NULL OR LOWER(COALESCE(r.payment_status, r.status, '')) = LOWER(?) )
+
+/* ===== PRE-AGGREGATED LINES (KEY FIX) ===== */
+LEFT JOIN (
+  SELECT
+    rl.reimbursement_id,
+
+    GROUP_CONCAT(
+      DISTINCT NULLIF(
+        COALESCE(
+          rl.purpose,
+          JSON_UNQUOTE(JSON_EXTRACT(rl.meta, '$.purpose'))
+        ),
+        ''
+      )
+      SEPARATOR ' | '
+    ) AS purpose,
+
+    GROUP_CONCAT(
+      DISTINCT COALESCE(
+        rl.travel_from,
+        JSON_UNQUOTE(JSON_EXTRACT(rl.meta, '$.travel_from'))
+      )
+      SEPARATOR ' | '
+    ) AS travel_from,
+
+    GROUP_CONCAT(
+      DISTINCT COALESCE(
+        rl.travel_to,
+        JSON_UNQUOTE(JSON_EXTRACT(rl.meta, '$.travel_to'))
+      )
+      SEPARATOR ' | '
+    ) AS travel_to,
+
+    MIN(COALESCE(rl.from_date, JSON_EXTRACT(rl.meta, '$.from_date'))) AS from_date,
+    MAX(COALESCE(rl.to_date, JSON_EXTRACT(rl.meta, '$.to_date'))) AS to_date,
+
+    GROUP_CONCAT(DISTINCT rl.meal_type SEPARATOR ' | ') AS meal_type,
+    GROUP_CONCAT(DISTINCT rl.meals_objective SEPARATOR ' | ') AS meals_objective,
+
+    SUM(COALESCE(rl.transport_amount, 0)) AS transport_amount,
+    SUM(COALESCE(rl.accommodation_fees, 0)) AS accommodation_fees,
+    SUM(COALESCE(rl.da, 0)) AS da,
+    SUM(COALESCE(rl.total_amount, 0)) AS line_total_amount
+
+  FROM reimbursement_lines rl
+  GROUP BY rl.reimbursement_id
+) la
+  ON la.reimbursement_id = r.id
+
+LEFT JOIN employees e
+  ON r.employee_id = e.employee_id
+
+LEFT JOIN employee_professional pr
+  ON e.employee_id = pr.employee_id
+
+LEFT JOIN departments d
+  ON pr.department_id = d.id
+
+WHERE ( ? IS NULL OR COALESCE(r.approved_date, r.created_at) >= ? )
+  AND ( ? IS NULL OR COALESCE(r.approved_date, r.created_at) < DATE_ADD(?, INTERVAL 1 DAY) )
+
 ORDER BY r.created_at DESC
 `,
 

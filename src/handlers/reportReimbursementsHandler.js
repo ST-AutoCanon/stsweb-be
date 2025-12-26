@@ -1,3 +1,4 @@
+// reportReimbursementsHandler.js
 const reportService = require("../services/reportIndex");
 const {
   coerceToString,
@@ -78,7 +79,8 @@ function findEmployeeIdInRequest(req) {
     req.employeeId ?? req.employee_id ?? req.userId ?? req.user_id
   );
   if (r1) return r1;
-  const user = req.user || req.authUser || req.auth || req.session?.user;
+  const user =
+    req.user || req.authUser || req.auth || (req.session && req.session.user);
   if (user && typeof user === "object") {
     const cand =
       safe(user.employee_id) ||
@@ -294,6 +296,95 @@ async function buildMetaFromReqQuery(query = {}) {
   return meta;
 }
 
+function _extractFieldValue(row, possibleKeys = []) {
+  if (!row || typeof row !== "object") return null;
+  for (const k of possibleKeys) {
+    if (Object.prototype.hasOwnProperty.call(row, k)) {
+      const v = row[k];
+      if (v !== undefined && v !== null) return v;
+    }
+    // case-insensitive search
+    const foundKey = Object.keys(row).find(
+      (rk) => String(rk).toLowerCase() === String(k).toLowerCase()
+    );
+    if (foundKey) {
+      const v = row[foundKey];
+      if (v !== undefined && v !== null) return v;
+    }
+  }
+  return null;
+}
+
+function normalizeRowsInPlace(rows) {
+  if (!Array.isArray(rows)) return rows;
+  // if reportService exposes a canonicalizer, use it
+  if (
+    reportService &&
+    typeof reportService.normalizeReimbursementRow === "function"
+  ) {
+    return rows.map((r) => reportService.normalizeReimbursementRow(r || {}));
+  }
+
+  // fallback normalization
+  return rows.map((raw) => {
+    const r = Object.assign({}, raw || {});
+    // id mapping
+    if (!Object.prototype.hasOwnProperty.call(r, "id")) {
+      const alt = _extractFieldValue(r, ["reimbursement_id", "id", "claim_id"]);
+      if (alt != null) r.id = alt;
+    }
+    // employee_name derivation
+    if (!Object.prototype.hasOwnProperty.call(r, "employee_name")) {
+      const fn = _extractFieldValue(r, ["first_name"]);
+      const ln = _extractFieldValue(r, ["last_name"]);
+      if (fn || ln) r.employee_name = `${fn || ""} ${ln || ""}`.trim();
+    }
+    // total mapping - prefer aggregated_total, but map to both names for compatibility
+    const agg = _extractFieldValue(r, [
+      "aggregated_total",
+      "aggregatedAmount",
+      "aggregated",
+    ]);
+    const tot = _extractFieldValue(r, ["total_amount", "total", "totalAmount"]);
+    if (agg != null) {
+      r.aggregated_total = agg;
+      if (!Object.prototype.hasOwnProperty.call(r, "total_amount"))
+        r.total_amount = agg;
+    } else if (tot != null) {
+      r.total_amount = tot;
+      if (!Object.prototype.hasOwnProperty.call(r, "aggregated_total"))
+        r.aggregated_total = tot;
+    } else {
+      r.aggregated_total = r.aggregated_total || 0;
+      r.total_amount = r.total_amount || r.aggregated_total || 0;
+    }
+
+    // status/payment normalization fallbacks
+    r.approval_status =
+      _extractFieldValue(r, ["approval_status", "status"]) ||
+      r.approval_status ||
+      "";
+    r.payment_status =
+      _extractFieldValue(r, [
+        "payment_status",
+        "raw_payment_status",
+        "approval_status",
+        "status",
+      ]) ||
+      r.payment_status ||
+      r.approval_status ||
+      "";
+
+    // ensure strings trimmed
+    for (const key of ["approval_status", "payment_status", "status"]) {
+      if (r[key] === null || r[key] === undefined) r[key] = "";
+      else if (typeof r[key] === "string") r[key] = r[key].trim();
+    }
+
+    return r;
+  });
+}
+
 async function downloadReimbursementsReport(req, res) {
   const startTs = Date.now();
   try {
@@ -318,7 +409,7 @@ async function downloadReimbursementsReport(req, res) {
 
     let managerEmpId = null;
     if (!departmentId && requesterEmpId) {
-      const u = req.user || req.authUser || req.session?.user;
+      const u = req.user || req.authUser || (req.session && req.session.user);
       const isAdmin =
         !!(u && (u.is_admin || u.isAdmin || u.role === "admin")) || false;
       const isManagerRole = !!(
@@ -358,29 +449,60 @@ async function downloadReimbursementsReport(req, res) {
       return res.status(500).json({ message: "Server misconfiguration" });
     }
 
-    if (employeeId || departmentId) {
-      const rawReimbursements = await reportService.getReimbursementRows(
-        startDate,
-        endDate,
-        status,
-        null,
-        employeeId,
-        departmentId
-      );
-      let rows = Array.isArray(rawReimbursements) ? rawReimbursements : [];
+    // Helper to fetch rows from reportService with stable signature
+    async function fetchRowsForScope(empId, deptId) {
+      try {
+        // many reportService implementations take (startDate, endDate, status, fields, employeeId, departmentId)
+        // keep using that signature for backward compatibility
+        const raw = await reportService.getReimbursementRows(
+          startDate,
+          endDate,
+          status,
+          null,
+          empId,
+          deptId
+        );
+        const arr = Array.isArray(raw) ? raw : [];
+        return normalizeRowsInPlace(arr);
+      } catch (e) {
+        console.warn(
+          "[reportReimbursementsHandler] fetchRowsForScope failed:",
+          e && e.message
+        );
+        return [];
+      }
+    }
 
+    // If explicit employee or department provided - fetch and return directly
+    if (employeeId || departmentId) {
+      let rows = await fetchRowsForScope(employeeId, departmentId);
+
+      // robust server-side enforcement of explicit ids (in case service ignored params)
       if (departmentId) {
         rows = rows.filter((r) => {
           const rid =
             r &&
-            (r.department_id ?? r.departmentId ?? r.department ?? r.dept_id);
+            (r.department_id ??
+              r.departmentId ??
+              r.department ??
+              r.dept_id ??
+              _extractFieldValue(r, [
+                "department_id",
+                "departmentId",
+                "department",
+              ]));
           return rid != null && String(rid) === String(departmentId);
         });
       }
       if (employeeId) {
         rows = rows.filter((r) => {
           const eid =
-            r && (r.employee_id ?? r.employeeId ?? r.emp_id ?? r.empId);
+            r &&
+            (r.employee_id ??
+              r.employeeId ??
+              r.emp_id ??
+              r.empId ??
+              _extractFieldValue(r, ["employee_id", "employeeId", "emp_id"]));
           return eid != null && String(eid) === String(employeeId);
         });
       }
@@ -393,6 +515,7 @@ async function downloadReimbursementsReport(req, res) {
         return sendPreviewResponse(req, res, rows, msg);
       }
 
+      // perform status filtering using normalized tokens
       const statusCandidate = normalizeStatusForQuery(status);
       const filtered = rows.filter((r) =>
         statusMatches(statusCandidate, [
@@ -452,6 +575,7 @@ async function downloadReimbursementsReport(req, res) {
       } else return res.status(400).json({ message: "Invalid format" });
     }
 
+    // Manager-scoped path: collect departments managed and fetch per-department
     let rows = [];
     if (managerEmpId) {
       let managedDeptIds = [];
@@ -468,38 +592,27 @@ async function downloadReimbursementsReport(req, res) {
         const merged = [];
         for (const d of managedDeptIds) {
           try {
-            const part = await reportService.getReimbursementRows(
-              startDate,
-              endDate,
-              status,
-              null,
-              null,
-              d
-            );
+            const part = await fetchRowsForScope(null, d);
             if (Array.isArray(part) && part.length) merged.push(...part);
           } catch (e) {
             console.warn(
-              "[reportReimbursementsHandler] per-dept getReimbursementRows failed for dept",
+              "[reportReimbursementsHandler] per-dept fetch failed for dept",
               d,
               e && e.message
             );
           }
         }
+        // dedupe by id
         const map = new Map();
-        for (const p of merged)
-          if (p && (p.reimbursement_id ?? p.id))
-            map.set(String(p.reimbursement_id ?? p.id), p);
+        for (const p of merged) {
+          const key = String(p.id ?? p.reimbursement_id ?? p.claim_id ?? "");
+          if (key) map.set(key, p);
+        }
         rows = Array.from(map.values());
       } else {
+        // fallback: fetch all reimbursements and filter by supervisor relationship
         try {
-          const all = await reportService.getReimbursementRows(
-            startDate,
-            endDate,
-            status,
-            null,
-            null,
-            null
-          );
+          const all = await fetchRowsForScope(null, null);
           const allArr = Array.isArray(all) ? all : [];
           const empIds = Array.from(
             new Set(allArr.map((x) => x.employee_id).filter(Boolean))
@@ -530,17 +643,12 @@ async function downloadReimbursementsReport(req, res) {
         }
       }
     } else {
-      const rawReimbursements = await reportService.getReimbursementRows(
-        startDate,
-        endDate,
-        status,
-        null,
-        null,
-        null
-      );
+      // Normal full-scope fetch
+      const rawReimbursements = await fetchRowsForScope(null, null);
       rows = Array.isArray(rawReimbursements) ? rawReimbursements : [];
     }
 
+    // Honor explicit query filters if present
     const explicitDept = coerceToString(
       req.query && (req.query.department_id ?? req.query.departmentId),
       null
