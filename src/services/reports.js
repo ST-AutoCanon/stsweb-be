@@ -1,3 +1,4 @@
+// reports.js
 const utils = require("./reportUtils");
 const filters = require("./reportFilters");
 const queries = require("../constants/reportQueries"); // your existing queries file
@@ -434,10 +435,7 @@ async function getLeaveRows(
   let rows;
   try {
     rows = await fetchRows(sql, params);
-
     rows = Array.isArray(rows) ? rows : [];
-    if (rows.length > 0) {
-    }
   } catch (err) {
     console.error("❌ [getLeaveRows] SQL execution error:", err);
     throw err;
@@ -520,9 +518,6 @@ async function getLeaveRows(
 
   const filteredRows = filters.keepOnlyFields(rows, fields, defaultOrder);
 
-  if (filteredRows.length > 0) {
-  }
-
   return filteredRows;
 }
 
@@ -559,6 +554,7 @@ async function getReimbursementRows(
   const params = [s, s, e, e];
   let statusSql = "";
   if (!st) {
+    // no additional clause
   } else if (st === "approved/paid") {
     statusSql =
       " AND LOWER(COALESCE(r.status, '')) = ? AND LOWER(COALESCE(r.payment_status, '')) = ? ";
@@ -609,6 +605,13 @@ async function getReimbursementRows(
     throw err;
   }
   let normalized = Array.isArray(rawRows) ? rawRows : [];
+
+  // Ensure normalized fields (use filters.normalizeReimbursementRow if available)
+  if (filters && typeof filters.normalizeReimbursementRow === "function") {
+    normalized = normalized.map((r) =>
+      filters.normalizeReimbursementRow(r || {})
+    );
+  }
 
   await attachEmployeeNames(normalized);
   await attachDeptNames(normalized);
@@ -1641,64 +1644,6 @@ async function searchEmployees(arg) {
       err && (err.stack || err)
     );
     throw err;
-  }
-}
-
-async function forceFilterByEmployeeProfessional(rows, departmentId) {
-  if (!Array.isArray(rows) || rows.length === 0) return [];
-  if (departmentId === undefined || departmentId === null) return rows;
-
-  const empIds = Array.from(
-    new Set(
-      rows
-        .map((r) =>
-          r.employee_id != null ? String(r.employee_id).trim() : null
-        )
-        .filter(Boolean)
-    )
-  );
-  if (empIds.length === 0) return rows;
-
-  try {
-    const placeholders = empIds.map(() => "?").join(",");
-    const sql = `SELECT employee_id, department_id FROM employee_professional WHERE employee_id IN (${placeholders})`;
-    const profRows = await fetchRows(sql, empIds);
-    if (!Array.isArray(profRows) || profRows.length === 0) {
-      console.warn(
-        "[reports] forceFilterByEmployeeProfessional: no mappings returned; skipping strict filter"
-      );
-      return rows;
-    }
-    const empToDept = {};
-    for (const p of profRows) {
-      if (p && p.employee_id != null)
-        empToDept[String(p.employee_id).trim()] =
-          p.department_id != null ? String(p.department_id).trim() : null;
-    }
-    if (Object.keys(empToDept).length === 0) {
-      console.warn(
-        "[reports] forceFilterByEmployeeProfessional: mapping empty after lookup; skipping strict filter"
-      );
-      return rows;
-    }
-
-    const deptStr = String(departmentId).trim();
-    const filtered = rows.filter((r) => {
-      if (r.department_id != null && String(r.department_id).trim() === deptStr)
-        return true;
-      const emp = r.employee_id != null ? String(r.employee_id).trim() : null;
-      if (!emp) return false;
-      const mapped = empToDept[emp];
-      if (mapped != null && String(mapped).trim() === deptStr) return true;
-      return false;
-    });
-    return filtered;
-  } catch (e) {
-    console.warn(
-      "[reports] forceFilterByEmployeeProfessional failed (will skip strict filter):",
-      e && e.message
-    );
-    return rows;
   }
 }
 

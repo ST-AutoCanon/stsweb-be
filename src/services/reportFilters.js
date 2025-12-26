@@ -239,7 +239,6 @@ function keepOnlyFields(rows, requestedFields, defaultOrder) {
 function pickFields(rows, fields) {
   return keepOnlyFields(rows, fields, null);
 }
-
 function normalizeReimbursementRow(raw) {
   const r = Object.assign({}, raw);
   if (!Object.prototype.hasOwnProperty.call(r, "approval_status")) {
