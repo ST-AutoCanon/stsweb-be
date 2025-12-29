@@ -17,7 +17,7 @@ const weeklyTaskSupervisorRoutes = require("./routes/weekly_task_supervisor");
 const weekTaskRoutes = require("./routes/weekTaskRoutes");
 const report = require("./routes/reportRoutes");
 const overtimeSupervisorRoutes = require("./routes/overtimeSupervisorRoutes");
-
+require("./services/punchCronService");
 const EmployeeQueries = require("./services/employeeQueries");
 const chatRoutes = require("./routes/chatRoutes");
 const chatService = require("./services/chatService");
@@ -95,14 +95,9 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
 const allowedOrigins = [
-  "https://localhost",
-  "capacitor://localhost",
+
   "https://sukalpatechsolutions.com",
-  "https://sts-test.site",
-  "http://localhost:3000",
-  "http://127.0.0.1:3000",
-  "http://192.168.1.2:3000",
-  "http://122.166.77.12:3000",
+
 ];
 
 app.use((req, res, next) => {
