@@ -12,7 +12,7 @@ const addDepartmentService = async (name, icon) => {
         throw error;
     }
 };
-
+/////////////////////////
 const getDepartmentsService = async () => {
     try {
         const [results] = await db.query(GET_DEPARTMENTS);
