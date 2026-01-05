@@ -1,15 +1,26 @@
+// reportsHandlerIndex.js
 const queries = require("../constants/reportQueries");
 const reportUtils = require("../services/reportUtils");
 const { fetchRows, coerceToString } = reportUtils;
 
-const reportService = require("../services/reportIndex");
+const reportService = require("../services/reportIndex"); // existing service
+// new: prefer the reports service (your reports.js) for meta builder if present
+let reportsServiceForMeta = null;
+try {
+  reportsServiceForMeta = require("../services/reports");
+} catch (e) {
+  // ok — will fallback to other builders below
+  reportsServiceForMeta = null;
+}
 
-const leavesHandler = require("./reportLeavesHandler");
+const reportLeavesHandler = require("./reportLeavesHandler");
 const attendanceHandler = require("./reportAttendanceHandler");
 const tasksHandler = require("./reportTasksHandler");
 const assetsHandler = require("./reportAssetsHandler");
 const reimbursementsHandler = require("./reportReimbursementsHandler");
+const leavesHandler = reportLeavesHandler;
 
+// ---------- deriveDepartmentForEmployee (unchanged logic) ----------
 async function deriveDepartmentForEmployee(employeeId) {
   try {
     if (!employeeId) {
@@ -36,6 +47,11 @@ async function deriveDepartmentForEmployee(employeeId) {
         LIMIT 1
       `;
       const params1 = [...candidates];
+      console.debug(
+        "[reportEmployeesHandler] executing SQL1 with params:",
+        params1
+      );
+
       rows = await fetchRows(sql1, params1);
     } catch (err) {
       console.warn(
@@ -59,8 +75,12 @@ async function deriveDepartmentForEmployee(employeeId) {
           LIMIT 1
         `;
         const params2 = [...candidates, ...candidates];
-        const r2 = await fetchRows(sql2, params2);
+        console.debug(
+          "[reportEmployeesHandler] executing SQL2 with params:",
+          params2
+        );
 
+        const r2 = await fetchRows(sql2, params2);
         if (Array.isArray(r2) && r2[0]) rows = r2;
       } catch (err2) {
         console.warn(
@@ -82,8 +102,12 @@ async function deriveDepartmentForEmployee(employeeId) {
           LIMIT 1
         `;
         const params3 = [...candidates, ...candidates];
-        const r3 = await fetchRows(sql3, params3);
+        console.debug(
+          "[reportEmployeesHandler] executing SQL3 with params:",
+          params3
+        );
 
+        const r3 = await fetchRows(sql3, params3);
         if (Array.isArray(r3) && r3[0]) rows = r3;
       } catch (err3) {
         console.warn(
@@ -143,13 +167,13 @@ async function deriveDepartmentForEmployee(employeeId) {
   } catch (e) {
     console.error(
       "[deriveDepartmentForEmployee] ERROR:",
-      e && e.stack ? e.stack : e.message
+      e && (e.stack || e.message)
     );
     return null;
-  } finally {
   }
 }
 
+// ---------- wrapper to derive department if not provided (unchanged) ----------
 function wrapHandlerWithDerivedDept(originalHandler) {
   if (typeof originalHandler !== "function") return originalHandler;
   return async function (req, res, next) {
@@ -178,7 +202,10 @@ function wrapHandlerWithDerivedDept(originalHandler) {
 
         console.debug(
           "[reportsHandlerIndex] wrapHandlerWithDerivedDept: header/x-user ids:",
-          { headerEmp: empId, reqUserEmp: userEmpId }
+          {
+            headerEmp: empId,
+            reqUserEmp: userEmpId,
+          }
         );
 
         if (candidateEmpId) {
@@ -227,6 +254,105 @@ function parseFieldsParam(fieldsRaw) {
   return arr.length ? arr : null;
 }
 
+// ---------- small helper used as fallback if you ever need it ----------
+function normalizeToPlainString(candidate, kind = "generic") {
+  if (candidate === null || typeof candidate === "undefined") return null;
+  if (typeof candidate === "object") {
+    const o = candidate;
+    if (o.employee_name || o.name || o.first_name || o.last_name) {
+      const name =
+        o.employee_name ||
+        `${(o.first_name || "").trim()} ${(o.last_name || "").trim()}`.trim() ||
+        o.name ||
+        null;
+      const id = o.employee_id || o.employeeId || o.id || null;
+      return id && name ? `${name} (${id})` : name || String(id || "");
+    }
+    if (o.department_name || o.name) {
+      return o.department_name || o.name || (o.id ? String(o.id) : null);
+    }
+    try {
+      return JSON.stringify(o);
+    } catch (e) {
+      return String(o);
+    }
+  }
+  if (typeof candidate === "string" && candidate.trim().startsWith("{")) {
+    try {
+      const parsed = JSON.parse(candidate);
+      return normalizeToPlainString(parsed, kind);
+    } catch (e) {}
+  }
+  return String(candidate);
+}
+
+// ---------- unified meta builder wrapper — prefer your reportsServiceForMeta.buildMetaFromReqQuery ----------
+async function buildMetaFromReqQueryWrapper(query = {}) {
+  // prefer the service-level reports.js builder if present (it matches leaves)
+  if (
+    reportsServiceForMeta &&
+    typeof reportsServiceForMeta.buildMetaFromReqQuery === "function"
+  ) {
+    try {
+      return await reportsServiceForMeta.buildMetaFromReqQuery(query);
+    } catch (e) {
+      console.warn(
+        "[buildMetaFromReqQueryWrapper] reportsServiceForMeta.buildMetaFromReqQuery failed:",
+        e && e.message
+      );
+    }
+  }
+
+  // fallback: if reportService (reportIndex) exposes buildMetaFromReqQuery, use it
+  if (
+    reportService &&
+    typeof reportService.buildMetaFromReqQuery === "function"
+  ) {
+    try {
+      return await reportService.buildMetaFromReqQuery(query);
+    } catch (e) {
+      console.warn(
+        "[buildMetaFromReqQueryWrapper] reportService.buildMetaFromReqQuery failed:",
+        e && e.message
+      );
+    }
+  }
+
+  // last-resort inline minimal builder (keeps behaviour safe)
+  const meta = { filters: [] };
+  try {
+    const startDate =
+      coerceToString(query.startDate, null) ||
+      coerceToString(query.start_date, null);
+    const endDate =
+      coerceToString(query.endDate, null) ||
+      coerceToString(query.end_date, null);
+    if (startDate || endDate) {
+      if (startDate && endDate)
+        meta.filters.push(`Date: ${startDate} → ${endDate}`);
+      else if (startDate) meta.filters.push(`From: ${startDate}`);
+      else meta.filters.push(`To: ${endDate}`);
+    }
+    const status = coerceToString(query.status, null);
+    if (status) meta.filters.push(`Status: ${normalizeToPlainString(status)}`);
+    const emp =
+      query.employee_id ??
+      query.employeeId ??
+      query.employee ??
+      query.employee_name ??
+      null;
+    if (emp) meta.filters.push(`Employee: ${normalizeToPlainString(emp)}`);
+    const dept =
+      query.department_id ?? query.departmentId ?? query.department ?? null;
+    if (dept) meta.filters.push(`Department: ${normalizeToPlainString(dept)}`);
+    if (meta.filters.length === 0) meta.filters.push("No explicit filters");
+    return meta;
+  } catch (e) {
+    return { filters: ["No explicit filters (meta build failed)"] };
+  }
+}
+
+// ---------- endpoints (search/getDepartments unchanged) ----------
 async function searchEmployees(req, res) {
   try {
     const qParam =
@@ -252,7 +378,7 @@ async function searchEmployees(req, res) {
     const params = [pattern, pattern, pattern, dept, dept, limit];
 
     const rows = await fetchRows(queries.SEARCH_EMPLOYEES, params);
-    if (rows?.length) return res.json(Array.isArray(rows) ? rows : []);
+    return res.json(Array.isArray(rows) ? rows : []);
   } catch (e) {
     console.error("❌ [searchEmployees] Failed:", e && (e.stack || e.message));
     return res.status(500).json({ message: "Failed to search employees" });
@@ -279,8 +405,13 @@ function normalizeStatusForQuery(statusRaw) {
   if (s.toLowerCase() === "all") return null;
   return s;
 }
+
+// ---------- MAIN: downloadEmployeesReport (changed to use unified meta builder) ----------
 async function downloadEmployeesReport(req, res) {
   try {
+    // debug actual incoming query right away
+    console.debug("[downloadEmployeesReport] req.query:", req.query);
+
     const startDate = req.query.startDate ?? req.query.start_date ?? null;
     const endDate = req.query.endDate ?? req.query.end_date ?? null;
 
@@ -294,10 +425,28 @@ async function downloadEmployeesReport(req, res) {
     }
 
     let dept = coerceToString(
-      req.query.department_id ?? req.query.departmentId ?? null,
+      req.query.department_id ??
+        req.query.departmentId ??
+        req.query.department ??
+        null,
       null
     );
     if (dept && dept.toLowerCase && dept.toLowerCase() === "null") dept = null;
+
+    let employeeId = coerceToString(
+      req.query.employee_id ??
+        req.query.employeeId ??
+        req.query.employee ??
+        req.query.employee_name ??
+        null,
+      null
+    );
+    if (
+      employeeId &&
+      employeeId.toLowerCase &&
+      employeeId.toLowerCase() === "null"
+    )
+      employeeId = null;
 
     const params = [
       startDate,
@@ -308,14 +457,21 @@ async function downloadEmployeesReport(req, res) {
       status,
       dept,
       dept,
+      employeeId,
+      employeeId,
     ];
+
     let rows;
     try {
       rows = await fetchRows(queries.GET_EMPLOYEE_REPORT, params);
     } catch (primaryErr) {
       console.error(
         "[reportsHandlerIndex] GET_EMPLOYEE_REPORT failed — will try compact fallback. Error:",
-        primaryErr && (primaryErr.stack || primaryErr.message)
+        primaryErr && (primaryErr.stack || primaryErr.message),
+        {
+          sqlMessage: primaryErr && primaryErr.sqlMessage,
+          sql: primaryErr && primaryErr.sql,
+        }
       );
 
       const compactQuery =
@@ -336,6 +492,7 @@ async function downloadEmployeesReport(req, res) {
           AND ( ? IS NULL OR (e.created_at < DATE_ADD(?, INTERVAL 1 DAY) ) )
           AND ( ? IS NULL OR LOWER(e.status) = LOWER(?) )
           AND ( ? IS NULL OR COALESCE(pr.department_id, e.dept_id, e.department) = ? )
+          AND ( ? IS NULL OR e.employee_id = ? )
         ORDER BY e.created_at DESC
         `;
 
@@ -354,6 +511,21 @@ async function downloadEmployeesReport(req, res) {
     }
 
     const rowsArr = Array.isArray(rows) ? rows : [];
+
+    // Build meta using the same service used by leaves (reportsServiceForMeta) if present,
+    // otherwise a robust wrapper that falls back gracefully.
+    let meta = { filters: [] };
+    try {
+      meta = await buildMetaFromReqQueryWrapper(req.query || {});
+    } catch (metaErr) {
+      console.warn(
+        "[downloadEmployeesReport] buildMetaFromReqQueryWrapper failed:",
+        metaErr && (metaErr.stack || metaErr.message)
+      );
+      meta = { filters: ["No explicit filters (meta build failed)"] };
+    }
+
+    console.debug("[downloadEmployeesReport] PDF meta:", meta);
 
     if (
       req.query &&
@@ -396,10 +568,12 @@ async function downloadEmployeesReport(req, res) {
     } else if (format === "pdf") {
       if (typeof reportService.renderPdfBuffer !== "function")
         return res.status(500).json({ message: "PDF renderer not available" });
+
+      // pass meta exactly like leaves handler does
       const pdfBuf = await reportService.renderPdfBuffer(
         "Employees Report",
         toExport,
-        { meta: {} }
+        { meta }
       );
       const filename = "employees_report.pdf";
       res.setHeader("Content-Type", "application/pdf");
@@ -421,6 +595,7 @@ async function downloadEmployeesReport(req, res) {
   }
 }
 
+// ---------- vendors (unchanged) ----------
 async function downloadVendorsReport(req, res) {
   try {
     const startDate = req.query.startDate ?? req.query.start_date ?? null;

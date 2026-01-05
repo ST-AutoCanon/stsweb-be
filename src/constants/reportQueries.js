@@ -28,7 +28,129 @@ module.exports = {
     AND ( ? IS NULL OR LOWER(lq.status) = LOWER(?) )
   ORDER BY COALESCE(lq.updated_at, lq.created_at) DESC
 `,
+  GET_EMPLOYEE_REPORT: `
+SELECT
+  e.employee_id,
+  e.first_name,
+  e.last_name,
+  CONCAT(COALESCE(e.first_name, ''), ' ', COALESCE(e.last_name, '')) AS employee_name,
+  e.email,
+  DATE_FORMAT(e.dob, '%Y-%m-%d') AS dob,
+  e.phone_number,
+  e.status,
+  p.address,
+  p.father_name,
+  p.mother_name,
+  p.gender,
+  p.marital_status,
+  p.spouse_name,
+  DATE_FORMAT(p.marriage_date, '%Y-%m-%d') AS marriage_date,
+  p.aadhaar_number,
+  p.aadhaar_doc_url,
+  p.pan_number,
+  p.pan_doc_url,
+  p.passport_number,
+  p.passport_doc_url,
+  p.voter_id,
+  p.voter_id_doc_url,
+  p.insurance_doc,
+  p.alternate_email,
+  p.alternate_number,
+  p.blood_group,
+  p.emergency_name,
+  p.emergency_number,
+  DATE_FORMAT(p.father_dob, '%Y-%m-%d') AS father_dob,
+  p.father_gov_doc_url,
+  DATE_FORMAT(p.mother_dob, '%Y-%m-%d') AS mother_dob,
+  p.mother_gov_doc_url,
+  DATE_FORMAT(p.spouse_dob, '%Y-%m-%d') AS spouse_dob,
+  p.spouse_gov_doc_url,
+  p.child1_name,
+  DATE_FORMAT(p.child1_dob, '%Y-%m-%d') AS child1_dob,
+  p.child1_gov_doc_url,
+  p.child2_name,
+  DATE_FORMAT(p.child2_dob, '%Y-%m-%d') AS child2_dob,
+  p.child2_gov_doc_url,
+  p.child3_name,
+  DATE_FORMAT(p.child3_dob, '%Y-%m-%d') AS child3_dob,
+  p.child3_gov_doc_url,
+  p.driving_license_number,
+  p.driving_license_doc_url,
+  p.uan_number,
+  p.pf_number,
+  p.esi_number,
+  pr.domain,
+  pr.employee_type,
+  DATE_FORMAT(pr.joining_date, '%Y-%m-%d') AS joining_date,
+  pr.role,
+  pr.position,
+  pr.department_id,
+  COALESCE(d.name, '') AS department_name,
+  pr.supervisor_id,
+  CONCAT(sup.first_name, ' ', sup.last_name) AS supervisor_name,
+  pr.salary,
+  pr.resume_url,
+  bd.bank_name,
+  bd.account_number,
+  bd.ifsc_code,
+  bd.branch_name AS bank_branch,
+  DATE_FORMAT(e.created_at, '%Y-%m-%d %H:%i:%s') AS created_at
+FROM employees e
+LEFT JOIN employee_personal p ON e.employee_id = p.employee_id
+LEFT JOIN employee_professional pr ON e.employee_id = pr.employee_id
+LEFT JOIN departments d ON pr.department_id = d.id
+LEFT JOIN employee_bank_details bd ON e.employee_id = bd.employee_id
+LEFT JOIN employees sup ON pr.supervisor_id = sup.employee_id
+WHERE ( ? IS NULL OR (e.created_at >= ? ) )
+  AND ( ? IS NULL OR (e.created_at < DATE_ADD(?, INTERVAL 1 DAY) ) )
+  AND ( ? IS NULL OR LOWER(e.status) = LOWER(?) )
+  AND ( ? IS NULL OR pr.department_id = ? )
+  AND ( ? IS NULL OR e.employee_id = ? )
+ORDER BY e.created_at DESC
+`,
 
+  GET_EMPLOYEE_REPORT_COMPACT: `
+SELECT
+  e.employee_id,
+  e.first_name,
+  e.last_name,
+  CONCAT(COALESCE(e.first_name, ''), ' ', COALESCE(e.last_name, '')) AS employee_name,
+  e.email,
+  DATE_FORMAT(e.dob, '%Y-%m-%d') AS dob,
+  e.phone_number,
+  e.status,
+  pr.employee_type,
+  pr.role,
+  pr.position,
+  pr.department_id,
+  COALESCE(d.name, '') AS department_name,
+  pr.supervisor_id,
+  CONCAT(COALESCE(sup.first_name, ''), ' ', COALESCE(sup.last_name, '')) AS supervisor_name,
+  p.address,
+  p.father_name,
+  p.mother_name,
+  /* include fields requested by ClaimFields */
+  p.gender,
+  p.aadhaar_number,
+  DATE_FORMAT(pr.joining_date, '%Y-%m-%d') AS joining_date,
+  bd.bank_name,
+  bd.account_number,
+  bd.ifsc_code,
+  bd.branch_name AS bank_branch,
+  DATE_FORMAT(e.created_at, '%Y-%m-%d %H:%i:%s') AS created_at
+FROM employees e
+LEFT JOIN employee_professional pr ON e.employee_id = pr.employee_id
+LEFT JOIN departments d ON pr.department_id = d.id
+LEFT JOIN employees sup ON pr.supervisor_id = sup.employee_id
+LEFT JOIN employee_personal p ON e.employee_id = p.employee_id
+LEFT JOIN employee_bank_details bd ON e.employee_id = bd.employee_id
+WHERE ( ? IS NULL OR (e.created_at >= ? ) )
+  AND ( ? IS NULL OR (e.created_at < DATE_ADD(?, INTERVAL 1 DAY) ) )
+  AND ( ? IS NULL OR LOWER(e.status) = LOWER(?) )
+  AND ( ? IS NULL OR pr.department_id = ? )
+  AND ( ? IS NULL OR e.employee_id = ? )
+ORDER BY e.created_at DESC
+`,
   GET_REIMBURSEMENT_REPORT: `
 SELECT
   r.id AS reimbursement_id,
@@ -140,133 +262,6 @@ WHERE ( ? IS NULL OR COALESCE(r.approved_date, r.created_at) >= ? )
 ORDER BY r.created_at DESC
 `,
 
-  GET_EMPLOYEE_REPORT: `
-  SELECT
-    e.employee_id,
-    e.first_name,
-    e.last_name,
-    CONCAT(COALESCE(e.first_name, ''), ' ', COALESCE(e.last_name, '')) AS employee_name,
-    e.email,
-    DATE_FORMAT(e.dob, '%Y-%m-%d') AS dob,
-    e.phone_number,
-    e.status,
-
-    -- personal (employee_personal)
-    p.address,
-    p.father_name,
-    p.mother_name,
-    p.gender,
-    p.marital_status,
-    p.spouse_name,
-    DATE_FORMAT(p.marriage_date, '%Y-%m-%d') AS marriage_date,
-    p.aadhaar_number,
-    p.aadhaar_doc_url,
-    p.pan_number,
-    p.pan_doc_url,
-    p.passport_number,
-    p.passport_doc_url,
-    p.voter_id,
-    p.voter_id_doc_url,
-   
-    p.insurance_doc,
-    p.alternate_email,
-    p.alternate_number,
-    p.blood_group,
-    p.emergency_name,
-    p.emergency_number,
-    DATE_FORMAT(p.father_dob, '%Y-%m-%d') AS father_dob,
-    p.father_gov_doc_url,
-    DATE_FORMAT(p.mother_dob, '%Y-%m-%d') AS mother_dob,
-    p.mother_gov_doc_url,
-    DATE_FORMAT(p.spouse_dob, '%Y-%m-%d') AS spouse_dob,
-    p.spouse_gov_doc_url,
-    p.child1_name,
-    DATE_FORMAT(p.child1_dob, '%Y-%m-%d') AS child1_dob,
-    p.child1_gov_doc_url,
-    p.child2_name,
-    DATE_FORMAT(p.child2_dob, '%Y-%m-%d') AS child2_dob,
-    p.child2_gov_doc_url,
-    p.child3_name,
-    DATE_FORMAT(p.child3_dob, '%Y-%m-%d') AS child3_dob,
-    p.child3_gov_doc_url,
-    p.driving_license_number,
-    p.driving_license_doc_url,
-    p.uan_number,
-    p.pf_number,
-    p.esi_number,
-
-    -- professional (employee_professional)
-    pr.domain,
-    pr.employee_type,
-    DATE_FORMAT(pr.joining_date, '%Y-%m-%d') AS joining_date,
-    pr.role,
-    pr.position,
-    pr.department_id,
-    COALESCE(d.name, '') AS department_name,
-    pr.supervisor_id,
-    CONCAT(sup.first_name, ' ', sup.last_name) AS supervisor_name,
-    pr.salary,
-    pr.resume_url,
-
-    -- bank details (employee_bank_details)
-    bd.bank_name,
-    bd.account_number,
-    bd.ifsc_code,
-    bd.branch_name AS bank_branch,
-
-    DATE_FORMAT(e.created_at, '%Y-%m-%d %H:%i:%s') AS created_at
-  FROM employees e
-  LEFT JOIN employee_personal p ON e.employee_id = p.employee_id
-  LEFT JOIN employee_professional pr ON e.employee_id = pr.employee_id
-  LEFT JOIN departments d ON pr.department_id = d.id
-  LEFT JOIN employee_bank_details bd ON e.employee_id = bd.employee_id
-  LEFT JOIN employees sup ON pr.supervisor_id = sup.employee_id
-  WHERE
-    ( ? IS NULL OR (e.created_at >= ? ) )
-    AND ( ? IS NULL OR (e.created_at < DATE_ADD(?, INTERVAL 1 DAY) ) )
-    AND ( ? IS NULL OR LOWER(e.status) = LOWER(?) )
-    AND ( ? IS NULL OR pr.department_id = ? )
-  ORDER BY e.created_at DESC
-`,
-
-  GET_EMPLOYEE_REPORT_COMPACT: `
-SELECT
-  e.employee_id,
-  e.first_name,
-  e.last_name,
-  CONCAT(COALESCE(e.first_name, ''), ' ', COALESCE(e.last_name, '')) AS employee_name,
-  e.email,
-  DATE_FORMAT(e.dob, '%Y-%m-%d') AS dob,
-  e.phone_number,
-  e.status,
-  pr.employee_type,
-  pr.role,
-  pr.position,
-  pr.department_id,
-  COALESCE(d.name, '') AS department_name,
-  pr.supervisor_id,
-  CONCAT(COALESCE(sup.first_name, ''), ' ', COALESCE(sup.last_name, '')) AS supervisor_name,
-  p.address,
-  p.father_name,
-  p.mother_name,
-  bd.bank_name,
-  bd.account_number,
-  bd.ifsc_code,
-  bd.branch_name AS bank_branch,
-  DATE_FORMAT(e.created_at, '%Y-%m-%d %H:%i:%s') AS created_at
-FROM employees e
-LEFT JOIN employee_professional pr ON e.employee_id = pr.employee_id
-LEFT JOIN departments d ON pr.department_id = d.id
-LEFT JOIN employees sup ON pr.supervisor_id = sup.employee_id
-LEFT JOIN employee_personal p ON e.employee_id = p.employee_id
-LEFT JOIN employee_bank_details bd ON e.employee_id = bd.employee_id
-WHERE ( ? IS NULL OR (e.created_at >= ? ) )
-  AND ( ? IS NULL OR (e.created_at < DATE_ADD(?, INTERVAL 1 DAY) ) )
-  AND ( ? IS NULL OR LOWER(e.status) = LOWER(?) )
-  AND ( ? IS NULL OR pr.department_id = ? )
-ORDER BY e.created_at DESC
-`,
-
   GET_VENDOR_REPORT: `
   SELECT
     v.vendor_id,
@@ -322,23 +317,42 @@ ORDER BY e.created_at DESC
 `,
 
   GET_EMPLOYEE_ATTENDANCE_REPORT: `
-    SELECT
-      punch_id,
-      employee_id,
-      punch_status,
-      DATE_FORMAT(punchin_time, '%Y-%m-%d %H:%i:%s') AS punchin_time,
-      punchin_device,
-      punchin_location,
-      DATE_FORMAT(punchout_time, '%Y-%m-%d %H:%i:%s') AS punchout_time,
-      punchout_device,
-      punchout_location,
-      punchmode,
-      DATE_FORMAT(punchin_time, '%Y-%m-%d %H:%i:%s') AS created_at
-    FROM emp_attendence
-    WHERE ( ? IS NULL OR (punchin_time >= ? ) )
-      AND ( ? IS NULL OR (punchin_time < DATE_ADD(?, INTERVAL 1 DAY) ) )
-    ORDER BY punchin_time DESC
-  `,
+  SELECT
+    a.punch_id,
+    a.employee_id,
+
+    CONCAT(
+      COALESCE(e.first_name, ''),
+      ' ',
+      COALESCE(e.last_name, '')
+    ) AS employee_name,
+
+    ep.department_id,
+    COALESCE(d.name, '') AS department_name,
+
+    a.punch_status,
+
+    DATE_FORMAT(a.punchin_time, '%Y-%m-%d %H:%i:%s') AS punchin_time,
+    a.punchin_device,
+    a.punchin_location,
+
+    DATE_FORMAT(a.punchout_time, '%Y-%m-%d %H:%i:%s') AS punchout_time,
+    a.punchout_device,
+    a.punchout_location,
+
+    a.punchmode,
+    DATE_FORMAT(a.punchin_time, '%Y-%m-%d %H:%i:%s') AS created_at
+  FROM emp_attendence a
+  LEFT JOIN employees e
+    ON e.employee_id = a.employee_id
+  LEFT JOIN employee_professional ep
+    ON ep.employee_id = a.employee_id
+  LEFT JOIN departments d
+    ON d.id = ep.department_id
+  WHERE ( ? IS NULL OR a.punchin_time >= ? )
+    AND ( ? IS NULL OR a.punchin_time < DATE_ADD(?, INTERVAL 1 DAY) )
+  ORDER BY a.punchin_time DESC
+`,
 
   GET_SUPERVISOR_TASK_REPORT: `
   SELECT

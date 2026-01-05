@@ -61,6 +61,23 @@ async function dbExec(sql, params = []) {
   }
 }
 
+// Small wrapper to always return [rows, fields] (or [rows, null])
+async function dbExecRaw(sql, params = []) {
+  const res = await dbExec(sql, params);
+  // Many mysql2 promise methods return [rows, fields]
+  if (Array.isArray(res) && res.length >= 1) {
+    // If it's already [rows, fields] return as-is
+    if (
+      res.length >= 2 &&
+      (Array.isArray(res[0]) || typeof res[0] === "object")
+    )
+      return res;
+    // else some drivers return rows as the single element; normalize
+    return [res[0], res[1] || null];
+  }
+  return [res, null];
+}
+
 function findEmployeeIdInRequest(req) {
   const safe = (v) =>
     v === undefined || v === null ? null : String(v).trim() || null;
@@ -118,7 +135,7 @@ async function lookupDeptForEmployee(employeeId) {
   try {
     if (!employeeId) return null;
     const sql = `SELECT department_id FROM employee_professional WHERE employee_id = ? LIMIT 1`;
-    const [rows] = await dbExec(sql, [employeeId]);
+    const [rows] = await dbExecRaw(sql, [employeeId]);
     if (Array.isArray(rows) && rows[0] && rows[0].department_id != null)
       return String(rows[0].department_id);
   } catch (e) {
@@ -135,7 +152,7 @@ async function findDepartmentsManagedBy(managerEmpId) {
   const out = [];
 
   try {
-    const [cols] = await dbExec("SHOW COLUMNS FROM departments");
+    const [cols] = await dbExecRaw("SHOW COLUMNS FROM departments");
     const colNames = Array.isArray(cols)
       ? cols
           .map((c) => {
@@ -148,7 +165,7 @@ async function findDepartmentsManagedBy(managerEmpId) {
 
     if (colNames.includes("manager_employee_id")) {
       try {
-        const [rows] = await dbExec(
+        const [rows] = await dbExecRaw(
           "SELECT id FROM departments WHERE manager_employee_id = ?",
           [managerEmpId]
         );
@@ -166,7 +183,7 @@ async function findDepartmentsManagedBy(managerEmpId) {
 
     if (colNames.includes("manager_id")) {
       try {
-        const [rows] = await dbExec(
+        const [rows] = await dbExecRaw(
           "SELECT id FROM departments WHERE manager_id = ?",
           [managerEmpId]
         );
@@ -189,7 +206,7 @@ async function findDepartmentsManagedBy(managerEmpId) {
   }
 
   try {
-    const [rows] = await dbExec(
+    const [rows] = await dbExecRaw(
       "SELECT DISTINCT department_id AS id FROM employee_professional WHERE supervisor_id = ? AND department_id IS NOT NULL",
       [managerEmpId]
     );
@@ -209,91 +226,40 @@ async function findDepartmentsManagedBy(managerEmpId) {
   return Array.from(new Set(out));
 }
 
-async function buildMetaFromReqQuery(query = {}) {
-  const meta = {};
-  const rawStatus =
-    coerceToString(query.status, null) ||
-    coerceToString(query.approval_status, null);
-  if (rawStatus) {
+// Helpers expected by the original code but not present
+function normalizeToPlainString(v, _ctx = "") {
+  if (v === null || typeof v === "undefined") return null;
+  if (typeof v === "string") {
+    const s = v.trim();
+    return s === "" ? null : s;
+  }
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  try {
+    return JSON.stringify(v);
+  } catch (e) {
+    return String(v);
+  }
+}
+
+// Heuristic: treat value as an ID candidate when it's a single token (no spaces)
+// or pure numeric. This mirrors common patterns where IDs have no spaces.
+function tryParseCandidate(candidate) {
+  if (candidate === null || typeof candidate === "undefined") return null;
+  if (typeof candidate === "number") return String(candidate);
+  if (typeof candidate !== "string") {
     try {
-      meta.status = normalizeStatusForQuery(rawStatus) || rawStatus;
+      return String(candidate);
     } catch (e) {
-      meta.status = rawStatus;
+      return null;
     }
   }
-
-  const typedEmployeeName =
-    coerceToString(query.employee_name, null) ||
-    coerceToString(query.employeeName, null) ||
-    coerceToString(query.employee, null);
-  if (typedEmployeeName) {
-    meta.employeeName = typedEmployeeName;
-  } else {
-    const empId =
-      coerceToString(query.employee_id, null) ||
-      coerceToString(query.employeeId, null);
-    if (empId) {
-      try {
-        if (typeof reportService.searchEmployees === "function") {
-          const found = await reportService.searchEmployees(empId);
-          meta.employeeName =
-            Array.isArray(found) && found[0]
-              ? found[0].employee_name ||
-                `${(found[0].first_name || "").trim()} ${(
-                  found[0].last_name || ""
-                ).trim()}`.trim() ||
-                empId
-              : empId;
-        } else if (typeof reportService.getEmployeeRows === "function") {
-          const er = await reportService.getEmployeeRows(empId);
-          meta.employeeName =
-            Array.isArray(er) && er[0]
-              ? er[0].employee_name ||
-                `${(er[0].first_name || "").trim()} ${(
-                  er[0].last_name || ""
-                ).trim()}`.trim() ||
-                empId
-              : empId;
-        } else meta.employeeName = empId;
-      } catch (e) {
-        meta.employeeName = empId;
-      }
-    }
-  }
-
-  const typedDept =
-    coerceToString(query.department_name, null) ||
-    coerceToString(query.departmentName, null) ||
-    coerceToString(query.department, null);
-  if (typedDept) meta.department = typedDept;
-  else {
-    const deptId =
-      coerceToString(query.department_id, null) ||
-      coerceToString(query.departmentId, null);
-    if (deptId) {
-      try {
-        if (typeof reportService.getDepartments === "function") {
-          const depts = await reportService.getDepartments();
-          if (Array.isArray(depts)) {
-            const found = depts.find(
-              (d) =>
-                d &&
-                (String(d.id) === String(deptId) ||
-                  String(d.department_id || d.id) === String(deptId))
-            );
-            meta.department =
-              (found &&
-                (found.name || found.department_name || found.department)) ||
-              deptId;
-          } else meta.department = deptId;
-        } else meta.department = deptId;
-      } catch (e) {
-        meta.department = deptId;
-      }
-    }
-  }
-
-  return meta;
+  const s = candidate.trim();
+  if (!s) return null;
+  // If contains whitespace, treat as a name not an id
+  if (/\s/.test(s)) return null;
+  // Accept alphanumeric IDs (including dashes/underscores)
+  if (/^[A-Za-z0-9_\-@.]{1,50}$/.test(s)) return s;
+  return null;
 }
 
 function _extractFieldValue(row, possibleKeys = []) {
@@ -383,6 +349,125 @@ function normalizeRowsInPlace(rows) {
 
     return r;
   });
+}
+
+async function buildMetaFromReqQuery(query = {}) {
+  const meta = {
+    filters: [],
+    status: null,
+    employee: null,
+    department: null,
+  };
+
+  try {
+    const startDate =
+      coerceToString(query.startDate, null) ||
+      coerceToString(query.start_date, null) ||
+      coerceToString(query.from, null) ||
+      coerceToString(query.fromDate, null);
+    const endDate =
+      coerceToString(query.endDate, null) ||
+      coerceToString(query.end_date, null) ||
+      coerceToString(query.to, null) ||
+      coerceToString(query.toDate, null);
+    if (startDate || endDate) {
+      if (startDate && endDate)
+        meta.filters.push(`Date: ${startDate} → ${endDate}`);
+      else if (startDate) meta.filters.push(`From: ${startDate}`);
+      else meta.filters.push(`To: ${endDate}`);
+    }
+
+    const rawStatus =
+      coerceToString(query.status, null) ||
+      coerceToString(query.approval_status, null) ||
+      coerceToString(query.state, null);
+    if (rawStatus) {
+      // use the provided normalizeStatusForQuery to make a displayable token
+      meta.status = normalizeToPlainString(rawStatus, "status");
+      meta.filters.push(`Status: ${meta.status}`);
+    }
+
+    let empCandidate =
+      query.employee_id ?? query.employeeId ?? query.employee ?? null;
+    if (typeof empCandidate === "string" && empCandidate.trim() === "")
+      empCandidate = null;
+
+    if (empCandidate) {
+      const idCandidate = tryParseCandidate(empCandidate);
+      if (idCandidate) {
+        try {
+          const [rows] = await dbExecRaw(
+            "SELECT employee_id, first_name, last_name, email FROM employees WHERE employee_id = ? LIMIT 1",
+            [idCandidate]
+          );
+          const er = Array.isArray(rows) && rows[0] ? rows[0] : null;
+          if (er) {
+            const name =
+              `${(er.first_name || "").trim()} ${(
+                er.last_name || ""
+              ).trim()}`.trim() ||
+              er.email ||
+              er.employee_id;
+            meta.employee = `${name} (${er.employee_id})`;
+            meta.filters.push(`Employee: ${meta.employee}`);
+          } else {
+            meta.employee = normalizeToPlainString(empCandidate, "employee");
+            meta.filters.push(`Employee: ${meta.employee}`);
+          }
+        } catch (e) {
+          meta.employee = normalizeToPlainString(empCandidate, "employee");
+          meta.filters.push(`Employee: ${meta.employee}`);
+        }
+      } else {
+        meta.employee = normalizeToPlainString(empCandidate, "employee");
+        meta.filters.push(`Employee: ${meta.employee}`);
+      }
+    }
+
+    let deptCandidate =
+      query.department_id ?? query.departmentId ?? query.department ?? null;
+    if (typeof deptCandidate === "string" && deptCandidate.trim() === "")
+      deptCandidate = null;
+
+    if (deptCandidate) {
+      const deptIdStr = coerceToString(deptCandidate, null);
+      if (deptIdStr && /^\d+$/.test(String(deptIdStr))) {
+        try {
+          const [drows] = await dbExecRaw(
+            "SELECT id, name FROM departments WHERE id = ? LIMIT 1",
+            [deptIdStr]
+          );
+          const dr = Array.isArray(drows) && drows[0] ? drows[0] : null;
+          if (dr) {
+            meta.department = `${dr.name}`;
+            meta.filters.push(`Department: ${meta.department}`);
+          } else {
+            meta.department = normalizeToPlainString(
+              deptCandidate,
+              "department"
+            );
+            meta.filters.push(`Department: ${meta.department}`);
+          }
+        } catch (e) {
+          meta.department = normalizeToPlainString(deptCandidate, "department");
+          meta.filters.push(`Department: ${meta.department}`);
+        }
+      } else {
+        meta.department = normalizeToPlainString(deptCandidate, "department");
+        meta.filters.push(`Department: ${meta.department}`);
+      }
+    }
+
+    if (meta.filters.length === 0) meta.filters.push("No explicit filters");
+  } catch (e) {
+    console.warn(
+      "[reportReimbursementsHandler] buildMetaFromReqQuery failed:",
+      e && e.message
+    );
+    if (meta.filters.length === 0)
+      meta.filters.push("No explicit filters (meta build failed)");
+  }
+  return meta;
 }
 
 async function downloadReimbursementsReport(req, res) {

@@ -165,6 +165,8 @@ module.exports = {
       title,
     });
 
+    console.debug("[renderPdfBuffer] Normalized meta:", metaWithMap);
+
     if (
       !metaWithMap.status &&
       !metaWithMap.department &&

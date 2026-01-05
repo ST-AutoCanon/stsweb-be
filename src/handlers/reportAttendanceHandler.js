@@ -1,3 +1,4 @@
+// reportAttendanceHandler.js
 const reportService = require("../services/reportIndex");
 const {
   coerceToString,
@@ -293,6 +294,71 @@ async function attachDeptInfoForRows(rows) {
   }
 }
 
+async function attachDepartmentNamesForRows(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return;
+
+  // collect unique department ids present in rows
+  const deptIds = Array.from(
+    new Set(
+      rows
+        .map((r) => {
+          if (!r) return null;
+          return (
+            r.department_id ??
+            r.pr_department_id ??
+            r.departmentId ??
+            r.dept_id ??
+            null
+          );
+        })
+        .filter((v) => v !== null && v !== undefined && v !== "")
+        .map((v) => Number(v))
+        .filter((n) => !isNaN(n))
+    )
+  );
+
+  if (deptIds.length === 0) return;
+
+  const placeholders = deptIds.map(() => "?").join(",");
+  const sql = `SELECT id, name FROM departments WHERE id IN (${placeholders})`;
+
+  try {
+    const [deptRows] = await dbExec(sql, deptIds);
+    const deptMap = new Map();
+    if (Array.isArray(deptRows)) {
+      for (const d of deptRows) {
+        if (!d) continue;
+        const id = Number(d.id);
+        if (isNaN(id)) continue;
+        const name = (d.name || "").toString();
+        deptMap.set(id, name);
+      }
+    }
+
+    for (const r of rows) {
+      if (!r) continue;
+      // keep existing department_name if present
+      if (r.department_name && String(r.department_name).trim() !== "")
+        continue;
+
+      const did =
+        r.department_id ??
+        r.pr_department_id ??
+        r.departmentId ??
+        r.dept_id ??
+        null;
+      if (did == null) continue;
+      const name = deptMap.get(Number(did));
+      if (name) r.department_name = name;
+    }
+  } catch (e) {
+    console.warn(
+      "[reportAttendanceHandler] attachDepartmentNamesForRows failed:",
+      e && (e.stack || e.message)
+    );
+  }
+}
+
 async function buildMetaFromReqQuery(query = {}) {
   const meta = {};
   const rawStatus =
@@ -334,18 +400,16 @@ async function buildMetaFromReqQuery(query = {}) {
     if (deptId) {
       if (/^\d+$/.test(deptId)) {
         try {
-          const [rows] = await dbExec(
-            `SELECT id, department_name, departmentName, name FROM departments WHERE id = ? LIMIT 1`,
+          // Safely select only `name` from departments to avoid unknown-column errors
+          const [drows] = await dbExec(
+            "SELECT id, name FROM departments WHERE id = ? LIMIT 1",
             [deptId]
           );
-          if (Array.isArray(rows) && rows[0]) {
-            const rec = rows[0];
-            const name =
-              coerceToString(rec.department_name, null) ||
-              coerceToString(rec.departmentName, null) ||
-              coerceToString(rec.name, null);
+          const dr = Array.isArray(drows) && drows[0] ? drows[0] : null;
+          if (dr) {
+            const name = coerceToString(dr.name, null);
             if (name) meta.department = name;
-            else meta.department = String(rec.id);
+            else meta.department = String(dr.id);
           } else {
             meta.department = deptId;
           }
@@ -488,6 +552,9 @@ async function downloadAttendanceReport(req, res) {
         employeeIdQuery || null,
         departmentIdQuery || null
       );
+      // Best-effort: fill department_name when missing (uses departments.name)
+      await attachDepartmentNamesForRows(rows);
+
       console.debug(
         "[reportAttendanceHandler] rows after local filtering:",
         rows.length
@@ -512,6 +579,12 @@ async function downloadAttendanceReport(req, res) {
         .json({ message: "No attendance data for selected date range" });
 
     const meta = await buildMetaFromReqQuery(req.query || {});
+    if (rows && rows.length > 0) {
+      const firstRow = rows.find((r) => r && r.department_name);
+      if (firstRow && firstRow.department_name) {
+        meta.department = firstRow.department_name;
+      }
+    }
     console.debug("[reportAttendanceHandler] render meta:", meta);
 
     if (format === "xlsx") {
