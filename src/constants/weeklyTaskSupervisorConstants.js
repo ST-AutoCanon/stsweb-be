@@ -5,8 +5,8 @@ module.exports = {
       e.first_name,
       e.last_name,
       CONCAT(e.first_name, ' ', e.last_name) AS employee_name
-    FROM sukalpadata.employees e
-    JOIN sukalpadata.employee_professional p ON e.employee_id = p.employee_id
+    FROM employees e
+    JOIN employee_professional p ON e.employee_id = p.employee_id
     WHERE p.supervisor_id = ? AND e.status = 'Active'
     ORDER BY e.first_name, e.last_name;
   `,
@@ -16,7 +16,7 @@ module.exports = {
       e.first_name,
       e.last_name,
       CONCAT(e.first_name, ' ', e.last_name) AS employee_name
-    FROM sukalpadata.employees e
+    FROM employees e
     WHERE e.status = 'Active'
     ORDER BY e.first_name, e.last_name;
   `,
@@ -40,9 +40,9 @@ module.exports = {
       t.created_at,
       t.updated_at,
       t.parent_task_id
-    FROM sukalpadata.weekly_tasks t
-    JOIN sukalpadata.employee_professional p ON t.employee_id = p.employee_id
-    JOIN sukalpadata.employees e ON t.employee_id = e.employee_id
+    FROM weekly_tasks t
+    JOIN employee_professional p ON t.employee_id = p.employee_id
+    JOIN employees e ON t.employee_id = e.employee_id
     WHERE p.supervisor_id = ? AND e.status = 'Active'
     ORDER BY t.task_date DESC, t.task_id ASC;
   `,
@@ -66,13 +66,13 @@ module.exports = {
       t.created_at,
       t.updated_at,
       t.parent_task_id
-    FROM sukalpadata.weekly_tasks t
-    JOIN sukalpadata.employees e ON t.employee_id = e.employee_id
+    FROM weekly_tasks t
+    JOIN employees e ON t.employee_id = e.employee_id
     WHERE e.status = 'Active'
     ORDER BY t.task_date DESC, t.task_id ASC;
   `,
   UPDATE_TASK_BY_ID: `
-    UPDATE sukalpadata.weekly_tasks
+    UPDATE weekly_tasks
     SET sup_status = ?,
         sup_comment = ?,
         sup_review_status = ?,
@@ -83,7 +83,7 @@ module.exports = {
     WHERE task_id = ?;
   `,
   INSERT_NEW_TASK: `
-    INSERT INTO sukalpadata.weekly_tasks (
+    INSERT INTO weekly_tasks (
       week_id,
       task_date,
       project_id,
@@ -100,11 +100,11 @@ module.exports = {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
   `,
   GET_CONFIG: `
-  SELECT \`key\`, \`value\` FROM sukalpadata.config;
+  SELECT \`key\`, \`value\` FROM config;
 `,
 
   UPDATE_CONFIG: `
-    UPDATE sukalpadata.config SET value = ? WHERE \`key\` = ?;
+    UPDATE config SET value = ? WHERE \`key\` = ?;
   `,
   GET_HOLIDAYS: `
     SELECT 
@@ -112,7 +112,7 @@ module.exports = {
       date,
       occasion,
       type
-    FROM sukalpadata.holidays
+    FROM holidays
     ORDER BY date ASC;
   `,
 };

@@ -11,7 +11,7 @@ const GET_TASKS_BY_EMPLOYEE1 = `
     progress_percentage,
     created_at,
     updated_at
-  FROM sukalpadata.tasks
+  FROM tasks
   WHERE employee_id = ?;
 `;
 
