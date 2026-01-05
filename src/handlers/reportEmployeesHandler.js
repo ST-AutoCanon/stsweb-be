@@ -1,3 +1,4 @@
+// reportEmployeesHandler.js
 const reportService = require("../services/reportIndex");
 const { coerceToString } = require("../services/reportUtils");
 const {
@@ -10,6 +11,7 @@ const {
 } = require("../services/reportFilters");
 const db = require("../config");
 
+/* Execute raw DB SQL (works with mysql2 or mysql client) */
 async function dbExecRaw(sql, params = []) {
   if (!Array.isArray(params)) params = [params];
   if (db && typeof db.execute === "function") {
@@ -28,6 +30,7 @@ async function dbExecRaw(sql, params = []) {
   });
 }
 
+/* Try to extract a usable candidate ID/email from various shapes */
 function tryParseCandidate(raw) {
   if (raw === null || typeof raw === "undefined") return null;
   if (typeof raw === "object") {
@@ -61,6 +64,8 @@ function tryParseCandidate(raw) {
   }
   return s;
 }
+
+/* Look at headers / body / query / session to find an employee id */
 function findEmployeeIdInRequest(req) {
   try {
     const headerCandidates = [
@@ -75,9 +80,11 @@ function findEmployeeIdInRequest(req) {
       const candidate = tryParseCandidate(raw);
       if (candidate) return candidate;
     }
+
     const r1 = req.employeeId ?? req.employee_id ?? req.userId ?? req.user_id;
     const cand1 = tryParseCandidate(r1);
     if (cand1) return cand1;
+
     const u = req.user || req.authUser || req.session?.user;
     if (u) {
       const cand =
@@ -88,6 +95,7 @@ function findEmployeeIdInRequest(req) {
         coerceToString(u.email, null);
       if (cand) return cand;
     }
+
     const qCandidate =
       tryParseCandidate(
         req.query &&
@@ -102,6 +110,7 @@ function findEmployeeIdInRequest(req) {
   return null;
 }
 
+/* Return dept ids managed by a manager (tries several column patterns) */
 async function findDepartmentsManagedBy(managerEmpId) {
   if (!managerEmpId) return [];
   const out = [];
@@ -159,6 +168,7 @@ async function findDepartmentsManagedBy(managerEmpId) {
     );
   }
 
+  /* fallback: employee_professional supervisor -> department id */
   try {
     const [rows] = await dbExecRaw(
       "SELECT DISTINCT department_id AS id FROM employee_professional WHERE supervisor_id = ? AND department_id IS NOT NULL",
@@ -179,6 +189,7 @@ async function findDepartmentsManagedBy(managerEmpId) {
   return Array.from(new Set(out));
 }
 
+/* Provide a readable string for various shapes */
 function normalizeToPlainString(candidate, kind = "generic") {
   if (candidate === null || typeof candidate === "undefined") return null;
   if (typeof candidate === "object") {
@@ -229,7 +240,6 @@ async function buildMetaFromReqQuery(query = {}) {
       coerceToString(query.end_date, null) ||
       coerceToString(query.to, null) ||
       coerceToString(query.toDate, null);
-
     if (startDate || endDate) {
       if (startDate && endDate)
         meta.filters.push(`Date: ${startDate} → ${endDate}`);
@@ -247,12 +257,7 @@ async function buildMetaFromReqQuery(query = {}) {
     }
 
     let empCandidate =
-      query.employee_id ??
-      query.employeeId ??
-      query.employee ??
-      query.employee_name ??
-      query.employeeName ??
-      null;
+      query.employee_id ?? query.employeeId ?? query.employee ?? null;
     if (typeof empCandidate === "string" && empCandidate.trim() === "")
       empCandidate = null;
 
@@ -289,12 +294,7 @@ async function buildMetaFromReqQuery(query = {}) {
     }
 
     let deptCandidate =
-      query.department_id ??
-      query.departmentId ??
-      query.department ??
-      query.department_name ??
-      query.departmentName ??
-      null;
+      query.department_id ?? query.departmentId ?? query.department ?? null;
     if (typeof deptCandidate === "string" && deptCandidate.trim() === "")
       deptCandidate = null;
 
@@ -339,6 +339,7 @@ async function buildMetaFromReqQuery(query = {}) {
   return meta;
 }
 
+/* Manager-scope flag (explicit override) */
 function isExplicitManagerScope(req) {
   try {
     const header = String(
@@ -361,6 +362,7 @@ function isExplicitManagerScope(req) {
   return false;
 }
 
+/* Main handler */
 async function downloadEmployeesReport(req, res) {
   try {
     const parsed = parseDates(req.query || {});
@@ -562,7 +564,10 @@ async function downloadEmployeesReport(req, res) {
     }
 
     const rowsToExport = pickFields(rows, fields);
+    console.debug("[downloadEmployeesReport] Query parameters:", req.query);
+
     const meta = await buildMetaFromReqQuery(req.query || {});
+    console.debug("[downloadEmployeesReport] Constructed meta:", meta);
     console.debug("[reportEmployeesHandler] PDF meta:", meta);
 
     if (format === "xlsx") {
@@ -585,11 +590,14 @@ async function downloadEmployeesReport(req, res) {
     } else if (format === "pdf") {
       if (typeof reportService.renderPdfBuffer !== "function")
         return res.status(500).json({ message: "PDF renderer not available" });
+
+      // Pass meta so PDF header includes filters (this fixes the "called without meta" issue)
       const pdfBuf = await reportService.renderPdfBuffer(
         "Employees Report",
         rowsToExport,
         { meta }
       );
+
       const filename = safeFilename("employees_report", "pdf");
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader(

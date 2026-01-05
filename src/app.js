@@ -51,6 +51,8 @@ const payrollRoutes = require("./routes/payrollRoutes");
 const bankDetailsRoutes = require("./routes/payrollRoutes");
 const salarylastmonthtotal = require("./routes/adminPayrollRoutes");
 const reimbursementRoutes = require("./routes/reimbursementRoute");
+const reimbursementRoutesOld = require("./routes/reimbursementRoutesOld");
+
 const adminSalaryStatementRoutes = require("./routes/adminSalaryStatementRoute");
 const assetsRoutes = require("./routes/assetsRoutes");
 const adminAttendanceRoutes = require("./routes/adminAttendancetrackerRoute");
@@ -186,6 +188,8 @@ app.use("/", resetPasswordRoutes);
 app.use("/", forgotPasswordRoutes);
 app.use("/", addDepartmentRoutes);
 app.use("/", reimbursementRoutes);
+app.use("/old", reimbursementRoutesOld);
+
 app.use("/", chatRoutes);
 app.use("/attendance", attendanceRoutes);
 app.use("/", dashboardReimbursementRoutes);

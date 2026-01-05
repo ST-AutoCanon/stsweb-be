@@ -1,9 +1,11 @@
-// reports.js
+// services/reports.js
 const utils = require("./reportUtils");
 const filters = require("./reportFilters");
 const queries = require("../constants/reportQueries"); // your existing queries file
 
 const fetchRows = utils.fetchRows;
+// --- fix: import coerceToString which buildMetaFromReqQuery needs ---
+const { coerceToString } = require("./reportUtils");
 
 const LABEL_OVERRIDES = {
   replacement_task: "Replacement Task",
@@ -30,18 +32,10 @@ const LABEL_OVERRIDES = {
   paid_date: "Paid Date",
   joining_date: "Joining Date",
   dob: "Date of Birth",
-  spouse_dob: "Spouse DOB",
-  father_dob: "Father DOB",
-  mother_dob: "Mother DOB",
+
   aadhaar_number: "Aadhaar Number",
-  pan_number: "PAN Number",
-  passport_number: "Passport Number",
-  alternate_email: "Alternate Email",
-  alternate_number: "Alternate Number",
   driving_license_number: "Driving License Number",
-  uan_number: "UAN Number",
-  pf_number: "PF Number",
-  esi_number: "ESI Number",
+
   H_F: "Half/Full",
   H_F_day: "Half/Full Day",
 };
@@ -200,9 +194,58 @@ function getFieldDisplayNames(component = "default") {
   }
   return map;
 }
-
 async function attachEmployeeNames(rows) {
   if (!Array.isArray(rows) || rows.length === 0) return;
+
+  // Normalize possible employee-id fields into employee_id so rest of the logic works
+  const candidateFields = [
+    "employee_id",
+    "emp_id",
+    "employee",
+    "employeeId",
+    "created_by",
+    "created_by_emp",
+    "requested_by",
+    "requestedBy",
+    "claim_by",
+    "claimed_by",
+    "owner_id",
+    "owner",
+  ];
+
+  for (const r of rows) {
+    if (r == null) continue;
+    if (!r.employee_id || String(r.employee_id).trim() === "") {
+      for (const f of candidateFields) {
+        if (Object.prototype.hasOwnProperty.call(r, f)) {
+          try {
+            const raw = r[f];
+            if (raw === null || typeof raw === "undefined") continue;
+            let val = raw;
+            if (typeof raw === "object") {
+              // try common object shapes
+              val =
+                raw.employee_id ||
+                raw.employeeId ||
+                raw.id ||
+                raw.user_id ||
+                raw.email ||
+                null;
+            }
+            if (typeof val === "string") val = val.trim();
+            if (val || val === 0) {
+              r.employee_id = String(val);
+              break;
+            }
+          } catch (e) {
+            // ignore and continue
+          }
+        }
+      }
+    }
+  }
+
+  // Now proceed as before but defensive
   const needName = rows.some((r) => r.employee_id && !r.employee_name);
   const needProf = rows.some(
     (r) =>
@@ -309,19 +352,51 @@ async function attachEmployeeNames(rows) {
 
 async function attachDeptNames(rows) {
   if (!Array.isArray(rows) || rows.length === 0) return;
-  const missing = rows.some(
-    (r) => (r.department_id || r.pr_department_id) && !r.department_name
-  );
+
+  // Accept many possible department id field names and normalize where safe
+  const deptCandidateFields = [
+    "department_id",
+    "pr_department_id",
+    "department",
+    "dept_id",
+    "departmentId",
+    "dept",
+  ];
+
+  // Quick check whether any row has a department id but no department_name
+  const missing = rows.some((r) => {
+    for (const f of deptCandidateFields) {
+      if (r && r[f] != null && !r.department_name) return true;
+    }
+    return false;
+  });
   if (!missing) return;
+
+  // Normalize: if row has department / dept_id etc but no department_id, copy into department_id
+  for (const r of rows) {
+    if (!r || (r.department_id != null && r.department_id !== "")) continue;
+    for (const f of deptCandidateFields) {
+      if (Object.prototype.hasOwnProperty.call(r, f) && r[f] != null) {
+        try {
+          const val = r[f];
+          if (
+            val !== null &&
+            typeof val !== "undefined" &&
+            String(val).trim() !== ""
+          )
+            r.department_id = String(val);
+          break;
+        } catch (e) {}
+      }
+    }
+  }
 
   const deptIds = Array.from(
     new Set(
       rows
-        .map((r) => {
-          if (r.department_id != null) return String(r.department_id);
-          if (r.pr_department_id != null) return String(r.pr_department_id);
-          return null;
-        })
+        .map((r) =>
+          r && r.department_id != null ? String(r.department_id) : null
+        )
         .filter(Boolean)
     )
   );
@@ -334,18 +409,16 @@ async function attachDeptNames(rows) {
     const map = new Map();
     if (Array.isArray(dbRows)) {
       for (const dr of dbRows) {
-        map.set(String(dr.id), dr.name || "");
+        const key = String(dr.id ?? dr.department_id ?? dr.dept_id ?? "");
+        map.set(key, dr.name ?? dr.department_name ?? "");
       }
     }
     for (const r of rows) {
-      const did =
-        r.department_id != null
-          ? String(r.department_id)
-          : r.pr_department_id != null
-          ? String(r.pr_department_id)
-          : null;
-      if (did && !r.department_name)
+      if (!r) continue;
+      const did = r.department_id != null ? String(r.department_id) : null;
+      if (did && !r.department_name) {
         r.department_name = map.get(did) || r.department_name || "";
+      }
     }
   } catch (e) {
     console.warn("[reports] attachDeptNames failed:", e && e.message);
@@ -413,6 +486,8 @@ async function forceFilterByEmployeeProfessional(rows, departmentId) {
     return rows;
   }
 }
+
+// ------------------- rows builders (leaves, reimbursements, attendance, tasks, etc.) -------------------
 
 async function getLeaveRows(
   startDate,
@@ -1072,7 +1147,36 @@ async function getEmployeeRows(
     console.error("[reports] GET_EMPLOYEE_REPORT missing in reportQueries");
     throw new Error("Missing GET_EMPLOYEE_REPORT SQL definition");
   }
-  const params = filters.buildDateStatusParams(startDate, endDate, status);
+
+  // build base params for date/status placeholders
+  const baseParams = filters.buildDateStatusParams(startDate, endDate, status);
+  // ensure an array copy
+  const params = Array.isArray(baseParams) ? [...baseParams] : [baseParams];
+
+  // Append departmentId placeholders (two places: ? IS NULL OR pr.department_id = ?)
+  // Append employeeId placeholders (two places: ? IS NULL OR e.employee_id = ?)
+  // Use null when not provided so SQL condition (? IS NULL OR ... = ?) becomes true.
+  params.push(
+    departmentId != null && String(departmentId).trim() !== ""
+      ? String(departmentId)
+      : null
+  );
+  params.push(
+    departmentId != null && String(departmentId).trim() !== ""
+      ? String(departmentId)
+      : null
+  );
+  params.push(
+    employeeId != null && String(employeeId).trim() !== ""
+      ? String(employeeId)
+      : null
+  );
+  params.push(
+    employeeId != null && String(employeeId).trim() !== ""
+      ? String(employeeId)
+      : null
+  );
+
   let rows;
   try {
     rows = await fetchRows(sql, params);
@@ -1449,6 +1553,38 @@ async function getAssetRows(
   return filters.keepOnlyFields(rows, fields, defaultOrder);
 }
 
+// ---------- helper used by buildMetaFromReqQuery ----------
+function normalizeToPlainString(candidate, kind = "generic") {
+  if (candidate === null || typeof candidate === "undefined") return null;
+  if (typeof candidate === "object") {
+    const o = candidate;
+    if (o.employee_name || o.name || o.first_name || o.last_name) {
+      const name =
+        o.employee_name ||
+        `${(o.first_name || "").trim()} ${(o.last_name || "").trim()}`.trim() ||
+        o.name ||
+        null;
+      const id = o.employee_id || o.employeeId || o.id || null;
+      return id && name ? `${name} (${id})` : name || String(id || "");
+    }
+    if (o.department_name || o.name) {
+      return o.department_name || o.name || (o.id ? String(o.id) : null);
+    }
+    try {
+      return JSON.stringify(o);
+    } catch (e) {
+      return String(o);
+    }
+  }
+  if (typeof candidate === "string" && candidate.trim().startsWith("{")) {
+    try {
+      const parsed = JSON.parse(candidate);
+      return normalizeToPlainString(parsed, kind);
+    } catch (e) {}
+  }
+  return String(candidate);
+}
+
 async function getDepartments() {
   try {
     if (queries && queries.GET_DEPARTMENTS) {
@@ -1493,6 +1629,7 @@ async function getDepartments() {
   }
 }
 
+// ---------- searchEmployees adapter (keeps old signature compatibility) ----------
 async function searchEmployees(arg) {
   if (typeof arg === "string") {
     const q = arg.trim();
@@ -1647,7 +1784,7 @@ async function searchEmployees(arg) {
   }
 }
 
-async function buildMetaFromReqQuery(query) {
+async function buildMetaFromReqQuery(query = {}) {
   const meta = {
     filters: [],
     summary: "",
@@ -1656,6 +1793,7 @@ async function buildMetaFromReqQuery(query) {
     employee: null,
     department: null,
   };
+
   try {
     const q = query || {};
     const startDate = q.startDate || q.start_date || null;
@@ -1663,6 +1801,12 @@ async function buildMetaFromReqQuery(query) {
     const status = q.status || null;
     const employeeId = q.employee_id || q.employeeId || null;
     const departmentId = q.department_id || q.departmentId || null;
+
+    console.debug("[buildMetaFromReqQuery] Received query:", query);
+    console.debug(
+      "[buildMetaFromReqQuery] Start constructing meta with query:",
+      query
+    );
 
     if (startDate || endDate) {
       if (startDate && endDate)
@@ -1673,9 +1817,13 @@ async function buildMetaFromReqQuery(query) {
       meta.filters.push("Date: (no range specified)");
     }
 
-    if (status && String(status).trim() !== "") {
-      meta.filters.push(`Status: ${status}`);
-      meta.status = String(status);
+    const rawStatus =
+      coerceToString(q.status, null) ||
+      coerceToString(q.approval_status, null) ||
+      coerceToString(q.state, null);
+    if (rawStatus) {
+      meta.status = normalizeToPlainString(rawStatus, "status");
+      meta.filters.push(`Status: ${meta.status}`);
     }
 
     if (employeeId && String(employeeId).trim() !== "") {
@@ -1692,16 +1840,15 @@ async function buildMetaFromReqQuery(query) {
             ).trim()}`.trim() ||
             r.email ||
             r.employee_id;
-          meta.employee = { id: r.employee_id, name };
-          meta.employeeName = name;
-          meta.filters.push(`Employee: ${name} (${r.employee_id})`);
+          meta.employee = `${name} (${r.employee_id})`;
+          meta.filters.push(`Employee: ${meta.employee}`);
         } else {
-          meta.employeeName = String(employeeId);
-          meta.filters.push(`Employee: ${employeeId}`);
+          meta.employee = normalizeToPlainString(employeeId, "employee");
+          meta.filters.push(`Employee: ${meta.employee}`);
         }
       } catch (e) {
-        meta.employeeName = String(employeeId);
-        meta.filters.push(`Employee: ${employeeId}`);
+        meta.employee = normalizeToPlainString(employeeId, "employee");
+        meta.filters.push(`Employee: ${meta.employee}`);
       }
     }
 
@@ -1712,19 +1859,20 @@ async function buildMetaFromReqQuery(query) {
           [String(departmentId)]
         ).catch(() => []);
         if (Array.isArray(drows) && drows[0]) {
-          meta.department = { id: drows[0].id, name: drows[0].name };
-          meta.departmentName = drows[0].name;
-          meta.filters.push(`Department: ${drows[0].name}`);
+          meta.department = `${drows[0].name}`;
+          meta.filters.push(`Department: ${meta.department}`);
         } else {
-          meta.departmentName = String(departmentId);
-          meta.filters.push(`Department: ${departmentId}`);
+          meta.department = normalizeToPlainString(departmentId, "department");
+          meta.filters.push(`Department: ${meta.department}`);
         }
       } catch (e) {
-        meta.departmentName = String(departmentId);
-        meta.filters.push(`Department: ${departmentId}`);
+        meta.department = normalizeToPlainString(departmentId, "department");
+        meta.filters.push(`Department: ${meta.department}`);
       }
     }
 
+    if (meta.filters.length === 0) meta.filters.push("No explicit filters");
+    console.debug("[buildMetaFromReqQuery] Constructed meta:", meta);
     meta.summary = meta.filters.join(" | ");
     return meta;
   } catch (err) {
