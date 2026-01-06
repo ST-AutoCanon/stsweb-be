@@ -1,4 +1,3 @@
-// services/reimbursementServiceOld.js
 const db = require("../config");
 const queries = require("../constants/reimbursementQueriesOld");
 const path = require("path");
@@ -348,19 +347,61 @@ exports.updateReimbursementStatus = async (
   }
 };
 
-/**
- * Update payment status (pending/paid/rejected). Sets paid_date only for "paid".
- */
 exports.updatePaymentStatus = async (id, payment_status, paid_date = null) => {
   try {
-    await db.query(queries.UPDATE_PAYMENT_STATUS, [
+    // sanity
+    if (!id) throw new Error("Missing reimbursement id");
+
+    // fetch claim from reimbursement_old to validate current state
+    const [rows] = await db.query(
+      "SELECT id, status, approved_date, payment_status AS current_payment_status FROM reimbursement_old WHERE id = ?",
+      [id]
+    );
+    const claim = rows && rows[0];
+    console.info("[Service:updatePaymentStatus] claim fetched:", claim);
+
+    if (!claim) {
+      const err = new Error("Claim not found");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    // only allow update if claim is approved
+    if (String(claim.status || "").toLowerCase() !== "approved") {
+      const err = new Error(
+        "Payment status can only be updated for approved reimbursements."
+      );
+      err.claimStatus = claim.status;
+      err.approved_date = claim.approved_date;
+      err.statusCode = 400;
+      throw err;
+    }
+
+    // Build update — set paid_date only when marking "paid"
+    const paidDateValue =
+      payment_status === "paid" ? paid_date || new Date() : null;
+
+    // Prefer explicit update on reimbursement_old table
+    const updateSql =
+      "UPDATE reimbursement_old SET payment_status = ?, paid_date = ?, updated_at = NOW() WHERE id = ?";
+    const [result] = await db.query(updateSql, [
       payment_status,
-      paid_date,
+      paidDateValue,
       id,
     ]);
-    return { id, payment_status, paid_date };
+
+    if (result.affectedRows === 0) {
+      const err = new Error(
+        "Failed to update payment status (no rows affected)."
+      );
+      err.statusCode = 500;
+      throw err;
+    }
+
+    return { id, payment_status, paid_date: paidDateValue };
   } catch (err) {
     console.error("Service.updatePaymentStatus error:", err);
+    // rethrow so handler can map status codes
     throw err;
   }
 };
