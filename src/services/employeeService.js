@@ -99,7 +99,7 @@ function deleteFilesByUrlsMixed(val) {
       console.warn(
         "[file-delete] failed for",
         url,
-        e && e.message ? e.message : e
+        e && e.message ? e.message : e,
       );
     }
   }
@@ -115,7 +115,7 @@ exports.addFullEmployee = async (data) => {
     "role",
   ];
   const missing = requiredFields.filter(
-    (f) => !data[f] || String(data[f]).trim() === ""
+    (f) => !data[f] || String(data[f]).trim() === "",
   );
 
   if (missing.length > 0) {
@@ -140,7 +140,7 @@ exports.addFullEmployee = async (data) => {
 
     const [[{ employee_id: eid }]] = await conn.execute(
       `SELECT employee_id FROM employees WHERE email = ?`,
-      [data.email]
+      [data.email],
     );
 
     const personalFileKeys = [
@@ -213,14 +213,14 @@ exports.addFullEmployee = async (data) => {
       data.tenth_board || null,
       data.tenth_score || null,
       arrayToJsonOrNull(
-        data.tenth_cert_url || data.tenth_cert || data.tenth_cert_urls
+        data.tenth_cert_url || data.tenth_cert || data.tenth_cert_urls,
       ),
       data.twelfth_institution || null,
       data.twelfth_year || null,
       data.twelfth_board || null,
       data.twelfth_score || null,
       arrayToJsonOrNull(
-        data.twelfth_cert_url || data.twelfth_cert || data.twelfth_cert_urls
+        data.twelfth_cert_url || data.twelfth_cert || data.twelfth_cert_urls,
       ),
       data.ug_institution || null,
       data.ug_year || null,
@@ -297,7 +297,7 @@ exports.addFullEmployee = async (data) => {
     try {
       const mailRes = await sendResetEmail(
         data.email,
-        `${data.first_name} ${data.last_name}`
+        `${data.first_name} ${data.last_name}`,
       );
       if (mailRes && mailRes.resetToken) {
         try {
@@ -309,14 +309,14 @@ exports.addFullEmployee = async (data) => {
         } catch (saveErr) {
           console.warn(
             "[addFullEmployee] warning: failed to save reset token:",
-            saveErr && (saveErr.stack || saveErr)
+            saveErr && (saveErr.stack || saveErr),
           );
         }
       }
     } catch (mailErr) {
       console.warn(
         "[addFullEmployee] warning: reset‐email failed — not rolling back:",
-        mailErr && (mailErr.stack || mailErr)
+        mailErr && (mailErr.stack || mailErr),
       );
     }
 
@@ -324,14 +324,14 @@ exports.addFullEmployee = async (data) => {
   } catch (err) {
     console.error(
       "[addFullEmployee] error, rolling back:",
-      err && (err.stack || err)
+      err && (err.stack || err),
     );
     try {
       await conn.rollback();
     } catch (rbErr) {
       console.error(
         "[addFullEmployee] rollback failed:",
-        rbErr && (rbErr.stack || rbErr)
+        rbErr && (rbErr.stack || rbErr),
       );
     }
     throw err;
@@ -341,7 +341,7 @@ exports.addFullEmployee = async (data) => {
     } catch (relErr) {
       console.warn(
         "[addFullEmployee] connection release failed:",
-        relErr && (relErr.stack || relErr)
+        relErr && (relErr.stack || relErr),
       );
     }
   }
@@ -377,6 +377,55 @@ exports.editFullEmployee = async (data) => {
 
     const pick = (key) => (hasKey(key) ? data[key] : existing[key]);
 
+    function normalizeIncomingToArray(raw) {
+      if (raw === undefined) return undefined;
+      if (raw === null) return [];
+      if (Array.isArray(raw)) {
+        const arr = normalizeToStringArray(raw);
+        return arr;
+      }
+      if (typeof raw === "object") {
+        try {
+          return normalizeToStringArray(raw);
+        } catch {
+          return undefined;
+        }
+      }
+      if (typeof raw === "string") {
+        const trimmed = raw.trim();
+        if (trimmed === "") return undefined;
+        const parsed = tryParseJSON(trimmed);
+        if (parsed === undefined) return undefined;
+        if (parsed === null) return [];
+        if (Array.isArray(parsed)) return normalizeToStringArray(parsed);
+        return normalizeToStringArray(parsed);
+      }
+      try {
+        return normalizeToStringArray(raw);
+      } catch {
+        return undefined;
+      }
+    }
+
+    function shouldDeleteExisting(existingVal, incomingRaw) {
+      const incoming = normalizeIncomingToArray(incomingRaw);
+      if (incoming === undefined) return false;
+      const existingArr = ensureArrayField(existingVal);
+      if (Array.isArray(incoming) && incoming.length === 0) {
+        return existingArr && existingArr.length > 0;
+      }
+      if (Array.isArray(incoming) && incoming.length > 0) {
+        if (!existingArr || existingArr.length !== incoming.length) return true;
+        for (const u of incoming) {
+          if (!existingArr.includes(u)) return true;
+        }
+        return false;
+      }
+      return false;
+    }
+
+    const filesToDelete = [];
+
     const personalFileFields = [
       "spouse_gov_doc_url",
       "aadhaar_doc_url",
@@ -393,50 +442,149 @@ exports.editFullEmployee = async (data) => {
     ];
 
     for (const field of personalFileFields) {
-      if (hasKey(field)) {
-        deleteFilesByUrlsMixed(existing[field]);
+      if (!hasKey(field)) continue;
+      if (shouldDeleteExisting(existing[field], data[field])) {
+        const arr = ensureArrayField(existing[field]);
+        if (arr && arr.length) filesToDelete.push(...arr);
       }
     }
 
-    if (hasKey("resume_url") || hasKey("resume") || hasKey("resume_urls")) {
-      deleteFilesByUrlsMixed(existing.resume_url);
+    const incomingResumeRaw = (() => {
+      if (hasKey("resume_url")) return data.resume_url;
+      if (hasKey("resume")) return data.resume;
+      if (hasKey("resume_urls")) return data.resume_urls;
+      return undefined;
+    })();
+
+    if (incomingResumeRaw !== undefined) {
+      if (shouldDeleteExisting(existing.resume_url, incomingResumeRaw)) {
+        const arr = ensureArrayField(existing.resume_url);
+        if (arr && arr.length) filesToDelete.push(...arr);
+      }
     }
 
     if (hasKey("other_docs") || hasKey("other_docs_urls")) {
-      deleteFilesByUrlsMixed(existing.other_docs);
+      const incomingOtherRaw = hasKey("other_docs_urls")
+        ? data.other_docs_urls
+        : hasKey("other_docs")
+          ? data.other_docs
+          : undefined;
+      if (incomingOtherRaw !== undefined) {
+        if (shouldDeleteExisting(existing.other_docs, incomingOtherRaw)) {
+          const arr = ensureArrayField(existing.other_docs);
+          if (arr && arr.length) filesToDelete.push(...arr);
+        }
+      }
     }
 
     if (hasKey("additional_certs")) {
+      let incomingRaw = data.additional_certs;
+      if (typeof incomingRaw === "string") {
+        const parsed = tryParseJSON(incomingRaw);
+        if (Array.isArray(parsed)) incomingRaw = parsed;
+        if (parsed === null) incomingRaw = null;
+      }
+
+      let incomingKind;
+      if (incomingRaw === undefined) incomingKind = "nochange";
+      else if (incomingRaw === null) incomingKind = "clear";
+      else if (Array.isArray(incomingRaw)) incomingKind = "array";
+      else incomingKind = "nochange";
+
+      let oldAdditional = [];
       try {
-        const oldAdditional = tryParseJSON(existing.additional_certs) || [];
+        oldAdditional = tryParseJSON(existing.additional_certs) || [];
+      } catch (e) {
+        oldAdditional = [];
+      }
+
+      if (incomingKind === "nochange") {
+      } else {
         if (Array.isArray(oldAdditional) && oldAdditional.length) {
           for (const cert of oldAdditional) {
-            deleteFilesByUrlsMixed(
-              cert && (cert.file_urls || cert.files || cert.file)
-            );
+            const files = cert && (cert.file_urls || cert.files || cert.file);
+            const arr = ensureArrayField(files);
+            if (arr && arr.length) filesToDelete.push(...arr);
           }
         }
-      } catch (e) {
-        console.warn(
-          "[editFullEmployee] could not parse existing.additional_certs",
-          e
-        );
+
+        await conn.execute(queries.DELETE_EMPLOYEE_ADDITIONAL_CERTS, [eid]);
+
+        if (
+          incomingKind === "array" &&
+          Array.isArray(incomingRaw) &&
+          incomingRaw.length
+        ) {
+          for (let cert of incomingRaw) {
+            const fileUrls = cert.file_urls || cert.files || cert.file || null;
+            await conn.execute(queries.ADD_EMPLOYEE_ADDITIONAL_CERT, [
+              eid,
+              cert.name || null,
+              cert.institution || null,
+              cert.year || null,
+              arrayToJsonOrNull(fileUrls),
+            ]);
+          }
+        }
       }
     }
 
     if (hasKey("experience")) {
+      let incomingRaw = data.experience;
+      if (typeof incomingRaw === "string") {
+        const parsed = tryParseJSON(incomingRaw);
+        if (Array.isArray(parsed)) incomingRaw = parsed;
+        if (parsed === null) incomingRaw = null;
+      }
+
+      let incomingKind;
+      if (incomingRaw === undefined) incomingKind = "nochange";
+      else if (incomingRaw === null) incomingKind = "clear";
+      else if (Array.isArray(incomingRaw)) incomingKind = "array";
+      else incomingKind = "nochange";
+
+      let oldExp = [];
       try {
-        const oldExp = tryParseJSON(existing.experience) || [];
+        oldExp = tryParseJSON(existing.experience) || [];
+      } catch (e) {
+        oldExp = [];
+      }
+
+      if (incomingKind === "nochange") {
+      } else {
         if (Array.isArray(oldExp) && oldExp.length) {
           for (const ex of oldExp) {
-            deleteFilesByUrlsMixed(ex && (ex.doc_urls || ex.files || ex.doc));
+            const files = ex && (ex.doc_urls || ex.files || ex.doc);
+            const arr = ensureArrayField(files);
+            if (arr && arr.length) filesToDelete.push(...arr);
           }
         }
-      } catch (e) {
-        console.warn(
-          "[editFullEmployee] could not parse existing.experience",
-          e
-        );
+
+        if (!queries.DELETE_EMPLOYEE_EXP)
+          throw new Error("Missing SQL query: DELETE_EMPLOYEE_EXP");
+        await conn.execute(queries.DELETE_EMPLOYEE_EXP, [eid]);
+
+        const expList = Array.isArray(incomingRaw) ? incomingRaw : [];
+        for (const exp of expList) {
+          const docUrls = normalizeToStringArray(
+            exp.doc_urls || exp.files || exp.doc || null,
+          );
+          const hasAny =
+            (exp.company && String(exp.company).trim()) ||
+            (exp.role && String(exp.role).trim()) ||
+            (exp.start_date && String(exp.start_date).trim()) ||
+            (exp.end_date && String(exp.end_date).trim()) ||
+            (Array.isArray(docUrls) && docUrls.length);
+          if (!hasAny) continue;
+          await conn.execute(queries.ADD_EMPLOYEE_EXP, [
+            eid,
+            exp.company || null,
+            exp.role || null,
+            exp.start_date || null,
+            exp.end_date || null,
+            arrayToJsonOrNull(docUrls),
+          ]);
+        }
       }
     }
 
@@ -518,7 +666,7 @@ exports.editFullEmployee = async (data) => {
       pick("tenth_board") || null,
       pick("tenth_score") || null,
       arrayToJsonOrNull(
-        resolveCertValue("tenth_cert_url", ["tenth_cert", "tenth_cert_urls"])
+        resolveCertValue("tenth_cert_url", ["tenth_cert", "tenth_cert_urls"]),
       ),
       pick("twelfth_institution") || null,
       pick("twelfth_year") || null,
@@ -528,44 +676,24 @@ exports.editFullEmployee = async (data) => {
         resolveCertValue("twelfth_cert_url", [
           "twelfth_cert",
           "twelfth_cert_urls",
-        ])
+        ]),
       ),
       pick("ug_institution") || null,
       pick("ug_year") || null,
       pick("ug_board") || null,
       pick("ug_score") || null,
       arrayToJsonOrNull(
-        resolveCertValue("ug_cert_url", ["ug_cert", "ug_cert_urls"])
+        resolveCertValue("ug_cert_url", ["ug_cert", "ug_cert_urls"]),
       ),
       pick("pg_institution") || null,
       pick("pg_year") || null,
       pick("pg_board") || null,
       pick("pg_score") || null,
       arrayToJsonOrNull(
-        resolveCertValue("pg_cert_url", ["pg_cert", "pg_cert_urls"])
+        resolveCertValue("pg_cert_url", ["pg_cert", "pg_cert_urls"]),
       ),
       eid,
     ]);
-
-    if (hasKey("additional_certs")) {
-      await conn.execute(queries.DELETE_EMPLOYEE_ADDITIONAL_CERTS, [eid]);
-      if (
-        Array.isArray(data.additional_certs) &&
-        data.additional_certs.length
-      ) {
-        for (let cert of data.additional_certs) {
-          const fileUrls = cert.file_urls || cert.files || cert.file || null;
-          await conn.execute(queries.ADD_EMPLOYEE_ADDITIONAL_CERT, [
-            eid,
-            cert.name || null,
-            cert.institution || null,
-            cert.year || null,
-            arrayToJsonOrNull(fileUrls),
-          ]);
-        }
-      }
-    } else {
-    }
 
     const chosenResume = (() => {
       if (hasKey("resume_url")) return data.resume_url;
@@ -594,15 +722,14 @@ exports.editFullEmployee = async (data) => {
       const otherDocsRaw = hasKey("other_docs_urls")
         ? data.other_docs_urls
         : hasKey("other_docs")
-        ? data.other_docs
-        : null;
+          ? data.other_docs
+          : null;
       const otherDocs = ensureArrayField(otherDocsRaw);
       if (otherDocs.length) {
         for (const url of otherDocs) {
           await conn.execute(queries.ADD_EMPLOYEE_OTHER_DOC, [eid, url]);
         }
       }
-    } else {
     }
 
     const fullName = `${pick("first_name") || existing.first_name || ""} ${
@@ -617,36 +744,20 @@ exports.editFullEmployee = async (data) => {
       eid,
     ]);
 
-    if (hasKey("experience")) {
-      if (!queries.DELETE_EMPLOYEE_EXP)
-        throw new Error("Missing SQL query: DELETE_EMPLOYEE_EXP");
-      await conn.execute(queries.DELETE_EMPLOYEE_EXP, [eid]);
+    await conn.commit();
 
-      const expList = Array.isArray(data.experience) ? data.experience : [];
-      for (const exp of expList) {
-        const docUrls = normalizeToStringArray(
-          exp.doc_urls || exp.files || exp.doc || null
+    if (filesToDelete.length) {
+      try {
+        deleteFilesByUrlsMixed(filesToDelete);
+      } catch (fsErr) {
+        console.warn(
+          "[editFullEmployee] post-commit file deletion failed:",
+          fsErr,
         );
-        const hasAny =
-          (exp.company && String(exp.company).trim()) ||
-          (exp.role && String(exp.role).trim()) ||
-          (exp.start_date && String(exp.start_date).trim()) ||
-          (exp.end_date && String(exp.end_date).trim()) ||
-          (Array.isArray(docUrls) && docUrls.length);
-        if (!hasAny) continue;
-        await conn.execute(queries.ADD_EMPLOYEE_EXP, [
-          eid,
-          exp.company || null,
-          exp.role || null,
-          exp.start_date || null,
-          exp.end_date || null,
-          arrayToJsonOrNull(docUrls),
-        ]);
       }
-    } else {
     }
 
-    await conn.commit();
+    return;
   } catch (err) {
     await conn.rollback();
     console.error("[editFullEmployee] error:", err);
@@ -695,7 +806,7 @@ exports.getFullEmployee = async (employeeId) => {
     row.experience = row.experience.map((exp) => {
       if (!exp) return exp;
       exp.files = ensureArrayField(
-        exp.files || exp.doc_url || exp.doc_urls || exp.doc
+        exp.files || exp.doc_url || exp.doc_urls || exp.doc,
       );
       return exp;
     });
