@@ -17,7 +17,7 @@ const weeklyTaskSupervisorRoutes = require("./routes/weekly_task_supervisor");
 const weekTaskRoutes = require("./routes/weekTaskRoutes");
 const report = require("./routes/reportRoutes");
 const overtimeSupervisorRoutes = require("./routes/overtimeSupervisorRoutes");
-
+require("./services/punchCronService");
 const EmployeeQueries = require("./services/employeeQueries");
 const chatRoutes = require("./routes/chatRoutes");
 const chatService = require("./services/chatService");
